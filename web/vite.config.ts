@@ -9,7 +9,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    proxy: { '/api': 'http://localhost:5000' },
+    proxy: { '/api': 'http://localhost:5082' },
   },
   test: {
     environment: 'jsdom',

@@ -21,7 +21,7 @@ dotnet run --project src/Wishlistarr.Api
 
 The API serves the built frontend and exposes `GET /api/health`.
 
-For frontend development, run the API and then `npm run dev` in `web`; the Vite dev server proxies `/api` to `http://localhost:5000`.
+For frontend development, run the API and then `npm run dev` in `web`; the Vite dev server proxies `/api` to `http://localhost:5082`.
 
 ## Test
 
@@ -30,6 +30,8 @@ dotnet build
 dotnet test
 cd web
 npm run lint
+npm run format:check
+npm run build
 npm test
 ```
 
