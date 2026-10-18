@@ -10,8 +10,7 @@ TestResults/
 coverage/
 node_modules/
 dist/
-src/Wishlistarr.Api/wwwroot/*
-!src/Wishlistarr.Api/wwwroot/.gitkeep
+src/Wishlistarr.Api/wwwroot/
 *.db
 *.db-shm
 *.db-wal
