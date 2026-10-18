@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wishlistarr.Api/Wishlistarr.Api.csproj" />
+    <Project Path="src/Wishlistarr.Core/Wishlistarr.Core.csproj" />
+    <Project Path="src/Wishlistarr.Data/Wishlistarr.Data.csproj" />
+    <Project Path="src/Wishlistarr.Integrations/Wishlistarr.Integrations.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wishlistarr.Tests/Wishlistarr.Tests.csproj" />
+  </Folder>
+</Solution>
