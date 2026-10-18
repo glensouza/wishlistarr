@@ -8,10 +8,16 @@ namespace Wishlistarr.Tests;
 public sealed class WebRootFactory : WebApplicationFactory<Program>
 {
     public const string IndexHtml = "<!doctype html><title>test-shell</title>";
+    public const string AssetJs = "console.log(1);";
 
     private readonly string _webRoot = Directory.CreateTempSubdirectory("wishlistarr-web").FullName;
 
-    public WebRootFactory() => File.WriteAllText(Path.Combine(_webRoot, "index.html"), IndexHtml);
+    public WebRootFactory()
+    {
+        File.WriteAllText(Path.Combine(_webRoot, "index.html"), IndexHtml);
+        Directory.CreateDirectory(Path.Combine(_webRoot, "assets"));
+        File.WriteAllText(Path.Combine(_webRoot, "assets", "x.js"), AssetJs);
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
         builder.ConfigureServices((context, _) =>
@@ -23,7 +29,7 @@ public sealed class WebRootFactory : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing)
+        if (disposing && Directory.Exists(_webRoot))
         {
             Directory.Delete(_webRoot, true);
         }
@@ -64,5 +70,16 @@ public class StaticFrontendTests(WebRootFactory factory) : IClassFixture<WebRoot
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.NotEqual(WebRootFactory.IndexHtml, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Static_asset_is_served()
+    {
+        var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/assets/x.js");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(WebRootFactory.AssetJs, await response.Content.ReadAsStringAsync());
     }
 }
