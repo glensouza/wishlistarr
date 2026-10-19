@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.EntityFrameworkCore;
+using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
 using Wishlistarr.Api.Security;
@@ -51,6 +52,7 @@ builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddSingleton<ApiKeyService>();
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddProblemDetails();
+builder.Services.AddOpenApi(options => options.AddApiKeySecurity());
 
 WebApplication app = builder.Build();
 
@@ -69,6 +71,13 @@ app.UseStaticFiles();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapApiV1();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference();
+}
+
 app.Map("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 

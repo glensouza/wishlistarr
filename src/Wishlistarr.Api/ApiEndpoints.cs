@@ -10,13 +10,24 @@ public static class ApiEndpoints
 
     public static void MapApiV1(this IEndpointRouteBuilder app)
     {
-        RouteGroupBuilder v1 = app.MapGroup("/api/v1").AddEndpointFilter<ApiKeyEndpointFilter>();
+        RouteGroupBuilder v1 = app.MapGroup("/api/v1")
+            .AddEndpointFilter<ApiKeyEndpointFilter>()
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
 
-        v1.MapGet("/system/status", (SystemStatus status) => status.Get());
+        v1.MapGet("/system/status", (SystemStatus status) => status.Get())
+            .WithTags("System")
+            .WithName("GetSystemStatus")
+            .WithSummary("Returns the application version and uptime.")
+            .Produces<StatusResponse>();
 
-        v1.MapGet("/settings", async (SettingsStore store, CancellationToken ct) => await store.ListAsync(ct));
+        RouteGroupBuilder settings = v1.MapGroup("/settings").WithTags("Settings");
 
-        v1.MapPut("/settings/{key}", async (string key, SettingUpdate? update, SettingsStore store, CancellationToken ct) =>
+        settings.MapGet("/", async (SettingsStore store, CancellationToken ct) => await store.ListAsync(ct))
+            .WithName("ListSettings")
+            .WithSummary("Lists settings. Secret values are never returned.")
+            .Produces<IReadOnlyList<SettingSummary>>();
+
+        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, CancellationToken ct) =>
         {
             if (update?.Value is null)
             {
@@ -39,7 +50,11 @@ public static class ApiEndpoints
 
             await store.SetAsync(key, update.Value, update.IsSecret, ct);
             return Results.NoContent();
-        });
+        })
+            .WithName("PutSetting")
+            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest);
     }
 }
 
