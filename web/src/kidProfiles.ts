@@ -1,0 +1,47 @@
+import { request } from './api'
+
+export type KidProfile = {
+  id: number
+  name: string
+  avatar: string
+  hasPin: boolean
+  movieAgeLimit: number | null
+  tvAgeLimit: number | null
+  plexLabel: string
+  plexUserId: string | null
+  weeklyAllowance: number | null
+  isLocked: boolean
+}
+
+export type KidProfileInput = {
+  name: string
+  avatar: string
+  pin?: string
+  removePin?: boolean
+  movieAgeLimit: number | null
+  tvAgeLimit: number | null
+  plexLabel: string
+  plexUserId: string
+  weeklyAllowance: number | null
+}
+
+const base = '/api/v1/kid-profiles'
+
+export const listKidProfiles = () => request<KidProfile[]>('GET', base)
+
+export const createKidProfile = (input: KidProfileInput) =>
+  request<KidProfile>('POST', base, input)
+
+export const updateKidProfile = (id: number, input: KidProfileInput) =>
+  request<KidProfile>('PUT', `${base}/${id}`, input)
+
+export const deleteKidProfile = (id: number, removeOwnedLabels: boolean) =>
+  request<void>(
+    'DELETE',
+    `${base}/${id}?removeOwnedLabels=${removeOwnedLabels}`,
+  )
+
+export const unlockKidProfile = (id: number) =>
+  request<void>('POST', `${base}/${id}/unlock`)
+
+export const avatars = ['fox', 'owl', 'bear', 'cat', 'frog', 'panda']
