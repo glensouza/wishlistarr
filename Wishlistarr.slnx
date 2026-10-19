@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Wishlistarr.Api/Wishlistarr.Api.csproj" />
+    <Project Path="src/Wishlistarr.AppHost/Wishlistarr.AppHost.csproj" />
     <Project Path="src/Wishlistarr.Core/Wishlistarr.Core.csproj" />
     <Project Path="src/Wishlistarr.Data/Wishlistarr.Data.csproj" />
     <Project Path="src/Wishlistarr.Integrations/Wishlistarr.Integrations.csproj" />

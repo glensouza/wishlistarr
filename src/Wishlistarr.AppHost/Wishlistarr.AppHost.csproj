@@ -1,0 +1,19 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.1">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPublishable>false</IsPublishable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.6.1" />
+    <PackageReference Include="MessagePack" Version="2.5.307" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wishlistarr.Api\Wishlistarr.Api.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -9,7 +9,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    proxy: { '/api': 'http://localhost:5082' },
+    proxy: {
+      '/api': process.env.WISHLISTARR_API_URL ?? 'http://localhost:5082',
+    },
   },
   test: {
     environment: 'jsdom',
