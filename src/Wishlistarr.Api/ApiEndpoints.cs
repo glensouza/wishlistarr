@@ -1,3 +1,4 @@
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.MediaServers;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
@@ -20,6 +21,7 @@ public static class ApiEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
         v1.MapParentAuth();
+        v1.MapParentKidProfiles();
         v1.MapTmdb();
         v1.MapMediaServer();
 
