@@ -1,5 +1,7 @@
 # Wishlistarr
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-glensouza-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/glensouza)
+
 A kid-friendly request app for Plex.
 
 ## Requirements
