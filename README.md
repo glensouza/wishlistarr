@@ -23,6 +23,8 @@ The API serves the built frontend and exposes `GET /api/health`.
 
 For frontend development, run the API and then `npm run dev` in `web`; the Vite dev server proxies `/api` to `http://localhost:5082`.
 
+On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass.
+
 ## Test
 
 ```sh

@@ -49,10 +49,10 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SystemStatus>();
-builder.Services.AddSingleton<ApiKeyService>();
+builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddProblemDetails();
-builder.Services.AddOpenApi(options => options.AddApiKeySecurity());
+builder.Services.AddOpenApi(options => options.AddSecuritySchemes());
 
 WebApplication app = builder.Build();
 
@@ -61,18 +61,22 @@ using (IServiceScope scope = app.Services.CreateScope())
     await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Database.MigrateAsync();
     await app.Services.GetRequiredService<ApiKeyService>()
         .EnsureAsync(scope.ServiceProvider.GetRequiredService<SettingsStore>());
+    await scope.ServiceProvider.GetRequiredService<ParentAccounts>().LoadSetupStateAsync();
 }
 
+app.UseKnownProxies();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseSerilogRequestLogging(options => options.Logger = app.Services.GetRequiredService<Serilog.ILogger>());
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseWishlistarrSecurity();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithTags("System")
     .WithName("GetHealth")
     .WithSummary("Reports that the service is running.");
+app.MapAuth();
 app.MapApiV1();
 
 if (app.Environment.IsDevelopment())

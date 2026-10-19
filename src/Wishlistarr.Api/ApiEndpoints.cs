@@ -11,8 +11,11 @@ public static class ApiEndpoints
     public static void MapApiV1(this IEndpointRouteBuilder app)
     {
         RouteGroupBuilder v1 = app.MapGroup("/api/v1")
-            .RequireApiKey()
-            .ProducesProblem(StatusCodes.Status401Unauthorized);
+            .RequireParent()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        v1.MapParentAuth();
 
         v1.MapGet("/system/status", (SystemStatus status) => status.Get())
             .WithTags("System")
