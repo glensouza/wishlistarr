@@ -202,6 +202,72 @@ internal sealed partial class PlexMediaServer(
         return index.TryGetValue(id, out List<MediaItem>? items) ? items : [];
     }
 
+    public async Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default)
+    {
+        if (!IsValidKey(itemId))
+        {
+            return null;
+        }
+
+        return await this.WithServerAsync(
+            async (server, token) =>
+            {
+                PlexMetadata? item = await servers.GetMetadataAsync(server, itemId, token);
+                string? showKey = item?.Type switch
+                {
+                    "season" => item.ParentRatingKey,
+                    "episode" => item.GrandparentRatingKey,
+                    _ => null,
+                };
+                if (showKey is not null)
+                {
+                    item = IsValidKey(showKey) ? await servers.GetMetadataAsync(server, showKey, token) : null;
+                }
+
+                return item is null ? null : ToLabels(server, item);
+            },
+            ct);
+    }
+
+    public async Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default)
+    {
+        if (!IsValidKey(item.Id) || !IsValidKey(item.LibraryId))
+        {
+            throw new MediaServerException("The Plex item cannot be edited.");
+        }
+
+        List<string> distinct = [.. labels.Distinct(StringComparer.OrdinalIgnoreCase)];
+        List<KeyValuePair<string, string>> parameters =
+        [
+            new("type", item.Kind == MediaKind.Movie ? "1" : "2"),
+            new("id", item.Id),
+        ];
+        if (distinct.Count > 0)
+        {
+            parameters.AddRange(distinct.Select((label, index) =>
+                new KeyValuePair<string, string>($"label[{index.ToString(CultureInfo.InvariantCulture)}].tag.tag", label)));
+        }
+        else if (item.Labels.Count > 0)
+        {
+            parameters.Add(new("label[].tag.tag-", string.Join(',', item.Labels)));
+        }
+
+        parameters.Add(new("label.locked", "1"));
+
+        await this.WithServerAsync(
+            async (server, token) =>
+            {
+                if (server.ServerId != item.ServerId)
+                {
+                    throw new MediaServerException("The selected Plex server has changed.");
+                }
+
+                await servers.EditSectionItemAsync(server, item.LibraryId, parameters, token);
+                return true;
+            },
+            ct);
+    }
+
     public void Dispose()
     {
         this.identifierLock.Dispose();
@@ -213,6 +279,31 @@ internal sealed partial class PlexMediaServer(
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
     private static bool IsValidKey(string? key) => key is not null && SectionKey().IsMatch(key);
+
+    private static MediaItemLabels ToLabels(PlexServerContext server, PlexMetadata item)
+    {
+        MediaKind kind = item.Type switch
+        {
+            "movie" => MediaKind.Movie,
+            "show" => MediaKind.Show,
+            _ => throw new MediaServerException("Labels can only be set on movies and shows."),
+        };
+        string? libraryId = item.LibrarySectionId?.ToString(CultureInfo.InvariantCulture);
+        if (!IsValidKey(item.RatingKey) || !IsValidKey(libraryId))
+        {
+            throw new MediaServerException("The Plex server returned an item without a library.");
+        }
+
+        return new MediaItemLabels(
+            server.ServerId,
+            item.RatingKey!,
+            item.Guid ?? string.Empty,
+            item.Title ?? string.Empty,
+            kind,
+            libraryId!,
+            [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)],
+            (item.Fields ?? []).Any(field => field.Name == "label" && field.Locked));
+    }
 
     private static MediaLibraryType ToLibraryType(string? type) => type switch
     {

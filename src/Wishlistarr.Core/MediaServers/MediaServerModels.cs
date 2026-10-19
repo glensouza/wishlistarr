@@ -69,6 +69,16 @@ public sealed record MediaItem(
     string LibraryId,
     IReadOnlyList<ExternalId> ExternalIds);
 
+public sealed record MediaItemLabels(
+    string ServerId,
+    string Id,
+    string Guid,
+    string Title,
+    MediaKind Kind,
+    string LibraryId,
+    IReadOnlyList<string> Labels,
+    bool Locked);
+
 public sealed record MediaServerTestResult(bool Valid, string Message, string? ServerName = null, string? Version = null);
 
 public sealed record MediaServerLinkStart(string Id, string Code, Uri AuthUrl, DateTimeOffset ExpiresAt);

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -13,7 +14,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Wishlistarr.Tests.Plex;
 
-public sealed class FakePlexServer : IAsyncDisposable
+public sealed partial class FakePlexServer : IAsyncDisposable
 {
     public const string AccountToken = "fixture-account-token";
     public const string ServerToken = "fixture-server-token";
@@ -28,6 +29,7 @@ public sealed class FakePlexServer : IAsyncDisposable
     private readonly WebApplication impostor;
     private readonly ConcurrentQueue<RecordedRequest> requests = new();
     private readonly ConcurrentQueue<RecordedRequest> impostorRequests = new();
+    private readonly ConcurrentDictionary<string, FakeItem> items = new(StringComparer.Ordinal);
     private readonly int[] closedPorts;
 
     private FakePlexServer(WebApplication app, Uri address, WebApplication impostor, Uri impostorAddress, int[] closedPorts)
@@ -38,6 +40,16 @@ public sealed class FakePlexServer : IAsyncDisposable
         this.ImpostorAddress = impostorAddress;
         this.closedPorts = closedPorts;
         this.ResourcesJson = this.Render(Fixture("resources.json"));
+        this.AddItem(new FakeItem("101", "movie", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1));
+        this.AddItem(new FakeItem("102", "movie", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 1));
+        this.AddItem(new FakeItem("201", "show", "plex://show/5d9c086c46115600200aa2fe", "Bluey", 2));
+        this.AddItem(new FakeItem("2011", "season", "plex://season/602e6a7e8f4d2a002c7b5e10", "Season 1", 2) { ParentRatingKey = "201" });
+        this.AddItem(new FakeItem("20111", "episode", "plex://episode/5d9c11ae2df347001e3b1a52", "Magic Xylophone", 2)
+        {
+            ParentRatingKey = "2011",
+            GrandparentRatingKey = "201",
+        });
+        this.AddItem(new FakeItem("501", "artist", "plex://artist/5d07bbfc403c6402904a5ec9", "The Wiggles", 5));
     }
 
     public Uri Address { get; }
@@ -64,6 +76,10 @@ public sealed class FakePlexServer : IAsyncDisposable
 
     public IReadOnlyList<RecordedRequest> ImpostorRequests => [.. this.impostorRequests];
 
+    public Action<RecordedRequest>? AfterRequest { get; set; }
+
+    public TimeSpan MetadataDelay { get; set; }
+
     public static async Task<FakePlexServer> StartAsync()
     {
         FakePlexServer? server = null;
@@ -77,6 +93,10 @@ public sealed class FakePlexServer : IAsyncDisposable
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Plex", "Fixtures", name));
 
     public int Count(string path) => this.requests.Count(request => request.Path == path);
+
+    public int Count(string method, string path) => this.requests.Count(request => request.Method == method && request.Path == path);
+
+    public FakeItem Item(string ratingKey) => this.items[ratingKey];
 
     public async ValueTask DisposeAsync()
     {
@@ -182,6 +202,20 @@ public sealed class FakePlexServer : IAsyncDisposable
             return;
         }
 
+        if (path.StartsWith("/library/metadata/", StringComparison.Ordinal) && request.Method == HttpMethods.Get)
+        {
+            await this.HandleMetadataAsync(context, path["/library/metadata/".Length..]);
+            this.AfterRequest?.Invoke(request);
+            return;
+        }
+
+        if (request.Method == HttpMethods.Put && path.StartsWith("/library/sections/", StringComparison.Ordinal) && path.EndsWith("/all", StringComparison.Ordinal))
+        {
+            this.HandleEdit(context, path["/library/sections/".Length..^"/all".Length], request.Query);
+            this.AfterRequest?.Invoke(request);
+            return;
+        }
+
         string? fixture = path switch
         {
             "/" => "root.json",
@@ -201,6 +235,97 @@ public sealed class FakePlexServer : IAsyncDisposable
 
         string body = this.Render(Fixture(fixture));
         await WriteAsync(context, path.EndsWith("/all", StringComparison.Ordinal) ? Page(body, context.Request.Query) : body);
+    }
+
+    private void AddItem(FakeItem item) => this.items[item.RatingKey] = item;
+
+    private async Task HandleMetadataAsync(HttpContext context, string ratingKey)
+    {
+        if (this.MetadataDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(this.MetadataDelay);
+        }
+
+        if (!this.items.TryGetValue(ratingKey, out FakeItem? item))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        JsonObject metadata = new()
+        {
+            ["ratingKey"] = item.RatingKey,
+            ["key"] = $"/library/metadata/{item.RatingKey}",
+            ["guid"] = item.Guid,
+            ["type"] = item.Type,
+            ["title"] = item.Title,
+            ["librarySectionID"] = item.Section,
+        };
+        if (item.ParentRatingKey is not null)
+        {
+            metadata["parentRatingKey"] = item.ParentRatingKey;
+        }
+
+        if (item.GrandparentRatingKey is not null)
+        {
+            metadata["grandparentRatingKey"] = item.GrandparentRatingKey;
+        }
+
+        (IReadOnlyList<string> labels, bool locked) = item.Snapshot();
+        if (labels.Count > 0)
+        {
+            metadata["Label"] = new JsonArray([.. labels.Select((label, index) => (JsonNode)new JsonObject
+            {
+                ["id"] = 9000 + index,
+                ["filter"] = $"label={9000 + index}",
+                ["tag"] = label,
+            })]);
+        }
+
+        if (locked)
+        {
+            metadata["Field"] = new JsonArray(new JsonObject { ["locked"] = true, ["name"] = "label" });
+        }
+
+        JsonObject root = new()
+        {
+            ["MediaContainer"] = new JsonObject
+            {
+                ["size"] = 1,
+                ["librarySectionID"] = item.Section,
+                ["Metadata"] = new JsonArray(metadata),
+            },
+        };
+        await WriteAsync(context, root.ToJsonString());
+    }
+
+    private void HandleEdit(HttpContext context, string section, IReadOnlyDictionary<string, string> query)
+    {
+        string expectedType = query.GetValueOrDefault("type") switch
+        {
+            "1" => "movie",
+            "2" => "show",
+            _ => string.Empty,
+        };
+        if (!this.items.TryGetValue(query.GetValueOrDefault("id") ?? string.Empty, out FakeItem? item)
+            || item.Section.ToString(CultureInfo.InvariantCulture) != section
+            || item.Type != expectedType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        List<string> replacement =
+        [
+            .. query
+                .Select(pair => (Match: LabelKey().Match(pair.Key), pair.Value))
+                .Where(entry => entry.Match.Success)
+                .OrderBy(entry => int.Parse(entry.Match.Groups[1].Value, CultureInfo.InvariantCulture))
+                .Select(entry => entry.Value),
+        ];
+        string[] removed = query.TryGetValue("label[].tag.tag-", out string? removal) ? removal.Split(',') : [];
+        item.Edit(replacement.Count > 0 ? replacement : null, removed, query.GetValueOrDefault("label.locked") == "1");
+        context.Response.StatusCode = StatusCodes.Status200OK;
     }
 
     private async Task HandlePlexTvAsync(HttpContext context, RecordedRequest request)
@@ -266,10 +391,77 @@ public sealed class FakePlexServer : IAsyncDisposable
             .Replace("{{AUTH_TOKEN}}", approved ? $"\"{AccountToken}\"" : "null", StringComparison.Ordinal);
     }
 
+    [GeneratedRegex(@"^label\[(\d+)\]\.tag\.tag$", RegexOptions.CultureInvariant)]
+    private static partial Regex LabelKey();
+
     public sealed record RecordedRequest(
         string Method,
         string Path,
         IReadOnlyDictionary<string, string> Query,
         string? Token,
         string? ClientIdentifier);
+
+    public sealed class FakeItem(string ratingKey, string type, string guid, string title, int section)
+    {
+        private readonly List<string> labels = [];
+        private bool locked;
+
+        public string RatingKey { get; } = ratingKey;
+
+        public string Type { get; } = type;
+
+        public string Guid { get; } = guid;
+
+        public string Title { get; } = title;
+
+        public int Section { get; } = section;
+
+        public string? ParentRatingKey { get; init; }
+
+        public string? GrandparentRatingKey { get; init; }
+
+        public IReadOnlyList<string> Labels => this.Snapshot().Labels;
+
+        public bool Locked => this.Snapshot().Locked;
+
+        public (IReadOnlyList<string> Labels, bool Locked) Snapshot()
+        {
+            lock (this.labels)
+            {
+                return ([.. this.labels], this.locked);
+            }
+        }
+
+        public void SetLabels(params string[] values)
+        {
+            lock (this.labels)
+            {
+                this.labels.Clear();
+                this.labels.AddRange(values);
+            }
+        }
+
+        public void AddLabel(string value)
+        {
+            lock (this.labels)
+            {
+                this.labels.Add(value);
+            }
+        }
+
+        public void Edit(IReadOnlyList<string>? replacement, IReadOnlyList<string> removed, bool lockField)
+        {
+            lock (this.labels)
+            {
+                if (replacement is not null)
+                {
+                    this.labels.Clear();
+                    this.labels.AddRange(replacement.Distinct(StringComparer.OrdinalIgnoreCase));
+                }
+
+                this.labels.RemoveAll(label => removed.Contains(label, StringComparer.OrdinalIgnoreCase));
+                this.locked |= lockField;
+            }
+        }
+    }
 }
