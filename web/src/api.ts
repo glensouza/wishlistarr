@@ -29,11 +29,12 @@ async function getAntiforgery(): Promise<Antiforgery> {
   return antiforgery
 }
 
-export async function request<T>(
+export async function requestWithStatus<T>(
   method: string,
   path: string,
   body?: unknown,
-): Promise<T> {
+  signal?: AbortSignal,
+): Promise<{ status: number; body: T }> {
   const headers: Record<string, string> = {}
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -46,6 +47,7 @@ export async function request<T>(
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
   if (!response.ok) {
     let message = `Request failed (${response.status})`
@@ -68,7 +70,16 @@ export async function request<T>(
     )
   }
   if (response.status === 204) {
-    return undefined as T
+    return { status: response.status, body: undefined as T }
   }
-  return (await response.json()) as T
+  return { status: response.status, body: (await response.json()) as T }
+}
+
+export async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  return (await requestWithStatus<T>(method, path, body, signal)).body
 }

@@ -11,6 +11,10 @@ You need the .NET SDK 10 and Node.js 24. The README explains how to [run locally
 3. Run the checks below.
 4. Open a pull request against `main`.
 
+## Optional dev AppHost
+
+`dotnet run --project src/Wishlistarr.AppHost` starts the API and the Vite dev server together and opens the Aspire dashboard with their logs. It is optional: the API and `npm run dev` work on their own, and the AppHost is never referenced by the API or shipped in a release. Run `npm ci` in `web` first.
+
 ## Branch names
 
 Use a short prefix and a descriptive slug: `feat/plex-label-writer`, `fix/session-expiry`, `docs/setup-guide`, `chore/update-dependencies`.
