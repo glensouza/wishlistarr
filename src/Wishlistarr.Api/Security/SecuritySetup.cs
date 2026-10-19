@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
+using Wishlistarr.Api.Kids;
+using Wishlistarr.Core.Kids;
 using Wishlistarr.Data;
 
 namespace Wishlistarr.Api.Security;
@@ -17,6 +19,7 @@ public static class AuthSchemes
 {
     public const string Default = "Wishlistarr";
     public const string Cookie = "ParentCookie";
+    public const string KidCookie = "KidCookie";
     public const string ApiKey = "ApiKey";
     public const string TrustedNetwork = "TrustedNetwork";
 }
@@ -24,6 +27,7 @@ public static class AuthSchemes
 public static class SecuritySetup
 {
     public const string CookieName = "wishlistarr.auth";
+    public const string KidCookieName = "wishlistarr.kid";
     public const string AntiforgeryCookieName = "wishlistarr.csrf";
     public const string AntiforgeryHeaderName = "X-CSRF-TOKEN";
     public const string LoginRateLimitPolicy = "login";
@@ -44,6 +48,15 @@ public static class SecuritySetup
         services.AddSingleton<IPasswordHasher<ParentAccount>, PasswordHasher<ParentAccount>>();
         services.AddScoped<ParentAccounts>();
         services.AddScoped<ParentSessions>();
+        services.AddOptions<KidOptions>()
+            .Bind(configuration.GetSection(KidOptions.SectionName))
+            .Validate(options => options.IsValid(), "The Kids configuration section is invalid.")
+            .ValidateOnStart();
+        services.AddSingleton<IPasswordHasher<KidProfile>, PasswordHasher<KidProfile>>();
+        services.AddSingleton<IParentNotifier, LoggingParentNotifier>();
+        services.AddScoped<KidProfiles>();
+        services.AddScoped<KidSignIn>();
+        services.AddScoped<KidSessions>();
 
         services.AddAuthentication(AuthSchemes.Default)
             .AddPolicyScheme(AuthSchemes.Default, null, options => options.ForwardDefaultSelector = SelectScheme)
@@ -57,6 +70,17 @@ public static class SecuritySetup
                 options.Events.OnRedirectToLogin = context => SetStatus(context.Response, StatusCodes.Status401Unauthorized);
                 options.Events.OnRedirectToAccessDenied = context => SetStatus(context.Response, StatusCodes.Status403Forbidden);
                 options.Events.OnValidatePrincipal = ValidateSessionAsync;
+            })
+            .AddCookie(AuthSchemes.KidCookie, options =>
+            {
+                options.Cookie.Name = KidCookieName;
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = SameSiteMode.Strict;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                options.SlidingExpiration = false;
+                options.Events.OnRedirectToLogin = context => SetStatus(context.Response, StatusCodes.Status401Unauthorized);
+                options.Events.OnRedirectToAccessDenied = context => SetStatus(context.Response, StatusCodes.Status403Forbidden);
+                options.Events.OnValidatePrincipal = KidEndpoints.ValidateKidSessionAsync;
             })
             .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(AuthSchemes.ApiKey, null)
             .AddScheme<AuthenticationSchemeOptions, TrustedNetworkAuthenticationHandler>(AuthSchemes.TrustedNetwork, null);
@@ -146,7 +170,12 @@ public static class SecuritySetup
             return AuthSchemes.ApiKey;
         }
 
-        return context.Request.Cookies.ContainsKey(CookieName) ? AuthSchemes.Cookie : AuthSchemes.TrustedNetwork;
+        if (context.Request.Cookies.ContainsKey(CookieName))
+        {
+            return AuthSchemes.Cookie;
+        }
+
+        return context.Request.Cookies.ContainsKey(KidCookieName) ? AuthSchemes.KidCookie : AuthSchemes.TrustedNetwork;
     }
 
     private static Task SetStatus(HttpResponse response, int statusCode)

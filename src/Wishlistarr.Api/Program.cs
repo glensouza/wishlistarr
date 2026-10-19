@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
@@ -86,6 +87,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithName("GetHealth")
     .WithSummary("Reports that the service is running.");
 app.MapAuth();
+app.MapKid();
 app.MapApiV1();
 
 if (app.Environment.IsDevelopment())

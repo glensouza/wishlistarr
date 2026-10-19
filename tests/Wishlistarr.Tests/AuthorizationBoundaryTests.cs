@@ -19,6 +19,8 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         "/api/v1/auth/antiforgery",
         "/api/v1/auth/setup",
         "/api/v1/auth/login",
+        "/api/v1/kid/profiles",
+        "/api/v1/kid/signin",
         "/api/{**path}",
     ];
 
@@ -61,7 +63,8 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
             string pattern = Pattern(endpoint);
             if (pattern.StartsWith("/api", StringComparison.Ordinal)
                 && !PublicApiRoutes.Contains(pattern)
-                && !IsParentOnly(endpoint))
+                && !IsParentOnly(endpoint)
+                && !IsKidOnly(endpoint))
             {
                 unprotected.Add(pattern);
             }
@@ -107,6 +110,10 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
 
     private static bool IsParentOnly(Endpoint endpoint) =>
         endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(data => data.Policy == Policies.Parent)
+        && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
+
+    private static bool IsKidOnly(Endpoint endpoint) =>
+        endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(data => data.Policy == Policies.Kid)
         && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
 
     private static string Pattern(RouteEndpoint endpoint) => "/" + endpoint.RoutePattern.RawText?.TrimStart('/');

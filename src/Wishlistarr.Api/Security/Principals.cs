@@ -25,14 +25,21 @@ public static class Principals
         return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType));
     }
 
-    public static ClaimsPrincipal CreateKid(string id, string name, string authenticationType) =>
-        new(new ClaimsIdentity(
-            [
-                new(ClaimTypes.NameIdentifier, id),
-                new(ClaimTypes.Name, name),
-                new(ClaimTypes.Role, Kid),
-            ],
-            authenticationType));
+    public static ClaimsPrincipal CreateKid(string id, string name, string authenticationType, string? sessionId = null)
+    {
+        List<Claim> claims =
+        [
+            new(ClaimTypes.NameIdentifier, id),
+            new(ClaimTypes.Name, name),
+            new(ClaimTypes.Role, Kid),
+        ];
+        if (sessionId is not null)
+        {
+            claims.Add(new Claim(SessionIdClaim, sessionId));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType));
+    }
 
     public static bool TryGetSessionAccount(ClaimsPrincipal user, out int accountId, out string sessionId)
     {

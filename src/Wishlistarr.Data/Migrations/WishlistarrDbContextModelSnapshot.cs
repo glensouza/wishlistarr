@@ -17,6 +17,141 @@ namespace Wishlistarr.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.13");
 
+            modelBuilder.Entity("Wishlistarr.Data.KidPinAttempt", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeviceHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("LastFailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KidProfileId", "DeviceHash")
+                        .IsUnique();
+
+                    b.ToTable("KidPinAttempts");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("ArchivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Avatar")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedPinCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LastFailedPinAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LockedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("MovieAgeLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<string>("PinHash")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PlexLabel")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<string>("PlexUserId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RemoveOwnedLabelsOnArchive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TvAgeLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("WeeklyAllowance")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasFilter("\"ArchivedAt\" IS NULL");
+
+                    b.HasIndex("PlexLabel")
+                        .IsUnique()
+                        .HasFilter("\"ArchivedAt\" IS NULL");
+
+                    b.ToTable("KidProfiles");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidSession", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RemoteAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KidProfileId");
+
+                    b.ToTable("KidSessions");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.ParentAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -104,6 +239,28 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("Settings");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.KidPinAttempt", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
+                        .WithMany("PinAttempts")
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("KidProfile");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidSession", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
+                        .WithMany("Sessions")
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("KidProfile");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.ParentSession", b =>
                 {
                     b.HasOne("Wishlistarr.Data.ParentAccount", "ParentAccount")
@@ -113,6 +270,13 @@ namespace Wishlistarr.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ParentAccount");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidProfile", b =>
+                {
+                    b.Navigation("PinAttempts");
+
+                    b.Navigation("Sessions");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.ParentAccount", b =>

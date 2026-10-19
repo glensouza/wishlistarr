@@ -25,7 +25,7 @@ The API serves the built frontend and exposes `GET /api/health`.
 
 For frontend development, run the API and then `npm run dev` in `web`; the Vite dev server proxies `/api` to `http://localhost:5082`.
 
-On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server.
+On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server.
 
 ## Test
 

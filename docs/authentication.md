@@ -1,8 +1,8 @@
 # Authentication
 
-Wishlistarr has two kinds of signed-in principal: a **Parent** and a **Kid**. They are separate roles checked by separate authorization policies, and a principal that carries both roles is rejected by both. Every endpoint under `/api` is either public or requires the Parent policy; a test walks the endpoint list to keep it that way and to confirm a Kid principal gets `403` on every parent route.
+Wishlistarr has two kinds of signed-in principal: a **Parent** and a **Kid**. They are separate roles checked by separate authorization policies, and a principal that carries both roles is rejected by both. Every endpoint under `/api` is either public, requires the Parent policy, or (the few Kid session routes) requires the Kid policy; a test walks the endpoint list to keep it that way and to confirm a Kid principal gets `403` on every parent route.
 
-Public endpoints: `GET /api/health`, `GET /api/v1/auth/status`, `GET /api/v1/auth/antiforgery`, `POST /api/v1/auth/setup` and `POST /api/v1/auth/login`.
+Public endpoints: `GET /api/health`, `GET /api/v1/auth/status`, `GET /api/v1/auth/antiforgery`, `POST /api/v1/auth/setup`, `POST /api/v1/auth/login`, `GET /api/v1/kid/profiles` (the profile picker) and `POST /api/v1/kid/signin`. Kid sessions and PIN limits are described in [kid-profiles.md](kid-profiles.md).
 
 ## First run
 

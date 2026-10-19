@@ -10,6 +10,12 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<ParentSession> ParentSessions => this.Set<ParentSession>();
 
+    public DbSet<KidProfile> KidProfiles => this.Set<KidProfile>();
+
+    public DbSet<KidSession> KidSessions => this.Set<KidSession>();
+
+    public DbSet<KidPinAttempt> KidPinAttempts => this.Set<KidPinAttempt>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -33,6 +39,38 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(session => session.Id).HasMaxLength(64);
             entity.Property(session => session.UserAgent).HasMaxLength(256);
             entity.Property(session => session.RemoteAddress).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<KidProfile>(entity =>
+        {
+            entity.Property(profile => profile.Name).HasMaxLength(50).UseCollation("NOCASE");
+            entity.Property(profile => profile.Avatar).HasMaxLength(32);
+            entity.Property(profile => profile.PinHash).HasMaxLength(256);
+            entity.Property(profile => profile.PlexLabel).HasMaxLength(64).UseCollation("NOCASE");
+            entity.Property(profile => profile.PlexUserId).HasMaxLength(100);
+            entity.HasIndex(profile => profile.Name).IsUnique().HasFilter("\"ArchivedAt\" IS NULL");
+            entity.HasIndex(profile => profile.PlexLabel).IsUnique().HasFilter("\"ArchivedAt\" IS NULL");
+            entity.HasMany(profile => profile.Sessions)
+                .WithOne(session => session.KidProfile)
+                .HasForeignKey(session => session.KidProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(profile => profile.PinAttempts)
+                .WithOne(attempt => attempt.KidProfile)
+                .HasForeignKey(attempt => attempt.KidProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<KidSession>(entity =>
+        {
+            entity.Property(session => session.Id).HasMaxLength(64);
+            entity.Property(session => session.UserAgent).HasMaxLength(256);
+            entity.Property(session => session.RemoteAddress).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<KidPinAttempt>(entity =>
+        {
+            entity.Property(attempt => attempt.DeviceHash).HasMaxLength(64);
+            entity.HasIndex(attempt => new { attempt.KidProfileId, attempt.DeviceHash }).IsUnique();
         });
     }
 }
