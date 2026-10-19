@@ -1,8 +1,22 @@
+<p align="center">
+  <img src="site/logo.svg" alt="Wishlistarr" width="128">
+</p>
+
 # Wishlistarr
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-glensouza-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/glensouza)
 
-A kid-friendly request app for Plex.
+Seerr, but for kids. They wish, you approve, and Plex stays safe.
+
+Wishlistarr is a free and open source request app for families that share a Plex server. Each child gets their own profile with a PIN, browses only titles that fit the rules you set, and asks for what they want to watch. You decide what is allowed outright, what needs your approval and what is never shown.
+
+- **Kid profiles:** a profile picker and PIN sign-in, with a child-friendly interface.
+- **Content policy:** rules per profile decide whether a title is allowed, needs approval or is blocked.
+- **Parent approval:** requests that need a decision wait for a parent before anything is downloaded.
+- **Plex labels:** approved titles are labeled for the profile so Plex restrictions keep each child to their own library.
+- **Private by design:** no telemetry or analytics, and metadata comes from TMDB.
+
+Wishlistarr is under active development and not yet released.
 
 ## Requirements
 
