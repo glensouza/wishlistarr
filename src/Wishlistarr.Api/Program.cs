@@ -8,6 +8,7 @@ using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
 using Wishlistarr.Api.Kids;
+using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
@@ -59,6 +60,8 @@ builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
 builder.Services.AddPlex<StoredAppSettings>();
+builder.Services.AddSingleton<ItemLocks>();
+builder.Services.AddScoped<LabelWriter>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();
