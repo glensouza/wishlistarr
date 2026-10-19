@@ -28,7 +28,7 @@ public static class TmdbEndpoints
             .Produces<TmdbTestResult>()
             .ProducesProblem(StatusCodes.Status502BadGateway);
 
-        v1.MapGet("/images/tmdb/{size}/{file}", async (string size, string file, TmdbImageProxy proxy, CancellationToken ct) =>
+        v1.MapGet("/images/tmdb/{size}/{file}", async (string size, string file, TmdbImageProxy proxy, HttpContext http, CancellationToken ct) =>
         {
             if (!TmdbImageProxy.IsAllowed(size, file))
             {
@@ -38,21 +38,20 @@ public static class TmdbEndpoints
             try
             {
                 TmdbImageContent? image = await proxy.FetchAsync(size, file, ct);
-                return image is null
-                    ? Results.NotFound()
-                    : Results.Bytes(image.Bytes, image.ContentType, enableRangeProcessing: false);
+                if (image is null)
+                {
+                    return Results.NotFound();
+                }
+
+                http.Response.Headers.CacheControl = "private, max-age=86400";
+                http.Response.Headers.XContentTypeOptions = "nosniff";
+                return Results.Bytes(image.Bytes, image.ContentType, enableRangeProcessing: false);
             }
             catch (Exception ex) when (ex is TmdbException or HttpRequestException or TaskCanceledException)
             {
                 return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The image could not be retrieved.");
             }
         })
-            .AddEndpointFilter(async (context, next) =>
-            {
-                context.HttpContext.Response.Headers.CacheControl = "private, max-age=86400";
-                context.HttpContext.Response.Headers.XContentTypeOptions = "nosniff";
-                return await next(context);
-            })
             .WithTags("Images")
             .WithName("GetTmdbImage")
             .WithSummary("Proxies a poster, backdrop or profile image from image.tmdb.org.")
