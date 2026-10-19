@@ -18,6 +18,10 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<OwnedLabel> OwnedLabels => this.Set<OwnedLabel>();
 
+    public DbSet<MediaRequest> MediaRequests => this.Set<MediaRequest>();
+
+    public DbSet<MediaRequestEvent> MediaRequestEvents => this.Set<MediaRequestEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -87,6 +91,35 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
                 .WithMany()
                 .HasForeignKey(label => label.KidProfileId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<MediaRequest>(entity =>
+        {
+            entity.Property(request => request.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(request => request.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(request => request.Title).HasMaxLength(300);
+            entity.Property(request => request.Version).IsConcurrencyToken();
+            entity.HasIndex(request => new { request.KidProfileId, request.Kind, request.TmdbId })
+                .IsUnique()
+                .HasFilter("\"State\" <> 'Denied'");
+            entity.HasIndex(request => request.State);
+            entity.HasOne(request => request.KidProfile)
+                .WithMany()
+                .HasForeignKey(request => request.KidProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(request => request.Events)
+                .WithOne(item => item.MediaRequest)
+                .HasForeignKey(item => item.MediaRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<MediaRequestEvent>(entity =>
+        {
+            entity.Property(item => item.FromState).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.ToState).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.ActorKind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.ActorName).HasMaxLength(100);
+            entity.Property(item => item.Reason).HasMaxLength(500);
         });
     }
 }
