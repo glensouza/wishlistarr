@@ -47,6 +47,25 @@ public sealed class OpenApiTests(DevelopmentApiFactory development, ProductionAp
     }
 
     [Fact]
+    public async Task Development_document_describes_parent_session_and_public_auth_routes()
+    {
+        HttpClient client = development.CreateClient();
+
+        using JsonDocument document = JsonDocument.Parse(await client.GetStringAsync("/openapi/v1.json"));
+
+        JsonElement root = document.RootElement;
+        JsonElement paths = root.GetProperty("paths");
+        JsonElement scheme = root.GetProperty("components").GetProperty("securitySchemes").GetProperty("ParentSession");
+        JsonElement sessions = paths.GetProperty("/api/v1/auth/sessions").GetProperty("get");
+        Assert.Equal("cookie", scheme.GetProperty("in").GetString());
+        Assert.Equal("wishlistarr.auth", scheme.GetProperty("name").GetString());
+        Assert.Contains(sessions.GetProperty("security").EnumerateArray(), item => item.TryGetProperty("ParentSession", out _));
+        Assert.True(sessions.GetProperty("responses").TryGetProperty("403", out _));
+        Assert.False(paths.GetProperty("/api/v1/auth/login").GetProperty("post").TryGetProperty("security", out _));
+        Assert.False(paths.GetProperty("/api/v1/auth/setup").GetProperty("post").TryGetProperty("security", out _));
+    }
+
+    [Fact]
     public async Task Development_document_marks_secret_flag_optional()
     {
         HttpClient client = development.CreateClient();

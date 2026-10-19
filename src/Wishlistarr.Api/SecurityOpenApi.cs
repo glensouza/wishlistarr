@@ -1,37 +1,52 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 using Wishlistarr.Api.Security;
 
 namespace Wishlistarr.Api;
 
-public static class ApiKeyOpenApi
+public static class SecurityOpenApi
 {
-    public const string SchemeName = "ApiKey";
+    public const string ApiKeySchemeName = "ApiKey";
+    public const string SessionSchemeName = "ParentSession";
 
-    public static OpenApiOptions AddApiKeySecurity(this OpenApiOptions options)
+    public static OpenApiOptions AddSecuritySchemes(this OpenApiOptions options)
     {
         options.AddDocumentTransformer((document, _, _) =>
         {
             document.Components ??= new OpenApiComponents();
             document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
-            document.Components.SecuritySchemes[SchemeName] = new OpenApiSecurityScheme
+            document.Components.SecuritySchemes[ApiKeySchemeName] = new OpenApiSecurityScheme
             {
                 Type = SecuritySchemeType.ApiKey,
                 In = ParameterLocation.Header,
                 Name = ApiKeyService.HeaderName,
                 Description = "API key generated on first start.",
             };
+            document.Components.SecuritySchemes[SessionSchemeName] = new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.ApiKey,
+                In = ParameterLocation.Cookie,
+                Name = SecuritySetup.CookieName,
+                Description = $"Parent session cookie. Writes also need the {SecuritySetup.AntiforgeryHeaderName} header.",
+            };
             return Task.CompletedTask;
         });
 
         options.AddOperationTransformer((operation, context, _) =>
         {
-            if (context.Description.ActionDescriptor.EndpointMetadata.OfType<ApiKeyRequiredMetadata>().Any())
+            IList<object> metadata = context.Description.ActionDescriptor.EndpointMetadata;
+            if (metadata.OfType<IAuthorizeData>().Any(data => data.Policy == Policies.Parent)
+                && !metadata.OfType<IAllowAnonymous>().Any())
             {
                 operation.Security ??= [];
                 operation.Security.Add(new OpenApiSecurityRequirement
                 {
-                    [new OpenApiSecuritySchemeReference(SchemeName, context.Document)] = [],
+                    [new OpenApiSecuritySchemeReference(ApiKeySchemeName, context.Document)] = [],
+                });
+                operation.Security.Add(new OpenApiSecurityRequirement
+                {
+                    [new OpenApiSecuritySchemeReference(SessionSchemeName, context.Document)] = [],
                 });
             }
 
