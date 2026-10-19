@@ -19,4 +19,38 @@ export const getKidMe = () => request<KidMe>('GET', '/api/v1/kid/me')
 
 export const kidSignOut = () => request<void>('POST', '/api/v1/kid/signout')
 
+export type SearchItem = {
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  year: string | null
+  overview: string | null
+  posterUrl: string | null
+  availability: 'inLibrary' | 'notInLibrary' | null
+}
+
+export type SearchPage = {
+  query: string
+  page: number
+  hasMore: boolean
+  results: SearchItem[]
+}
+
+export type RequestedTitle = { id: number; state: string; requestCount: number }
+
+export const searchTitles = (
+  query: string,
+  page: number,
+  signal: AbortSignal,
+) =>
+  request<SearchPage>(
+    'GET',
+    `/api/v1/kid/search?q=${encodeURIComponent(query)}&page=${page}`,
+    undefined,
+    signal,
+  )
+
+export const requestTitle = (kind: SearchItem['kind'], tmdbId: number) =>
+  request<RequestedTitle>('POST', '/api/v1/kid/requests', { kind, tmdbId })
+
 export const pinLength = { min: 4, max: 8 }

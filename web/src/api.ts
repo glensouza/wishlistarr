@@ -33,6 +33,7 @@ export async function request<T>(
   method: string,
   path: string,
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = {}
   if (body !== undefined) {
@@ -46,6 +47,7 @@ export async function request<T>(
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   })
   if (!response.ok) {
     let message = `Request failed (${response.status})`
