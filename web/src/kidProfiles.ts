@@ -44,4 +44,4 @@ export const deleteKidProfile = (id: number, removeOwnedLabels: boolean) =>
 export const unlockKidProfile = (id: number) =>
   request<void>('POST', `${base}/${id}/unlock`)
 
-export const avatars = ['fox', 'owl', 'bear', 'cat', 'frog', 'panda']
+export { avatars } from './kid/avatarArt'
