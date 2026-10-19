@@ -106,6 +106,22 @@ public sealed class TmdbApiTests(TmdbApiFactory factory) : IClassFixture<TmdbApi
         Assert.Empty(isolated.Fake.Requests);
     }
 
+    [Fact]
+    public async Task Cache_headers_are_only_set_on_successful_images()
+    {
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        HttpResponseMessage ok = await client.GetAsync("/api/v1/images/tmdb/w500/poster.jpg");
+        HttpResponseMessage rejected = await client.GetAsync("/api/v1/images/tmdb/w501/poster.jpg");
+        HttpResponseMessage missing = await client.GetAsync("/api/v1/images/tmdb/w500/missing.jpg");
+
+        Assert.NotNull(ok.Headers.CacheControl);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Null(rejected.Headers.CacheControl);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        Assert.Null(missing.Headers.CacheControl);
+    }
+
     private static async Task<bool> TestKeyAsync(HttpClient client)
     {
         HttpResponseMessage response = await client.PostAsync("/api/v1/settings/tmdb/test", null);

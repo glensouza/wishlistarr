@@ -69,6 +69,8 @@ public sealed class TmdbHarness : IAsyncDisposable
 
     public ITmdbClient Client => this.provider.GetRequiredService<ITmdbClient>();
 
+    public TmdbCache Cache => this.provider.GetRequiredService<TmdbCache>();
+
     public TmdbImageProxy Images => this.provider.GetRequiredService<TmdbImageProxy>();
 
     public static async Task<TmdbHarness> CreateAsync(Action<TmdbOptions>? configure = null)

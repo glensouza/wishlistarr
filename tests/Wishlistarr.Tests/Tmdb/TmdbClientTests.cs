@@ -177,7 +177,7 @@ public sealed class TmdbClientTests
     }
 
     [Fact]
-    public async Task Retry_after_is_capped_and_retries_are_bounded()
+    public async Task Retry_after_is_capped_and_total_wait_is_bounded()
     {
         await using TmdbHarness harness = await TmdbHarness.CreateAsync(options => options.MaxRetries = 2);
         for (int index = 0; index < 5; index++)
@@ -188,8 +188,8 @@ public sealed class TmdbClientTests
         TmdbException error = await Assert.ThrowsAsync<TmdbException>(() => harness.Client.GetDetailsAsync(TmdbMediaType.Movie, 603));
 
         Assert.Equal(HttpStatusCode.TooManyRequests, error.StatusCode);
-        Assert.Equal(3, harness.Server.Count("/3/movie/603"));
-        Assert.Equal([TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30)], harness.Time.Delays);
+        Assert.Equal(2, harness.Server.Count("/3/movie/603"));
+        Assert.Equal([TimeSpan.FromSeconds(30)], harness.Time.Delays);
     }
 
     [Fact]
@@ -226,5 +226,88 @@ public sealed class TmdbClientTests
         FakeTmdbServer.RecordedRequest request = Assert.Single(harness.Server.Requests);
         Assert.Equal($"Bearer {FakeTmdbServer.ValidApiKey}.token", request.Authorization);
         Assert.False(request.Query.ContainsKey("api_key"));
+    }
+
+    [Fact]
+    public async Task Retries_are_bounded_by_count()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync(options => options.MaxRetries = 2);
+        for (int index = 0; index < 5; index++)
+        {
+            harness.Server.Enqueue("/3/movie/603", 429, "1");
+        }
+
+        TmdbException error = await Assert.ThrowsAsync<TmdbException>(() => harness.Client.GetDetailsAsync(TmdbMediaType.Movie, 603));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, error.StatusCode);
+        Assert.Equal(3, harness.Server.Count("/3/movie/603"));
+    }
+
+    [Fact]
+    public async Task Retry_after_accepts_an_http_date()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+        harness.Server.Enqueue("/3/movie/603", 429, DateTimeOffset.UtcNow.AddSeconds(10).ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+
+        await harness.Client.GetDetailsAsync(TmdbMediaType.Movie, 603);
+
+        TimeSpan delay = Assert.Single(harness.Time.Delays);
+        Assert.InRange(delay, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task Cache_stays_within_its_entry_limit()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync(options => options.CacheMaxEntries = 5);
+
+        for (int index = 0; index < 30; index++)
+        {
+            await harness.Client.SearchAsync($"query {index}");
+        }
+
+        Assert.InRange(harness.Cache.EntryCount, 1, 5);
+    }
+
+    [Fact]
+    public async Task Query_values_with_separators_are_sent_intact()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+
+        await harness.Client.SearchAsync("a&page=2=b");
+        await harness.Client.SearchAsync("a");
+
+        Assert.Equal(2, harness.Server.Count("/3/search/multi"));
+        Assert.Equal("a&page=2=b", harness.Server.Requests[0].Query["query"]);
+    }
+
+    [Fact]
+    public async Task Include_adult_is_false_on_every_endpoint()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+        ITmdbClient client = harness.Client;
+
+        await client.GetCreditsAsync(TmdbMediaType.Movie, 603);
+        await client.GetVideosAsync(TmdbMediaType.Movie, 603);
+        await client.GetImagesAsync(TmdbMediaType.Movie, 603);
+        await client.GetWatchProvidersAsync(TmdbMediaType.Movie, 603);
+        await client.GetCertificationAsync(TmdbMediaType.Tv, 1399, ["US"]);
+        await client.TestApiKeyAsync();
+
+        Assert.Equal(6, harness.Server.Requests.Count);
+        Assert.All(harness.Server.Requests, request => Assert.Equal("false", request.Query["include_adult"]));
+    }
+
+    [Fact]
+    public async Task Certification_lookup_ignores_blank_regions_and_entries_without_a_region()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+        harness.Server.SetBody("/3/movie/603/release_dates", """{"results":[{"release_dates":[{"certification":"R","type":3}]},{"iso_3166_1":"US","release_dates":[{"certification":"PG","type":3}]}]}""");
+        harness.Server.SetBody("/3/tv/1399/content_ratings", """{"results":[{"rating":"TV-14"},{"iso_3166_1":"US","rating":"TV-G"}]}""");
+
+        TmdbCertification? movie = await harness.Client.GetCertificationAsync(TmdbMediaType.Movie, 603, [null!, "", "US"]);
+        TmdbCertification? tv = await harness.Client.GetCertificationAsync(TmdbMediaType.Tv, 1399, [null!, "US"]);
+
+        Assert.Equal("PG", movie?.Rating);
+        Assert.Equal("TV-G", tv?.Rating);
     }
 }
