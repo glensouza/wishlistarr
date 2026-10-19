@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wishlistarr.Core\Wishlistarr.Core.csproj" />
+    <ProjectReference Include="..\Wishlistarr.Data\Wishlistarr.Data.csproj" />
+    <ProjectReference Include="..\Wishlistarr.Integrations\Wishlistarr.Integrations.csproj" />
+  </ItemGroup>
+
+</Project>
