@@ -18,9 +18,9 @@ Usernames are 1 to 100 characters and compared case-insensitively. Passwords are
 
 - `GET /api/v1/auth/sessions` lists the signed-in parent's active sessions with their user agent, address and last use; `isCurrent` marks the caller's own.
 - `DELETE /api/v1/auth/sessions/{id}` revokes one of the signed-in parent's sessions.
+- `POST /api/v1/auth/logout` revokes the current session.
 
 Both act only on the account behind the session cookie. API key and trusted-network callers have no account, so they see an empty list and get `404` on revoke.
-- `POST /api/v1/auth/logout` revokes the current session.
 
 Sessions last 30 days (`Auth:SessionLifetime`) from sign-in.
 
@@ -54,9 +54,9 @@ The bypass treats every request from configured networks as a signed-in parent w
 }
 ```
 
-`TrustedNetworks` are CIDR ranges written with full IP addresses, such as `192.168.1.0/24`. `KnownProxies` are the exact addresses of reverse proxies in front of Wishlistarr, also written in full; shorthand such as `10.1` is rejected. `X-Forwarded-For` is only read from those addresses; when the list is empty the header is ignored entirely.
+`TrustedNetworks` are CIDR ranges written with full IP addresses, such as `192.168.1.0/24`. `KnownProxies` are the exact addresses of reverse proxies in front of Wishlistarr, also written in full; shorthand such as `10.1` and IPv4 parts with leading zeros such as `010` are rejected. `X-Forwarded-For` is only read from those addresses; when the list is empty the header is ignored entirely.
 
-`TrustedHosts` lists the host names (without port) that browsers use to reach Wishlistarr. It is required while the bypass is on, and a request is only bypassed when its `Host` header matches one of them. Wildcards are not accepted. Without this check a web page on another site could use DNS rebinding to point its own host name at Wishlistarr, and the parent's browser on a trusted network would then read the antiforgery token and make writes as a parent.
+`TrustedHosts` lists the host names (without port) that browsers use to reach Wishlistarr. It is required while the bypass is on, and a request is only bypassed when its `Host` header matches one of them. Wildcards and IPv6 literal hosts are not accepted. A reverse proxy in front of Wishlistarr must pass the original `Host` header through unchanged and only serve the trusted host names; a proxy that rewrites `Host` to its upstream name makes every request match and defeats this check. Without this check a web page on another site could use DNS rebinding to point its own host name at Wishlistarr, and the parent's browser on a trusted network would then read the antiforgery token and make writes as a parent.
 
 Invalid entries, or the bypass turned on without `TrustedHosts`, stop the app from starting.
 
