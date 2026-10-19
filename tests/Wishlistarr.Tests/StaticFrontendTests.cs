@@ -1,11 +1,10 @@
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.FileProviders;
 
 namespace Wishlistarr.Tests;
 
-public sealed class WebRootFactory : WebApplicationFactory<Program>
+public class WebRootFactory : ApiFactory
 {
     public const string IndexHtml = "<!doctype html><title>test-shell</title>";
     public const string AssetJs = "console.log(1);";
@@ -19,12 +18,15 @@ public sealed class WebRootFactory : WebApplicationFactory<Program>
         File.WriteAllText(Path.Combine(this.webRoot, "assets", "x.js"), AssetJs);
     }
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
         builder.ConfigureServices((context, _) =>
         {
             context.HostingEnvironment.WebRootPath = this.webRoot;
             context.HostingEnvironment.WebRootFileProvider = new PhysicalFileProvider(this.webRoot);
         });
+    }
 
     protected override void Dispose(bool disposing)
     {
