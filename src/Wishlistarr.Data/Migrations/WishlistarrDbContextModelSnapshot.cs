@@ -152,6 +152,54 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("KidSessions");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.OwnedLabel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("AppliedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Guid")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<string>("RatingKey")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KidProfileId");
+
+                    b.HasIndex("ServerId", "Guid", "Label")
+                        .IsUnique();
+
+                    b.ToTable("OwnedLabels");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.ParentAccount", b =>
                 {
                     b.Property<int>("Id")
@@ -256,6 +304,17 @@ namespace Wishlistarr.Data.Migrations
                         .WithMany("Sessions")
                         .HasForeignKey("KidProfileId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("KidProfile");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.OwnedLabel", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
+                        .WithMany()
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("KidProfile");
