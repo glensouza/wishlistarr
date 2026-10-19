@@ -47,7 +47,10 @@ public sealed class AuthOptions
         }
 
         string[] parts = value.Split('.');
-        return parts.Length == 4 && parts.All(part => part.Length is > 0 and <= 3 && part.All(char.IsAsciiDigit));
+        return parts.Length == 4 && parts.All(part =>
+            part.Length is > 0 and <= 3
+            && part.All(char.IsAsciiDigit)
+            && (part.Length == 1 || part[0] != '0'));
     }
 
     public static bool IsNetwork(string value)

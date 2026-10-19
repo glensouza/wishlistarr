@@ -143,6 +143,9 @@ public sealed class TrustedNetworkTests
         Assert.False(new AuthOptions { TrustedNetworks = ["10.1/16"] }.IsValid());
         Assert.False(new AuthOptions { TrustedNetworks = ["192.168.1.0"] }.IsValid());
         Assert.False(new AuthOptions { TrustedNetworks = ["192.168.1.0/+24"] }.IsValid());
+        Assert.False(new AuthOptions { KnownProxies = ["10.0.0.01"] }.IsValid());
+        Assert.False(new AuthOptions { TrustedNetworks = ["192.168.010.0/24"] }.IsValid());
+        Assert.True(new AuthOptions { KnownProxies = ["10.0.0.0", "10.100.0.1"] }.IsValid());
         Assert.True(new AuthOptions { KnownProxies = ["::1", "fd00::2"] }.IsValid());
     }
 
