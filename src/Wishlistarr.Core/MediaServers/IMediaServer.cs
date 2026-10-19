@@ -9,4 +9,8 @@ public interface IMediaServer
     Task<IReadOnlyList<MediaServerUser>> GetUsersAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<MediaItem>> FindByExternalIdAsync(MediaKind kind, ExternalId id, CancellationToken ct = default);
+
+    Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default);
+
+    Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default);
 }

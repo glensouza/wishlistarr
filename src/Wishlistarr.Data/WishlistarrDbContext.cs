@@ -16,6 +16,8 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<KidPinAttempt> KidPinAttempts => this.Set<KidPinAttempt>();
 
+    public DbSet<OwnedLabel> OwnedLabels => this.Set<OwnedLabel>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -71,6 +73,20 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
         {
             entity.Property(attempt => attempt.DeviceHash).HasMaxLength(64);
             entity.HasIndex(attempt => new { attempt.KidProfileId, attempt.DeviceHash }).IsUnique();
+        });
+
+        modelBuilder.Entity<OwnedLabel>(entity =>
+        {
+            entity.Property(label => label.ServerId).HasMaxLength(100);
+            entity.Property(label => label.Guid).HasMaxLength(256);
+            entity.Property(label => label.RatingKey).HasMaxLength(20);
+            entity.Property(label => label.Label).HasMaxLength(64).UseCollation("NOCASE");
+            entity.Property(label => label.Source).HasMaxLength(32);
+            entity.HasIndex(label => new { label.ServerId, label.Guid, label.Label }).IsUnique();
+            entity.HasOne(label => label.KidProfile)
+                .WithMany()
+                .HasForeignKey(label => label.KidProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

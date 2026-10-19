@@ -53,3 +53,15 @@ Endpoints that need a linked account or a selected server answer `409` until tha
 Items matched by the current Plex agents carry `tmdb://`, `tvdb://` and `imdb://` guids. Items matched by the legacy agents carry a single `com.plexapp.agents.themoviedb://`, `com.plexapp.agents.thetvdb://` or `com.plexapp.agents.imdb://` guid. Both are recognised. Other legacy agents and unmatched items are ignored.
 
 Plex cannot search by external id, so the first lookup for a kind reads every library of that kind, 500 items per request, and keeps the result in memory for 10 minutes.
+
+## Labels
+
+Wishlistarr tags movies and shows with each kid profile's label so Plex content filters can limit what that kid sees. `LabelWriter` adds and removes labels through `IMediaServer.GetLabelsAsync` and `SetLabelsAsync`; there is no endpoint for it yet.
+
+- TV labels are always applied to the show. A season or episode id is resolved to its show first.
+- Every write reads the item's current labels, sends the complete set back (`label[0].tag.tag=...`) and locks the label field (`label.locked=1`) so a metadata refresh does not drop it. Clearing the last label uses `label[].tag.tag-=...` instead, because an empty set cannot be sent.
+- Plex has no conditional write, so the labels are read a second time just before writing and the write starts over if they changed. After writing, the item is read again; if the change did not stick (for example another client wrote an older set at the same moment) the write is retried, up to 3 attempts.
+- Writes to the same item are serialized inside the app.
+- Labels are compared case-insensitively.
+
+Every label the app applies is recorded in the `OwnedLabels` table with the server id, the item guid, the rating key, the label, the kid profile, the source of the change and the time. Items are matched by guid, so the record survives Plex assigning a new rating key. A label that was already on the item is not recorded, and removal only ever touches labels that are in this table, so labels added by hand in Plex are left alone.

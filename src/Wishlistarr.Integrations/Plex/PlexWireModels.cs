@@ -66,9 +66,35 @@ internal sealed record PlexMetadata(
     [property: JsonPropertyName("guid")] string? Guid,
     [property: JsonPropertyName("title")] string? Title,
     [property: JsonPropertyName("year")] int? Year,
-    [property: JsonPropertyName("Guid")] IReadOnlyList<PlexGuidEntry>? Guids);
+    [property: JsonPropertyName("Guid")] IReadOnlyList<PlexGuidEntry>? Guids)
+{
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("librarySectionID")]
+    public long? LibrarySectionId { get; init; }
+
+    [JsonPropertyName("parentRatingKey")]
+    public string? ParentRatingKey { get; init; }
+
+    [JsonPropertyName("grandparentRatingKey")]
+    public string? GrandparentRatingKey { get; init; }
+
+    [JsonPropertyName("Label")]
+    public IReadOnlyList<PlexTag>? Labels { get; init; }
+
+    [JsonPropertyName("Field")]
+    public IReadOnlyList<PlexField>? Fields { get; init; }
+}
 
 internal sealed record PlexGuidEntry(
     [property: JsonPropertyName("id")] string? Id);
+
+internal sealed record PlexTag(
+    [property: JsonPropertyName("tag")] string? Tag);
+
+internal sealed record PlexField(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("locked")] bool Locked);
 
 internal sealed record PlexServerContext(string ServerId, Uri BaseUri, string Token, string ClientIdentifier);
