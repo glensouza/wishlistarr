@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 
 namespace Wishlistarr.Api.Security;
@@ -32,6 +33,15 @@ public static class Principals
                 new(ClaimTypes.Role, Kid),
             ],
             authenticationType));
+
+    public static bool TryGetSessionAccount(ClaimsPrincipal user, out int accountId, out string sessionId)
+    {
+        sessionId = user.FindFirstValue(SessionIdClaim) ?? string.Empty;
+        accountId = 0;
+        return sessionId.Length > 0
+            && user.IsInRole(Parent)
+            && int.TryParse(user.FindFirstValue(ClaimTypes.NameIdentifier), NumberStyles.None, CultureInfo.InvariantCulture, out accountId);
+    }
 
     public static string? GetPrincipalType(ClaimsPrincipal user)
     {

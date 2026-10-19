@@ -20,6 +20,7 @@ public sealed class AuthTests(AuthApiFactory factory) : IClassFixture<AuthApiFac
 
         JsonElement before = await client.GetFromJsonAsync<JsonElement>("/api/v1/auth/status");
         HttpResponseMessage blocked = await keyed.GetAsync("/api/v1/system/status");
+        HttpResponseMessage anonymous = await client.GetAsync("/api/v1/system/status");
         HttpResponseMessage loginBeforeSetup = await client.PostAsJsonAsync(
             "/api/v1/auth/login",
             new { username = "parent", password = ApiFactory.ParentPassword });
@@ -34,6 +35,7 @@ public sealed class AuthTests(AuthApiFactory factory) : IClassFixture<AuthApiFac
         Assert.Equal(JsonValueKind.Null, before.GetProperty("principalType").ValueKind);
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
         Assert.Equal("application/problem+json", blocked.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, loginBeforeSetup.StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, setup.StatusCode);
         Assert.False(after.GetProperty("setupRequired").GetBoolean());
@@ -147,6 +149,49 @@ public sealed class AuthTests(AuthApiFactory factory) : IClassFixture<AuthApiFac
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
         Assert.DoesNotContain(remaining, session => session.GetProperty("id").GetString() == secondId);
         Assert.Contains(remaining, session => session.GetProperty("id").GetString() == currentId);
+    }
+
+    [Fact]
+    public async Task Sessions_of_other_accounts_are_not_listed_or_revocable()
+    {
+        using AuthApiFactory fresh = new();
+        HttpClient client = await fresh.CreateSignedInClientAsync();
+        using (IServiceScope scope = fresh.Services.CreateScope())
+        {
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            ParentAccount other = new() { Username = "other-" + Guid.NewGuid(), PasswordHash = "x" };
+            other.Sessions.Add(new ParentSession
+            {
+                Id = "foreign-session",
+                CreatedAt = DateTimeOffset.UtcNow,
+                LastSeenAt = DateTimeOffset.UtcNow,
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            });
+            db.ParentAccounts.Add(other);
+            await db.SaveChangesAsync();
+        }
+
+        List<JsonElement> sessions = await client.GetFromJsonAsync<List<JsonElement>>("/api/v1/auth/sessions") ?? [];
+        HttpResponseMessage revoke = await client.DeleteAsync("/api/v1/auth/sessions/foreign-session");
+
+        Assert.DoesNotContain(sessions, session => session.GetProperty("id").GetString() == "foreign-session");
+        Assert.Equal(HttpStatusCode.NotFound, revoke.StatusCode);
+        using IServiceScope verify = fresh.Services.CreateScope();
+        WishlistarrDbContext check = verify.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        Assert.True(await check.ParentSessions.AnyAsync(session => session.Id == "foreign-session"));
+    }
+
+    [Fact]
+    public async Task Overlong_login_password_is_rejected()
+    {
+        await factory.EnsureParentAsync();
+        HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/auth/login",
+            new { username = ApiFactory.ParentUsername, password = new string('p', ParentAccounts.MaxPasswordLength + 1) });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]

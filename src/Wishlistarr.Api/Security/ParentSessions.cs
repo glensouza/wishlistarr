@@ -67,10 +67,16 @@ public sealed class ParentSessions(WishlistarrDbContext db, IOptions<AuthOptions
         return true;
     }
 
-    public async Task<IReadOnlyList<SessionSummary>> ListAsync(string? currentSessionId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SessionSummary>> ListAsync(
+        int accountId,
+        string? currentSessionId,
+        CancellationToken ct = default)
     {
         DateTimeOffset now = time.GetUtcNow();
-        List<ParentSession> sessions = await db.ParentSessions.AsNoTracking().ToListAsync(ct);
+        List<ParentSession> sessions = await db.ParentSessions
+            .AsNoTracking()
+            .Where(session => session.ParentAccountId == accountId)
+            .ToListAsync(ct);
         return sessions
             .Where(session => session.ExpiresAt > now)
             .OrderByDescending(session => session.LastSeenAt)
@@ -85,8 +91,10 @@ public sealed class ParentSessions(WishlistarrDbContext db, IOptions<AuthOptions
             .ToList();
     }
 
-    public async Task<bool> RevokeAsync(string sessionId, CancellationToken ct = default) =>
-        await db.ParentSessions.Where(session => session.Id == sessionId).ExecuteDeleteAsync(ct) > 0;
+    public async Task<bool> RevokeAsync(int accountId, string sessionId, CancellationToken ct = default) =>
+        await db.ParentSessions
+            .Where(session => session.ParentAccountId == accountId && session.Id == sessionId)
+            .ExecuteDeleteAsync(ct) > 0;
 
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');

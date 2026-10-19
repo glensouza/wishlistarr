@@ -75,6 +75,11 @@ public sealed class ParentAccounts(
 
     public async Task<LoginResult> LoginAsync(string username, string password, CancellationToken ct = default)
     {
+        if (password.Length > MaxPasswordLength)
+        {
+            return new LoginResult(LoginOutcome.InvalidCredentials, null, null);
+        }
+
         string trimmed = username.Trim();
         ParentAccount? account = await db.ParentAccounts.FirstOrDefaultAsync(row => row.Username == trimmed, ct);
         if (account is null)

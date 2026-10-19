@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Wishlistarr.Api.Security;
@@ -123,10 +122,9 @@ public static class AuthEndpoints
 
         auth.MapPost("/logout", async (HttpContext context, ParentSessions sessions, CancellationToken ct) =>
         {
-            string? sessionId = context.User.FindFirstValue(Principals.SessionIdClaim);
-            if (sessionId is not null)
+            if (Principals.TryGetSessionAccount(context.User, out int accountId, out string sessionId))
             {
-                await sessions.RevokeAsync(sessionId, ct);
+                await sessions.RevokeAsync(accountId, sessionId, ct);
                 await context.SignOutAsync(AuthSchemes.Cookie);
             }
 
@@ -137,19 +135,22 @@ public static class AuthEndpoints
             .Produces(StatusCodes.Status204NoContent);
 
         auth.MapGet("/sessions", async (HttpContext context, ParentSessions sessions, CancellationToken ct) =>
-            await sessions.ListAsync(context.User.FindFirstValue(Principals.SessionIdClaim), ct))
+            Principals.TryGetSessionAccount(context.User, out int accountId, out string sessionId)
+                ? await sessions.ListAsync(accountId, sessionId, ct)
+                : [])
             .WithName("ListSessions")
-            .WithSummary("Lists active parent sessions.")
+            .WithSummary("Lists the signed-in parent's active sessions.")
             .Produces<IReadOnlyList<SessionSummary>>();
 
         auth.MapDelete("/sessions/{id}", async (string id, HttpContext context, ParentSessions sessions, CancellationToken ct) =>
         {
-            if (!await sessions.RevokeAsync(id, ct))
+            if (!Principals.TryGetSessionAccount(context.User, out int accountId, out string sessionId)
+                || !await sessions.RevokeAsync(accountId, id, ct))
             {
                 return Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Session not found.");
             }
 
-            if (context.User.FindFirstValue(Principals.SessionIdClaim) == id)
+            if (sessionId == id)
             {
                 await context.SignOutAsync(AuthSchemes.Cookie);
             }
@@ -157,7 +158,7 @@ public static class AuthEndpoints
             return Results.NoContent();
         })
             .WithName("RevokeSession")
-            .WithSummary("Revokes a parent session so its cookie stops working.")
+            .WithSummary("Revokes one of the signed-in parent's sessions so its cookie stops working.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
