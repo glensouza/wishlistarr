@@ -1,9 +1,15 @@
 export class ApiError extends Error {
   status: number
+  retryAfter: number | null
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    retryAfter: number | null = null,
+  ) {
     super(message)
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
 
@@ -51,7 +57,15 @@ export async function request<T>(
     } catch {
       // The response had no problem body.
     }
-    throw new ApiError(response.status, message)
+    const retryAfter = Number.parseInt(
+      response.headers.get('Retry-After') ?? '',
+      10,
+    )
+    throw new ApiError(
+      response.status,
+      message,
+      Number.isNaN(retryAfter) ? null : retryAfter,
+    )
   }
   if (response.status === 204) {
     return undefined as T
