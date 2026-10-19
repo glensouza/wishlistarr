@@ -43,10 +43,22 @@ public class ApiFactory : WebApplicationFactory<Program>
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        if (disposing && Directory.Exists(this.DataPath))
+        if (!disposing)
         {
-            SqliteConnection.ClearAllPools();
-            Directory.Delete(this.DataPath, true);
+            return;
+        }
+
+        SqliteConnection.ClearAllPools();
+        for (int attempt = 0; attempt < 5 && Directory.Exists(this.DataPath); attempt++)
+        {
+            try
+            {
+                Directory.Delete(this.DataPath, true);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(200);
+            }
         }
     }
 }
