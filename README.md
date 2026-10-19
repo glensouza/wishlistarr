@@ -35,6 +35,10 @@ npm run build
 npm test
 ```
 
+## Code style
+
+C# style is defined in `.editorconfig` and enforced as warnings (errors in the build): explicit types instead of `var`, `this.` on instance members, target-typed `new()`, collection expressions, file-scoped namespaces, usings outside the namespace with `System` first, and camelCase private fields without an underscore. Prefer primary constructors and sealed classes where they fit, and give public async methods a trailing `CancellationToken ct = default`. Run `dotnet format --verify-no-changes` before pushing.
+
 ## Privacy
 
 Wishlistarr does not collect any telemetry or analytics.
