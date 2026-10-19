@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Wishlistarr.Api.Requests;
+using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Data;
 
@@ -113,6 +114,7 @@ public static class KidEndpoints
             .Produces(StatusCodes.Status204NoContent);
 
         signedIn.MapKidRequests();
+        signedIn.MapKidSearch();
     }
 
     public static void MapParentKidProfiles(this RouteGroupBuilder parent)
