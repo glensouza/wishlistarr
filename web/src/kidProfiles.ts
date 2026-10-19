@@ -21,7 +21,7 @@ export type KidProfileInput = {
   movieAgeLimit: number | null
   tvAgeLimit: number | null
   plexLabel: string
-  plexUserId: string
+  plexUserId: string | null
   weeklyAllowance: number | null
 }
 

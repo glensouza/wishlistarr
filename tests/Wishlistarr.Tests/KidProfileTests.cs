@@ -149,10 +149,14 @@ public sealed class KidProfileTests
             "/api/v1/kid-profiles",
             new { name = "Gus", avatar = "fox", weeklyAllowance = -1 });
         HttpResponseMessage avatar = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new { name = "Gus", avatar = "Not Valid" });
+        HttpResponseMessage plexUser = await parent.PostAsJsonAsync(
+            "/api/v1/kid-profiles",
+            new { name = "Gus", avatar = "fox", plexUserId = new string('1', 101) });
 
         Assert.Equal(HttpStatusCode.BadRequest, age.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, allowance.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, avatar.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, plexUser.StatusCode);
     }
 
     [Fact]

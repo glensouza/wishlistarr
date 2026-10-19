@@ -9,6 +9,7 @@ import {
   type KidProfile,
   type KidProfileInput,
 } from './kidProfiles'
+import PlexUserPicker from './PlexUserPicker'
 
 type FormState = {
   name: string
@@ -59,7 +60,7 @@ function toInput(form: FormState): KidProfileInput {
     movieAgeLimit: toNumber(form.movieAgeLimit),
     tvAgeLimit: toNumber(form.tvAgeLimit),
     plexLabel: form.plexLabel,
-    plexUserId: form.plexUserId,
+    plexUserId: form.plexUserId === '' ? null : form.plexUserId,
     weeklyAllowance: toNumber(form.weeklyAllowance),
   }
 }
@@ -256,13 +257,10 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
           onChange={(event) => set('plexLabel', event.target.value)}
         />
       </label>
-      <label>
-        Plex user id
-        <input
-          value={form.plexUserId}
-          onChange={(event) => set('plexUserId', event.target.value)}
-        />
-      </label>
+      <PlexUserPicker
+        value={form.plexUserId}
+        onChange={(value) => set('plexUserId', value)}
+      />
       <label>
         Weekly requests
         <input

@@ -27,17 +27,27 @@ const ada: KidProfile = {
 let calls: Call[]
 let profiles: KidProfile[]
 let failNext: { status: number; title: string } | null
+let plexUsers: { id: string; name: string }[] | null
 
 beforeEach(() => {
   calls = []
   profiles = [ada]
   failNext = null
+  plexUsers = [
+    { id: '10', name: 'Kid Account' },
+    { id: '11', name: 'Other' },
+  ]
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
+      }
+      if (path === '/api/v1/plex/users') {
+        return plexUsers
+          ? Response.json(plexUsers)
+          : Response.json({ title: 'Plex is not linked' }, { status: 409 })
       }
       calls.push({
         method,
@@ -161,4 +171,66 @@ it('deletes without removing labels by default', async () => {
   expect(writes()[0].path).toBe(
     '/api/v1/kid-profiles/1?removeOwnedLabels=false',
   )
+})
+
+it('maps a profile to a Plex user chosen from the endpoint', async () => {
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+  expect(
+    await screen.findByRole('option', { name: 'Kid Account' }),
+  ).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('Plex user'), {
+    target: { value: '10' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({ plexUserId: '10' })
+})
+
+it('sends null when no Plex user is selected', async () => {
+  profiles = [{ ...ada, plexUserId: '10' }]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+  await screen.findByRole('option', { name: 'Kid Account' })
+  expect((screen.getByLabelText('Plex user') as HTMLSelectElement).value).toBe(
+    '10',
+  )
+  fireEvent.change(screen.getByLabelText('Plex user'), {
+    target: { value: '' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({ plexUserId: null })
+})
+
+it('keeps a mapped id that Plex no longer returns', async () => {
+  profiles = [{ ...ada, plexUserId: '99' }]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(await screen.findByRole('option', { name: '99' })).toBeTruthy()
+  expect((screen.getByLabelText('Plex user') as HTMLSelectElement).value).toBe(
+    '99',
+  )
+})
+
+it('still saves when the Plex users cannot be loaded', async () => {
+  plexUsers = null
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(await screen.findByText(/Plex users are unavailable/)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({ plexUserId: null })
+})
+
+it('says so when Plex has no users', async () => {
+  plexUsers = []
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(await screen.findByText(/No Plex users found/)).toBeTruthy()
 })
