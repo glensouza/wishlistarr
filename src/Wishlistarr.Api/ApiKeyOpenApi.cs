@@ -26,7 +26,7 @@ public static class ApiKeyOpenApi
 
         options.AddOperationTransformer((operation, context, _) =>
         {
-            if (context.Description.RelativePath?.StartsWith("api/v1", StringComparison.Ordinal) == true)
+            if (context.Description.ActionDescriptor.EndpointMetadata.OfType<ApiKeyRequiredMetadata>().Any())
             {
                 operation.Security ??= [];
                 operation.Security.Add(new OpenApiSecurityRequirement

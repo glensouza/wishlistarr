@@ -4,7 +4,7 @@ using Microsoft.Extensions.FileProviders;
 
 namespace Wishlistarr.Tests;
 
-public sealed class WebRootFactory : ApiFactory
+public class WebRootFactory : ApiFactory
 {
     public const string IndexHtml = "<!doctype html><title>test-shell</title>";
     public const string AssetJs = "console.log(1);";

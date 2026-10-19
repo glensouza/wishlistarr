@@ -16,3 +16,11 @@ public sealed class ApiKeyEndpointFilter(ApiKeyService apiKeys) : IEndpointFilte
         return await next(context);
     }
 }
+
+public sealed record ApiKeyRequiredMetadata;
+
+public static class ApiKeyRouteExtensions
+{
+    public static RouteGroupBuilder RequireApiKey(this RouteGroupBuilder group) =>
+        group.AddEndpointFilter<ApiKeyEndpointFilter>().WithMetadata(new ApiKeyRequiredMetadata());
+}

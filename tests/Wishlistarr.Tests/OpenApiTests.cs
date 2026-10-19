@@ -13,7 +13,7 @@ public sealed class DevelopmentApiFactory : ApiFactory
     }
 }
 
-public sealed class ProductionApiFactory : ApiFactory
+public sealed class ProductionApiFactory : WebRootFactory
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -35,13 +35,29 @@ public sealed class OpenApiTests(DevelopmentApiFactory development, ProductionAp
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         JsonElement root = document.RootElement;
-        JsonElement operation = root.GetProperty("paths").GetProperty("/api/v1/system/status").GetProperty("get");
+        JsonElement paths = root.GetProperty("paths");
+        JsonElement operation = paths.GetProperty("/api/v1/system/status").GetProperty("get");
         JsonElement scheme = root.GetProperty("components").GetProperty("securitySchemes").GetProperty("ApiKey");
         Assert.Equal("apiKey", scheme.GetProperty("type").GetString());
         Assert.Equal("header", scheme.GetProperty("in").GetString());
         Assert.Equal("X-Api-Key", scheme.GetProperty("name").GetString());
         Assert.True(operation.GetProperty("security")[0].TryGetProperty("ApiKey", out _));
         Assert.True(operation.GetProperty("responses").TryGetProperty("401", out _));
+        Assert.False(paths.GetProperty("/api/health").GetProperty("get").TryGetProperty("security", out _));
+    }
+
+    [Fact]
+    public async Task Development_document_marks_secret_flag_optional()
+    {
+        HttpClient client = development.CreateClient();
+
+        string json = await client.GetStringAsync("/openapi/v1.json");
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement schema = document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("SettingUpdate");
+        bool required = schema.TryGetProperty("required", out JsonElement list)
+            && list.EnumerateArray().Any(item => item.GetString() == "isSecret");
+        Assert.False(required);
     }
 
     [Fact]
@@ -52,17 +68,26 @@ public sealed class OpenApiTests(DevelopmentApiFactory development, ProductionAp
         HttpResponseMessage response = await client.GetAsync("/scalar/v1");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("scalar", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
     }
 
-    [Theory]
-    [InlineData("/openapi/v1.json")]
-    [InlineData("/scalar/v1")]
-    public async Task Production_does_not_expose_api_docs(string path)
+    [Fact]
+    public async Task Production_does_not_serve_the_openapi_document()
     {
         HttpClient client = production.CreateClient();
 
-        HttpResponseMessage response = await client.GetAsync(path);
+        HttpResponseMessage response = await client.GetAsync("/openapi/v1.json");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Production_serves_the_spa_shell_instead_of_the_scalar_ui()
+    {
+        HttpClient client = production.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync("/scalar/v1");
+
+        Assert.Equal(WebRootFactory.IndexHtml, await response.Content.ReadAsStringAsync());
     }
 }

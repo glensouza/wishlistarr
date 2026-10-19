@@ -11,7 +11,7 @@ public static class ApiEndpoints
     public static void MapApiV1(this IEndpointRouteBuilder app)
     {
         RouteGroupBuilder v1 = app.MapGroup("/api/v1")
-            .AddEndpointFilter<ApiKeyEndpointFilter>()
+            .RequireApiKey()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         v1.MapGet("/system/status", (SystemStatus status) => status.Get())
@@ -58,4 +58,4 @@ public static class ApiEndpoints
     }
 }
 
-public sealed record SettingUpdate(string? Value, bool IsSecret);
+public sealed record SettingUpdate(string? Value, bool IsSecret = false);

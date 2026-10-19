@@ -69,7 +69,10 @@ app.UseSerilogRequestLogging(options => options.Logger = app.Services.GetRequire
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
+    .WithTags("System")
+    .WithName("GetHealth")
+    .WithSummary("Reports that the service is running.");
 app.MapApiV1();
 
 if (app.Environment.IsDevelopment())
