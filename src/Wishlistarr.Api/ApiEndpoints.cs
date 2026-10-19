@@ -1,5 +1,6 @@
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.MediaServers;
+using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
@@ -64,6 +65,13 @@ public static class ApiEndpoints
                 return Results.Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: $"Keys starting with '{MediaServerSettings.KeyPrefix}' are managed by the Plex endpoints.");
+            }
+
+            if (key == KidRequestFlow.TimeZoneSetting && !KidRequestFlow.TryFindTimeZone(update.Value, out _))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "The time zone is not recognized. Use an IANA name such as America/Chicago.");
             }
 
             await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);
