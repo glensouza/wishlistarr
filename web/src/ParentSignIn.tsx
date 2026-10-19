@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react'
+import { useT } from './i18n'
 import { request, resetAntiforgery } from './api'
 
 type Props = { setupRequired: boolean; onSignedIn: () => void }
 
 export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
+  const t = useT()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,15 +22,19 @@ export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
       resetAntiforgery()
       onSignedIn()
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Sign-in failed')
+      setError(
+        failure instanceof Error ? failure.message : t('parent.signInFailed'),
+      )
     }
   }
 
   return (
     <form onSubmit={submit}>
-      <h2>{setupRequired ? 'Create the parent account' : 'Parent sign-in'}</h2>
+      <h2>
+        {setupRequired ? t('parent.setupTitle') : t('parent.signInTitle')}
+      </h2>
       <label>
-        Username
+        {t('parent.username')}
         <input
           value={username}
           onChange={(event) => setUsername(event.target.value)}
@@ -36,7 +42,7 @@ export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
         />
       </label>
       <label>
-        Password
+        {t('parent.password')}
         <input
           type="password"
           value={password}
@@ -46,7 +52,7 @@ export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="submit">
-        {setupRequired ? 'Create account' : 'Sign in'}
+        {setupRequired ? t('parent.createAccount') : t('parent.signIn')}
       </button>
     </form>
   )

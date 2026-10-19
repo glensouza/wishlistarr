@@ -9,6 +9,7 @@ import {
   type KidProfile,
   type KidProfileInput,
 } from './kidProfiles'
+import { useT } from './i18n'
 import PlexUserPicker from './PlexUserPicker'
 
 type FormState = {
@@ -65,10 +66,11 @@ function toInput(form: FormState): KidProfileInput {
   }
 }
 
-const messageOf = (failure: unknown) =>
-  failure instanceof Error ? failure.message : 'Something went wrong'
+const messageOf = (failure: unknown, fallback: string) =>
+  failure instanceof Error ? failure.message : fallback
 
 export default function KidProfilesAdmin() {
+  const t = useT()
   const [profiles, setProfiles] = useState<KidProfile[]>([])
   const [editing, setEditing] = useState<KidProfile | 'new' | null>(null)
   const [deleting, setDeleting] = useState<KidProfile | null>(null)
@@ -81,12 +83,13 @@ export default function KidProfilesAdmin() {
     let current = true
     listKidProfiles().then(
       (loaded) => current && setProfiles(loaded),
-      (failure: unknown) => current && setError(messageOf(failure)),
+      (failure: unknown) =>
+        current && setError(messageOf(failure, t('app.somethingWrong'))),
     )
     return () => {
       current = false
     }
-  }, [version])
+  }, [version, t])
 
   async function unlock(profile: KidProfile) {
     setError(null)
@@ -94,37 +97,37 @@ export default function KidProfilesAdmin() {
       await unlockKidProfile(profile.id)
       load()
     } catch (failure) {
-      setError(messageOf(failure))
+      setError(messageOf(failure, t('app.somethingWrong')))
     }
   }
 
   return (
     <section aria-labelledby="kid-profiles-heading">
-      <h2 id="kid-profiles-heading">Kid profiles</h2>
+      <h2 id="kid-profiles-heading">{t('admin.title')}</h2>
       {error && !editing && <p role="alert">{error}</p>}
       <ul>
         {profiles.map((profile) => (
           <li key={profile.id}>
             <strong>{profile.name}</strong> ({profile.avatar})
-            {profile.isLocked && <span> Locked</span>}
+            {profile.isLocked && <span> {t('admin.locked')}</span>}
             <button type="button" onClick={() => setEditing(profile)}>
-              Edit {profile.name}
+              {t('admin.edit', { name: profile.name })}
             </button>
             {profile.isLocked && (
               <button type="button" onClick={() => void unlock(profile)}>
-                Unlock {profile.name}
+                {t('admin.unlock', { name: profile.name })}
               </button>
             )}
             <button type="button" onClick={() => setDeleting(profile)}>
-              Delete {profile.name}
+              {t('admin.delete', { name: profile.name })}
             </button>
           </li>
         ))}
       </ul>
-      {profiles.length === 0 && <p>No profiles yet.</p>}
+      {profiles.length === 0 && <p>{t('admin.none')}</p>}
       {editing === null && (
         <button type="button" onClick={() => setEditing('new')}>
-          Add profile
+          {t('admin.add')}
         </button>
       )}
       {editing !== null && (
@@ -159,6 +162,7 @@ type ProfileFormProps = {
 }
 
 function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
+  const t = useT()
   const [form, setForm] = useState<FormState>(
     profile ? toForm(profile) : emptyForm,
   )
@@ -179,24 +183,24 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
       }
       onSaved()
     } catch (failure) {
-      setError(messageOf(failure))
+      setError(messageOf(failure, t('app.somethingWrong')))
     }
   }
 
   return (
     <form
       onSubmit={submit}
-      aria-label={profile ? 'Edit profile' : 'New profile'}
+      aria-label={profile ? t('admin.editForm') : t('admin.newForm')}
     >
       <label>
-        Name
+        {t('admin.name')}
         <input
           value={form.name}
           onChange={(event) => set('name', event.target.value)}
         />
       </label>
       <label>
-        Avatar
+        {t('admin.avatar')}
         <select
           value={form.avatar}
           onChange={(event) => set('avatar', event.target.value)}
@@ -209,13 +213,15 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
         </select>
       </label>
       <label>
-        PIN
+        {t('admin.pin')}
         <input
           type="password"
           inputMode="numeric"
           autoComplete="off"
           value={form.pin}
-          placeholder={profile?.hasPin ? 'Unchanged' : '4 to 8 digits'}
+          placeholder={
+            profile?.hasPin ? t('admin.pinUnchanged') : t('admin.pinHint')
+          }
           onChange={(event) => set('pin', event.target.value)}
         />
       </label>
@@ -226,11 +232,11 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
             checked={form.removePin}
             onChange={(event) => set('removePin', event.target.checked)}
           />
-          Remove PIN
+          {t('admin.removePin')}
         </label>
       )}
       <label>
-        Movie age limit
+        {t('admin.movieLimit')}
         <input
           type="number"
           min={0}
@@ -240,7 +246,7 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
         />
       </label>
       <label>
-        TV age limit
+        {t('admin.tvLimit')}
         <input
           type="number"
           min={0}
@@ -250,7 +256,7 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
         />
       </label>
       <label>
-        Plex label
+        {t('admin.plexLabel')}
         <input
           value={form.plexLabel}
           placeholder={form.name}
@@ -262,7 +268,7 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
         onChange={(value) => set('plexUserId', value)}
       />
       <label>
-        Weekly requests
+        {t('admin.weekly')}
         <input
           type="number"
           min={0}
@@ -271,9 +277,9 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button type="submit">Save</button>
+      <button type="submit">{t('admin.save')}</button>
       <button type="button" onClick={onCancel}>
-        Cancel
+        {t('admin.cancel')}
       </button>
     </form>
   )
@@ -286,6 +292,7 @@ type DeleteConfirmProps = {
 }
 
 function DeleteConfirm({ profile, onCancel, onDeleted }: DeleteConfirmProps) {
+  const t = useT()
   const [removeLabels, setRemoveLabels] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -295,30 +302,30 @@ function DeleteConfirm({ profile, onCancel, onDeleted }: DeleteConfirmProps) {
       await deleteKidProfile(profile.id, removeLabels)
       onDeleted()
     } catch (failure) {
-      setError(messageOf(failure))
+      setError(messageOf(failure, t('app.somethingWrong')))
     }
   }
 
   return (
-    <div role="alertdialog" aria-label={`Delete ${profile.name}`}>
-      <p>
-        Delete {profile.name}? Their request history is kept, but they can no
-        longer sign in.
-      </p>
+    <div
+      role="alertdialog"
+      aria-label={t('admin.deleteDialog', { name: profile.name })}
+    >
+      <p>{t('admin.deleteQuestion', { name: profile.name })}</p>
       <label>
         <input
           type="checkbox"
           checked={removeLabels}
           onChange={(event) => setRemoveLabels(event.target.checked)}
         />
-        Also remove the Plex labels this profile owns
+        {t('admin.removeLabels')}
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="button" onClick={() => void confirm()}>
-        Confirm delete
+        {t('admin.confirmDelete')}
       </button>
       <button type="button" onClick={onCancel}>
-        Keep profile
+        {t('admin.keep')}
       </button>
     </div>
   )
