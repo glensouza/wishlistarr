@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
@@ -24,7 +26,7 @@ public sealed class KidSearchTests
               {"id":800,"media_type":"movie","title":"Tiny Tale","overview":"Gentle.","poster_path":"/tiny.jpg","release_date":"2019-05-01"},
               {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"},
               {"id":801,"media_type":"movie","title":"Night Terror","release_date":"2021-10-31"},
-              {"id":802,"media_type":"movie","title":"Unrated Short","release_date":"2020-01-01"},
+              {"id":802,"media_type":"movie","title":"Unrated Short","overview":"Secret plot.","poster_path":"/unrated.jpg","release_date":"2020-01-01"},
               {"id":803,"media_type":"movie","title":"Unreachable Rating","release_date":"2020-01-01"},
               {"id":82728,"media_type":"tv","name":"Bluey","poster_path":"/bluey.jpg","first_air_date":"2018-10-01"},
               {"id":5,"media_type":"person","name":"Some Actor"}]}
@@ -60,6 +62,7 @@ public sealed class KidSearchTests
 
         Assert.Equal([800, 802, 82728], Ids(body));
         Assert.DoesNotContain("The Matrix", text);
+        Assert.DoesNotContain("matrix.jpg", text);
         Assert.DoesNotContain("Night Terror", text);
         Assert.DoesNotContain("Some Actor", text);
         Assert.DoesNotContain("57", text);
@@ -126,14 +129,11 @@ public sealed class KidSearchTests
     [Fact]
     public async Task Rating_lookups_run_in_parallel_within_the_documented_limit()
     {
-        Assert.Equal(8, KidSearch.MaxParallelLookups);
-        Assert.Equal(TimeSpan.FromSeconds(3), KidSearch.LookupBudget);
-
         using KidRequestApiFactory factory = CreateFactory();
         (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 20);
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System);
+        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
@@ -143,18 +143,117 @@ public sealed class KidSearchTests
     }
 
     [Fact]
-    public async Task Lookups_that_outlive_the_budget_are_dropped_instead_of_shown()
+    public async Task Lookups_that_outlive_the_budget_are_cut_off_and_dropped()
     {
         using KidRequestApiFactory factory = CreateFactory();
         (_, int profileId) = await factory.SignInKidAsync();
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 4) { Hang = true };
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], new RecordingTimeProvider());
+        ManualTimeProvider time = new();
+        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], time, NullLogger<KidSearch>.Instance);
 
-        KidSearchResponse? response = await search.SearchAsync(profileId, "slow", 1);
+        Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
+        using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
+        while (tmdb.Running < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        Assert.False(pending.IsCompleted);
+        time.Advance(KidSearch.LookupBudget);
+        KidSearchResponse? response = await pending.WaitAsync(guard.Token);
 
         Assert.NotNull(response);
         Assert.Empty(response.Results);
+        Assert.Equal(0, tmdb.Running);
+    }
+
+    [Fact]
+    public async Task Unrated_titles_are_masked_in_the_raw_response_but_can_still_be_asked_for()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        factory.Tmdb.SetBody("/3/movie/802", """{"id":802,"title":"Unrated Short"}""");
+
+        string text = await (await kid.GetAsync($"{SearchPath}?q=matrix")).Content.ReadAsStringAsync();
+        JsonElement results = JsonDocument.Parse(text).RootElement.GetProperty("results");
+        JsonElement masked = results.EnumerateArray().Single(item => item.GetProperty("tmdbId").GetInt32() == 802);
+        JsonElement allowed = results[0];
+
+        Assert.DoesNotContain("Secret plot.", text);
+        Assert.DoesNotContain("unrated.jpg", text);
+        Assert.True(masked.GetProperty("needsParent").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, masked.GetProperty("posterUrl").ValueKind);
+        Assert.Equal(JsonValueKind.Null, masked.GetProperty("overview").ValueKind);
+        Assert.Equal("Unrated Short", masked.GetProperty("title").GetString());
+        Assert.Equal("2020", masked.GetProperty("year").GetString());
+        Assert.False(allowed.GetProperty("needsParent").GetBoolean());
+        Assert.Equal("Gentle.", allowed.GetProperty("overview").GetString());
+        Assert.Equal(
+            HttpStatusCode.Created,
+            (await KidRequestApiFactory.RequestAsync(kid, "movie", 802)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Shows_are_filtered_by_the_profiles_tv_age_limit()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        factory.Tmdb.SetBody("/3/search/multi", """
+            {"page":1,"total_pages":1,"total_results":2,"results":[
+              {"id":82728,"media_type":"tv","name":"Bluey","first_air_date":"2018-10-01"},
+              {"id":810,"media_type":"tv","name":"Grown Up Show","first_air_date":"2015-01-01"}]}
+            """);
+        factory.Tmdb.SetBody("/3/tv/810/content_ratings", """{"results":[{"iso_3166_1":"US","rating":"TV-MA"}]}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16, tvAgeLimit: 7);
+
+        string text = await (await kid.GetAsync($"{SearchPath}?q=show")).Content.ReadAsStringAsync();
+
+        Assert.Equal([82728], Ids(JsonDocument.Parse(text).RootElement));
+        Assert.DoesNotContain("Grown Up Show", text);
+    }
+
+    [Fact]
+    public async Task Search_is_unavailable_when_tmdb_has_no_key()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        ((FixedKeyProvider)factory.Services.GetRequiredService<ITmdbApiKeyProvider>()).Key = null;
+
+        HttpResponseMessage response = await kid.GetAsync($"{SearchPath}?q=matrix");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains("Search isn't working right now.", await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, factory.Tmdb.Count("/3/search/multi"));
+    }
+
+    [Fact]
+    public async Task An_archived_profile_gets_nothing_and_tmdb_is_not_called()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (_, int profileId) = await factory.SignInKidAsync();
+        using IServiceScope scope = factory.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        KidProfile profile = await db.KidProfiles.SingleAsync(row => row.Id == profileId);
+        profile.ArchivedAt = factory.Clock.GetUtcNow();
+        await db.SaveChangesAsync();
+
+        Assert.Null(await scope.ServiceProvider.GetRequiredService<KidSearch>().SearchAsync(profileId, "matrix", 1));
+        Assert.Equal(0, factory.Tmdb.Count("/3/search/multi"));
+    }
+
+    [Theory]
+    [InlineData("w185")]
+    [InlineData("w500")]
+    [InlineData("original")]
+    public async Task Only_the_search_poster_size_is_served_to_kids(string size)
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+
+        HttpResponseMessage image = await kid.GetAsync($"/api/v1/kid/images/tmdb/{size}/tiny.jpg");
+
+        Assert.Equal(HttpStatusCode.BadRequest, image.StatusCode);
+        Assert.DoesNotContain(factory.Tmdb.Requests, request => request.Path.StartsWith("/t/p/", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -316,6 +415,8 @@ public sealed class KidSearchTests
 
         public int PeakConcurrency => this.peak;
 
+        public int Running => Volatile.Read(ref this.running);
+
         public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) =>
             Task.FromResult(new TmdbPage<TmdbSearchResult>(
                 1,
@@ -362,5 +463,65 @@ public sealed class KidSearchTests
         public Task<TmdbPage<TmdbSearchResult>> GetTrendingAsync(TmdbMediaType type, string window = "week", int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private readonly List<ManualTimer> timers = [];
+        private DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        public override DateTimeOffset GetUtcNow() => this.now;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            ManualTimer timer = new(callback, state, this.now + dueTime);
+            lock (this.timers)
+            {
+                this.timers.Add(timer);
+            }
+
+            return timer;
+        }
+
+        public void Advance(TimeSpan by)
+        {
+            List<ManualTimer> due;
+            lock (this.timers)
+            {
+                this.now += by;
+                due = [.. this.timers.Where(timer => timer.Due <= this.now)];
+            }
+
+            foreach (ManualTimer timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class ManualTimer(TimerCallback callback, object? state, DateTimeOffset due) : ITimer
+        {
+            private bool done;
+
+            public DateTimeOffset Due => due;
+
+            public void Fire()
+            {
+                if (!this.done)
+                {
+                    this.done = true;
+                    callback(state);
+                }
+            }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => !this.done;
+
+            public void Dispose() => this.done = true;
+
+            public ValueTask DisposeAsync()
+            {
+                this.done = true;
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 }

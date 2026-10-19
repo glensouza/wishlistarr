@@ -51,16 +51,19 @@ public static class KidSearchEndpoints
         })
             .WithTags("Kid")
             .WithName("SearchKidTitles")
-            .WithSummary("Searches movies and shows for the signed-in profile. Titles the profile's content policy blocks, or whose rating cannot be checked in time, are never returned, and the response carries no totals.")
+            .WithSummary("Searches movies and shows for the signed-in profile. Titles the profile's content policy blocks, or whose rating cannot be checked in time, are never returned. Unrated titles come back masked, without poster or overview and flagged needsParent. The response carries no totals.")
             .Produces<KidSearchResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status502BadGateway)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
-        kid.MapGet("/images/tmdb/{size}/{file}", TmdbEndpoints.ServeImageAsync)
+        kid.MapGet("/images/tmdb/{size}/{file}", (string size, string file, TmdbImageProxy proxy, HttpContext http, CancellationToken ct) =>
+            size == KidSearch.PosterSize
+                ? TmdbEndpoints.ServeImageAsync(size, file, proxy, http, ct)
+                : Task.FromResult<IResult>(Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The image size or path is not allowed.")))
             .WithTags("Images")
             .WithName("GetKidTmdbImage")
-            .WithSummary("Proxies a poster from image.tmdb.org for a signed-in profile.")
+            .WithSummary("Proxies a search poster from image.tmdb.org for a signed-in profile; only the search poster size is served.")
             .Produces(StatusCodes.Status200OK, contentType: "image/jpeg")
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)

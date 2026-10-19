@@ -22,15 +22,17 @@ public sealed record KidSearchItem(
     string? Year,
     string? Overview,
     string? PosterUrl,
-    Availability? Availability);
+    Availability? Availability,
+    bool NeedsParent = false);
 
 public sealed record KidSearchResponse(string Query, int Page, bool HasMore, IReadOnlyList<KidSearchItem> Results);
 
-public sealed class KidSearch(
+public sealed partial class KidSearch(
     WishlistarrDbContext db,
     ITmdbClient tmdb,
     IEnumerable<ILibraryIndex> indexes,
-    TimeProvider time)
+    TimeProvider time,
+    ILogger<KidSearch> logger)
 {
     public const int MinQueryLength = 2;
     public const int MaxQueryLength = 100;
@@ -75,7 +77,7 @@ public sealed class KidSearch(
             ContentDecision decision = ContentPolicyEngine.Default.Evaluate(new ContentTitle(candidate.Key, known), policy);
             if (decision.Outcome != ContentOutcome.Blocked)
             {
-                results.Add(await this.ToItemAsync(candidate, ct));
+                results.Add(await this.ToItemAsync(candidate, decision.Outcome == ContentOutcome.NeedsApproval, ct));
             }
         }
 
@@ -112,7 +114,6 @@ public sealed class KidSearch(
         return TmdbImageProxy.IsAllowed(PosterSize, file) ? $"{PosterRoute}/{PosterSize}/{file}" : null;
     }
 
-    // A title whose certification cannot be read in time is left out: unknown never counts as allowed.
     private async Task<ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>>> LookUpAsync(
         IReadOnlyList<Candidate> candidates,
         CancellationToken ct)
@@ -135,25 +136,34 @@ public sealed class KidSearch(
                     }
                     catch (Exception ex) when (ex is TmdbException or HttpRequestException)
                     {
+                        this.LogLookupFailed(ex, candidate.Key.Kind, candidate.Key.TmdbId);
                     }
                 });
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            this.LogBudgetExceeded(LookupBudget.TotalSeconds);
         }
 
         return known;
     }
 
-    private async Task<KidSearchItem> ToItemAsync(Candidate candidate, CancellationToken ct) =>
+    private async Task<KidSearchItem> ToItemAsync(Candidate candidate, bool needsParent, CancellationToken ct) =>
         new(
             candidate.Key.Kind,
             candidate.Key.TmdbId,
             candidate.Title,
             candidate.Year,
-            candidate.Overview,
-            candidate.PosterUrl,
-            await this.AvailabilityAsync(candidate.Key, ct));
+            needsParent ? null : candidate.Overview,
+            needsParent ? null : candidate.PosterUrl,
+            await this.AvailabilityAsync(candidate.Key, ct),
+            needsParent);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Certification lookup failed for {Kind} {TmdbId}")]
+    private partial void LogLookupFailed(Exception exception, MediaKind kind, int tmdbId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Certification lookups did not finish within {Seconds} s; unresolved titles were left out")]
+    private partial void LogBudgetExceeded(double seconds);
 
     private async Task<Availability?> AvailabilityAsync(TitleKey title, CancellationToken ct)
     {
