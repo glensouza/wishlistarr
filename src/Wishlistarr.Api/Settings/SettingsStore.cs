@@ -7,12 +7,15 @@ namespace Wishlistarr.Api.Settings;
 public sealed class SettingsStore(WishlistarrDbContext db, IDataProtectionProvider protectionProvider, TimeProvider time)
 {
     public const string ProtectorPurpose = "Wishlistarr.Settings";
+    public const string ReservedPrefix = "system.";
 
     private readonly IDataProtector protector = protectionProvider.CreateProtector(ProtectorPurpose);
 
+    public static bool IsReserved(string key) => key.StartsWith(ReservedPrefix, StringComparison.OrdinalIgnoreCase);
+
     public async Task<IReadOnlyList<SettingSummary>> ListAsync(CancellationToken ct = default)
     {
-        List<Setting> settings = await db.Settings.AsNoTracking().OrderBy(setting => setting.Key).ToListAsync(ct);
+        List<Setting> settings = await db.Settings.AsNoTracking().Where(setting => !setting.Key.StartsWith(ReservedPrefix)).OrderBy(setting => setting.Key).ToListAsync(ct);
         return settings
             .Select(setting => new SettingSummary(setting.Key, setting.IsSecret, setting.IsSecret ? null : setting.Value))
             .ToList();
