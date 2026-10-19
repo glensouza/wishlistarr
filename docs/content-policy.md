@@ -27,24 +27,30 @@ Titles are identified by `TitleKey(Kind, TmdbId)`. A show is decided at series l
 
 US ratings map to a shared scale so movies and TV can be compared:
 
-| Level | Movie | TV |
-| --- | --- | --- |
-| `Preschool` | | TV-Y |
-| `Children` | | TV-Y7 |
-| `General` | G | TV-G |
-| `ParentalGuidance` | PG | TV-PG |
-| `Teen` | PG-13 | TV-14 |
-| `Mature` | R | TV-MA |
-| `Adult` | NC-17 | |
+| Level | Movie | TV | Minimum age |
+| --- | --- | --- | --- |
+| `Preschool` | | TV-Y | 0 |
+| `General` | G | TV-G | 0 |
+| `Children` | | TV-Y7 | 7 |
+| `ParentalGuidance` | PG | TV-PG | 8 |
+| `Teen` | PG-13 | TV-14 | 13 |
+| `Mature` | R | TV-MA | 17 |
+| `Adult` | NC-17 | | 18 |
 
-A title is allowed when its level is at or below the profile's max level for its kind. Movies and shows have separate limits; a missing limit means any rating is allowed.
+TV-Y7 ranks above G and TV-G because it is meant for children aged 7 and up, while G and TV-G suit all ages.
 
-The US certification is used first. If it is missing or not recognized (for example `NR`), the configured region is used, and if that has no usable rating either, the unrated policy applies. Certifications from other regions are ignored. Outside the US, a few letter ratings are recognized (such as `U` in GB and `M` in AU) and ratings containing an age, such as `12A`, `FSK 16` or `MA15+`, are rounded up to the next level, so an imprecise match errs towards stricter.
+A title is allowed when its level is at or below the profile's max level for its kind. Movies and shows have separate limits. A missing limit means any recognized rating is allowed; titles without a usable rating still follow the unrated policy.
+
+The US certification is used first. If it is missing or not recognized (for example `NR`), the configured region is used, and if that has no usable rating either, the unrated policy applies. Certifications from other regions are ignored. When a region has several ratings, the strictest recognized one is used. Missing regions or ratings count as no rating.
+
+Outside the US, a few letter ratings are recognized (`U` in GB and FR, `G` and `PG` in AU and CA, `PG` in GB, and `M` in AU, which is treated as `Mature` because it is recommended for 15 and up). Ratings containing an age, such as `12A`, `FSK 16` or `MA15+`, are rounded up to the next level, so an imprecise match errs towards stricter.
 
 ## Unrated titles
 
-`UnratedPolicy` decides titles without a usable rating: `Allow`, `NeedsApproval` (the default) or `Block`.
+`UnratedPolicy` decides titles without a usable rating: `Allow`, `NeedsApproval` (the default) or `Block`. It applies whether or not the profile has a rating limit.
 
 ## Profile age limits
 
-Profiles store movie and TV age limits. `ContentPolicy.FromAgeLimits` turns them into max levels using each level's minimum age: 0 for `General` and below, 8 for `ParentalGuidance`, 13 for `Teen`, 17 for `Mature` and 18 for `Adult`.
+Profiles store movie and TV age limits. `ContentPolicy.FromAgeLimits` turns each limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on.
+
+`Preschool` cannot be reached from an age limit. TV-Y, G and TV-G are all suitable for every age, so no age separates them; a policy can still set `Preschool` as its max level directly to allow only TV-Y.
