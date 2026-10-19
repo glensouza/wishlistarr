@@ -152,6 +152,105 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("KidSessions");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("LastRequestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RequestCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("StateChangedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("State");
+
+                    b.HasIndex("KidProfileId", "Kind", "TmdbId")
+                        .IsUnique()
+                        .HasFilter("\"State\" <> 'Denied'");
+
+                    b.ToTable("MediaRequests");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequestEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("ActorId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ActorKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FromState")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MediaRequestId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToState")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MediaRequestId");
+
+                    b.ToTable("MediaRequestEvents");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.OwnedLabel", b =>
                 {
                     b.Property<int>("Id")
@@ -309,6 +408,28 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("KidProfile");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
+                        .WithMany()
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("KidProfile");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequestEvent", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.MediaRequest", "MediaRequest")
+                        .WithMany("Events")
+                        .HasForeignKey("MediaRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MediaRequest");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.OwnedLabel", b =>
                 {
                     b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
@@ -336,6 +457,11 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("PinAttempts");
 
                     b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
+                {
+                    b.Navigation("Events");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.ParentAccount", b =>
