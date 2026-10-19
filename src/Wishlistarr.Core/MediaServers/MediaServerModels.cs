@@ -45,8 +45,6 @@ public sealed record ExternalId(ExternalIdSource Source, string Value)
 
         return id is not null;
     }
-
-    public override string ToString() => $"{this.Source.ToString().ToLowerInvariant()}:{this.Value}";
 }
 
 public enum MediaLibraryType

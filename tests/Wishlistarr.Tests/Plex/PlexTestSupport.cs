@@ -12,19 +12,22 @@ public sealed class InMemoryAppSettings : IAppSettings
 
     public IReadOnlyDictionary<string, StoredValue> Values => this.values;
 
-    public Task<string?> GetAsync(string key, CancellationToken ct = default) =>
-        Task.FromResult(this.values.TryGetValue(key, out StoredValue? value) ? value.Value : null);
-
-    public Task SetAsync(string key, string value, bool isSecret, CancellationToken ct = default)
+    public async Task<string?> GetAsync(string key, CancellationToken ct = default)
     {
-        this.values[key] = new StoredValue(value, isSecret);
-        return Task.CompletedTask;
+        await Task.Delay(1, ct);
+        return this.values.TryGetValue(key, out StoredValue? value) ? value.Value : null;
     }
 
-    public Task DeleteAsync(string key, CancellationToken ct = default)
+    public async Task SetAsync(string key, string value, bool isSecret, CancellationToken ct = default)
     {
+        await Task.Delay(1, ct);
+        this.values[key] = new StoredValue(value, isSecret);
+    }
+
+    public async Task DeleteAsync(string key, CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
         this.values.TryRemove(key, out _);
-        return Task.CompletedTask;
     }
 
     public sealed record StoredValue(string Value, bool IsSecret);

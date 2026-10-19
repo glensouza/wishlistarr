@@ -30,7 +30,6 @@ internal sealed record PlexResource(
 }
 
 internal sealed record PlexResourceConnection(
-    [property: JsonPropertyName("protocol")] string? Protocol,
     [property: JsonPropertyName("uri")] string? Uri,
     [property: JsonPropertyName("local")] bool Local,
     [property: JsonPropertyName("relay")] bool Relay,
@@ -52,7 +51,6 @@ internal sealed record PlexContainer(
     [property: JsonPropertyName("machineIdentifier")] string? MachineIdentifier,
     [property: JsonPropertyName("friendlyName")] string? FriendlyName,
     [property: JsonPropertyName("version")] string? Version,
-    [property: JsonPropertyName("size")] int? Size,
     [property: JsonPropertyName("totalSize")] int? TotalSize,
     [property: JsonPropertyName("Directory")] IReadOnlyList<PlexSection>? Directory,
     [property: JsonPropertyName("Metadata")] IReadOnlyList<PlexMetadata>? Metadata);
@@ -66,7 +64,6 @@ internal sealed record PlexSection(
 internal sealed record PlexMetadata(
     [property: JsonPropertyName("ratingKey")] string? RatingKey,
     [property: JsonPropertyName("guid")] string? Guid,
-    [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("title")] string? Title,
     [property: JsonPropertyName("year")] int? Year,
     [property: JsonPropertyName("Guid")] IReadOnlyList<PlexGuidEntry>? Guids);
