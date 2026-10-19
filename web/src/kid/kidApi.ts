@@ -1,4 +1,4 @@
-import { request } from '../api'
+import { request, requestWithStatus } from '../api'
 
 export type PickerProfile = {
   id: number
@@ -27,6 +27,7 @@ export type SearchItem = {
   overview: string | null
   posterUrl: string | null
   availability: 'inLibrary' | 'notInLibrary' | null
+  needsParent: boolean
 }
 
 export type SearchPage = {
@@ -36,7 +37,12 @@ export type SearchPage = {
   results: SearchItem[]
 }
 
-export type RequestedTitle = { id: number; state: string; requestCount: number }
+export type RequestedTitle = {
+  id: number
+  state: string
+  requestCount: number
+  alreadyAsked: boolean
+}
 
 export const searchTitles = (
   query: string,
@@ -50,7 +56,14 @@ export const searchTitles = (
     signal,
   )
 
-export const requestTitle = (kind: SearchItem['kind'], tmdbId: number) =>
-  request<RequestedTitle>('POST', '/api/v1/kid/requests', { kind, tmdbId })
+export async function requestTitle(
+  kind: SearchItem['kind'],
+  tmdbId: number,
+): Promise<RequestedTitle> {
+  const { status, body } = await requestWithStatus<
+    Omit<RequestedTitle, 'alreadyAsked'>
+  >('POST', '/api/v1/kid/requests', { kind, tmdbId })
+  return { ...body, alreadyAsked: status !== 201 }
+}
 
 export const pinLength = { min: 4, max: 8 }

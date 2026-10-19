@@ -10,6 +10,7 @@ import {
 
 export const searchDebounceMs = 300
 export const searchMinLength = 2
+export const searchMaxPage = 10
 
 type Status = 'idle' | 'loading' | 'ready' | 'failed'
 type Ask = { state: 'sending' | 'done' | 'failed'; message?: MessageKey }
@@ -28,6 +29,7 @@ export default function Search() {
   const [retry, setRetry] = useState(0)
   const more = useRef<AbortController | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [moreFailed, setMoreFailed] = useState(false)
 
   const term = normalize(query)
   const searchable = term.length >= searchMinLength
@@ -37,17 +39,29 @@ export default function Search() {
     const controller = new AbortController()
     const timer = setTimeout(() => {
       setStatus('loading')
-      searchTitles(term, 1, controller.signal).then(
-        (loaded) => {
+      setMoreFailed(false)
+      void (async () => {
+        try {
+          let loaded = await searchTitles(term, 1, controller.signal)
+          while (
+            loaded.results.length === 0 &&
+            loaded.hasMore &&
+            loaded.page < searchMaxPage
+          ) {
+            loaded = await searchTitles(
+              loaded.query,
+              loaded.page + 1,
+              controller.signal,
+            )
+          }
           if (controller.signal.aborted) return
           setPage(loaded)
           setStatus('ready')
-        },
-        () => {
+        } catch {
           if (controller.signal.aborted) return
           setStatus('failed')
-        },
-      )
+        }
+      })()
     }, searchDebounceMs)
     return () => {
       clearTimeout(timer)
@@ -63,6 +77,7 @@ export default function Search() {
     const controller = new AbortController()
     more.current = controller
     setLoadingMore(true)
+    setMoreFailed(false)
     searchTitles(page.query, page.page + 1, controller.signal).then(
       (next) => {
         if (controller.signal.aborted) return
@@ -78,7 +93,7 @@ export default function Search() {
       },
       () => {
         if (controller.signal.aborted) return
-        setStatus('failed')
+        setMoreFailed(true)
         setLoadingMore(false)
       },
     )
@@ -89,12 +104,11 @@ export default function Search() {
     setAsks((current) => ({ ...current, [key]: { state: 'sending' } }))
     try {
       const made = await requestTitle(item.kind, item.tmdbId)
-      const message: MessageKey =
-        made.requestCount > 1
-          ? 'search.already'
-          : made.state === 'labeled'
-            ? 'search.added'
-            : 'search.requested'
+      const message: MessageKey = made.alreadyAsked
+        ? 'search.already'
+        : made.state === 'labeled'
+          ? 'search.added'
+          : 'search.requested'
       setAsks((current) => ({ ...current, [key]: { state: 'done', message } }))
     } catch (failure) {
       const code = failure instanceof ApiError ? failure.status : 0
@@ -144,7 +158,10 @@ export default function Search() {
         className={showing === 'ready' ? 'visually-hidden' : 'muted'}
       >
         {showing === 'loading' && t('search.loading')}
-        {showing === 'ready' && t('search.found', { count: results.length })}
+        {showing === 'ready' &&
+          (results.length === 1
+            ? t('search.foundOne')
+            : t('search.found', { count: results.length }))}
       </p>
       {showing === 'failed' && (
         <div role="alert">
@@ -154,8 +171,10 @@ export default function Search() {
           </button>
         </div>
       )}
-      {showing === 'ready' && results.length === 0 && (
-        <p className="search-empty">{t('search.empty', { query: term })}</p>
+      {showing === 'ready' && page && results.length === 0 && !page.hasMore && (
+        <p className="search-empty">
+          {t('search.empty', { query: page.query })}
+        </p>
       )}
       {results.length > 0 && (
         <ul className="search-results">
@@ -169,7 +188,15 @@ export default function Search() {
           ))}
         </ul>
       )}
-      {showing === 'ready' && page?.hasMore && (
+      {showing === 'ready' && moreFailed && (
+        <div role="alert">
+          <p className="error">{t('search.moreFailed')}</p>
+          <button type="button" onClick={showMore}>
+            {t('search.retry')}
+          </button>
+        </div>
+      )}
+      {showing === 'ready' && page?.hasMore && !moreFailed && (
         <button type="button" onClick={showMore} disabled={loadingMore}>
           {loadingMore ? t('search.loading') : t('search.more')}
         </button>
@@ -210,6 +237,14 @@ function ResultCard({
         </h3>
         <p className="muted">
           {item.kind === 'movie' ? t('search.movie') : t('search.show')}
+          {item.needsParent && (
+            <>
+              {' · '}
+              <span className="badge badge-needsParent">
+                {t('search.askParent')}
+              </span>
+            </>
+          )}
           {item.availability && (
             <>
               {' · '}

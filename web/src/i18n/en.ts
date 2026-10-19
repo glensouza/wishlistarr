@@ -40,6 +40,7 @@ export const en = {
   'search.label': 'Search movies and shows',
   'search.hint': 'Type at least {min} letters.',
   'search.loading': 'Searching',
+  'search.foundOne': 'Found 1 title',
   'search.found': 'Found {count} titles',
   'search.empty':
     'We could not find anything for "{query}". Try another word or check the spelling.',
@@ -47,6 +48,9 @@ export const en = {
     'Search is not working right now. Try again in a little while.',
   'search.retry': 'Try again',
   'search.more': 'Show more',
+  'search.moreFailed':
+    'We could not load more titles. The ones above are still here.',
+  'search.askParent': 'Ask a parent',
   'search.movie': 'Movie',
   'search.show': 'Show',
   'search.inLibrary': 'Ready to watch',
