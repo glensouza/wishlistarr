@@ -9,6 +9,7 @@ using Serilog;
 using Wishlistarr.Api;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
+using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
@@ -64,6 +65,8 @@ builder.Services.AddPlex<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
+builder.Services.AddScoped<LibraryLookup>();
+builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();
