@@ -16,8 +16,8 @@ public sealed class ContentPolicyEngineTests
     [InlineData("R", RatingLevel.Mature)]
     [InlineData("NC-17", RatingLevel.Adult)]
     [InlineData("TV-Y", RatingLevel.Preschool)]
-    [InlineData("TV-Y7", RatingLevel.Children)]
     [InlineData("TV-G", RatingLevel.General)]
+    [InlineData("TV-Y7", RatingLevel.Children)]
     [InlineData("TV-PG", RatingLevel.ParentalGuidance)]
     [InlineData("TV-14", RatingLevel.Teen)]
     [InlineData("TV-MA", RatingLevel.Mature)]
@@ -34,8 +34,8 @@ public sealed class ContentPolicyEngineTests
     [InlineData("R", "TV-MA")]
     public void Equivalent_movie_and_tv_ratings_compare_equal(string movie, string tv)
     {
-        RatingScale.TryParse("US", movie, out RatingLevel? movieLevel);
-        RatingScale.TryParse("US", tv, out RatingLevel? tvLevel);
+        Assert.True(RatingScale.TryParse("US", movie, out RatingLevel? movieLevel));
+        Assert.True(RatingScale.TryParse("US", tv, out RatingLevel? tvLevel));
         Assert.Equal(movieLevel, tvLevel);
     }
 
@@ -152,13 +152,13 @@ public sealed class ContentPolicyEngineTests
 
     [Theory]
     [InlineData("DE", "0", RatingLevel.General)]
-    [InlineData("DE", "6", RatingLevel.ParentalGuidance)]
+    [InlineData("DE", "6", RatingLevel.Children)]
     [InlineData("DE", "12", RatingLevel.Teen)]
     [InlineData("DE", "16", RatingLevel.Mature)]
     [InlineData("DE", "18", RatingLevel.Adult)]
     [InlineData("GB", "U", RatingLevel.General)]
     [InlineData("GB", "12A", RatingLevel.Teen)]
-    [InlineData("AU", "M", RatingLevel.Teen)]
+    [InlineData("AU", "M", RatingLevel.Mature)]
     [InlineData("AU", "MA15+", RatingLevel.Mature)]
     [InlineData("AU", "R18+", RatingLevel.Adult)]
     public void Other_region_ratings_round_up_to_the_shared_scale(string region, string rating, RatingLevel expected)
@@ -196,16 +196,74 @@ public sealed class ContentPolicyEngineTests
     }
 
     [Fact]
-    public void No_limit_allows_any_rating()
+    public void No_limit_allows_any_recognized_rating()
     {
-        ContentDecision decision = Evaluate(Title(Show), new ContentPolicy { MaxMovieRating = RatingLevel.General });
+        ContentDecision decision = Evaluate(Title(Show, ("US", "TV-MA")), new ContentPolicy { MaxMovieRating = RatingLevel.General });
 
-        Assert.Equal(new ContentDecision(ContentOutcome.Allowed, new ContentReason(ContentReasonCode.NoRatingLimit)), decision);
+        Assert.Equal(
+            new ContentDecision(ContentOutcome.Allowed, new ContentReason(ContentReasonCode.NoRatingLimit, "US", "TV-MA", RatingLevel.Mature)),
+            decision);
     }
 
     [Theory]
+    [InlineData(UnratedPolicy.Allow, ContentOutcome.Allowed)]
+    [InlineData(UnratedPolicy.NeedsApproval, ContentOutcome.NeedsApproval)]
+    [InlineData(UnratedPolicy.Block, ContentOutcome.Blocked)]
+    public void No_limit_still_applies_the_unrated_policy(UnratedPolicy unrated, ContentOutcome expected)
+    {
+        ContentPolicy policy = ContentPolicy.FromAgeLimits(null, null) with { Unrated = unrated };
+
+        ContentDecision decision = Evaluate(Title(Show, ("US", "NR")), policy);
+
+        Assert.Equal(new ContentDecision(expected, new ContentReason(ContentReasonCode.Unrated, "US", "NR")), decision);
+    }
+
+    [Fact]
+    public void Strictest_rating_within_a_region_is_used()
+    {
+        ContentDecision decision = Evaluate(
+            Title(Movie, ("US", "PG"), ("US", "NR"), ("US", "PG-13"), ("US", "G")),
+            new ContentPolicy { MaxMovieRating = RatingLevel.ParentalGuidance });
+
+        Assert.Equal(
+            new ContentReason(ContentReasonCode.AboveRatingLimit, "US", "PG-13", RatingLevel.Teen, RatingLevel.ParentalGuidance),
+            decision.Reason);
+    }
+
+    [Fact]
+    public void Missing_region_or_rating_is_treated_as_unrated()
+    {
+        ContentTitle title = new(Movie, [new RegionCertification(null!, "PG"), new RegionCertification("US", null!), null!]);
+
+        ContentDecision decision = Evaluate(title, new ContentPolicy { MaxMovieRating = RatingLevel.Mature });
+
+        Assert.Equal(
+            new ContentDecision(ContentOutcome.NeedsApproval, new ContentReason(ContentReasonCode.Unrated, "US", null, MaxLevel: RatingLevel.Mature)),
+            decision);
+        Assert.Equal(ContentOutcome.NeedsApproval, Evaluate(new ContentTitle(Movie, null!), new ContentPolicy()).Outcome);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(6)]
+    public void Young_age_limits_exclude_tv_y7(int age)
+    {
+        ContentPolicy policy = ContentPolicy.FromAgeLimits(age, age);
+
+        Assert.Equal(ContentOutcome.Blocked, Evaluate(Title(Show, ("US", "TV-Y7")), policy).Outcome);
+        Assert.Equal(ContentOutcome.Allowed, Evaluate(Title(Show, ("US", "TV-G")), policy).Outcome);
+        Assert.Equal(ContentOutcome.Allowed, Evaluate(Title(Movie, ("US", "G")), policy).Outcome);
+    }
+
+    [Fact]
+    public void Age_limit_of_seven_allows_tv_y7() =>
+        Assert.Equal(ContentOutcome.Allowed, Evaluate(Title(Show, ("US", "TV-Y7")), ContentPolicy.FromAgeLimits(null, 7)).Outcome);
+
+    [Theory]
     [InlineData(0, RatingLevel.General)]
-    [InlineData(7, RatingLevel.General)]
+    [InlineData(6, RatingLevel.General)]
+    [InlineData(7, RatingLevel.Children)]
     [InlineData(8, RatingLevel.ParentalGuidance)]
     [InlineData(12, RatingLevel.ParentalGuidance)]
     [InlineData(13, RatingLevel.Teen)]

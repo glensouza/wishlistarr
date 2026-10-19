@@ -3,8 +3,8 @@ namespace Wishlistarr.Core.Content;
 public enum RatingLevel
 {
     Preschool,
-    Children,
     General,
+    Children,
     ParentalGuidance,
     Teen,
     Mature,

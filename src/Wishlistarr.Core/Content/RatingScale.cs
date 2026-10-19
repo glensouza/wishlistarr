@@ -9,7 +9,7 @@ public static class RatingScale
 
     public static IReadOnlyList<string> UsMovieRatings { get; } = ["G", "PG", "PG-13", "R", "NC-17"];
 
-    public static IReadOnlyList<string> UsTvRatings { get; } = ["TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA"];
+    public static IReadOnlyList<string> UsTvRatings { get; } = ["TV-Y", "TV-G", "TV-Y7", "TV-PG", "TV-14", "TV-MA"];
 
     private static readonly Dictionary<string, Dictionary<string, RatingLevel>> RegionRatings = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -36,7 +36,7 @@ public static class RatingScale
         {
             ["G"] = RatingLevel.General,
             ["PG"] = RatingLevel.ParentalGuidance,
-            ["M"] = RatingLevel.Teen,
+            ["M"] = RatingLevel.Mature,
         },
         ["CA"] = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -51,7 +51,8 @@ public static class RatingScale
 
     public static int MinimumAge(RatingLevel level) => level switch
     {
-        RatingLevel.Preschool or RatingLevel.Children or RatingLevel.General => 0,
+        RatingLevel.Preschool or RatingLevel.General => 0,
+        RatingLevel.Children => 7,
         RatingLevel.ParentalGuidance => 8,
         RatingLevel.Teen => 13,
         RatingLevel.Mature => 17,
@@ -75,11 +76,11 @@ public static class RatingScale
         return candidates.Where(level => MinimumAge(level) == threshold).Max();
     }
 
-    public static bool TryParse(string region, string rating, [NotNullWhen(true)] out RatingLevel? level)
+    public static bool TryParse(string? region, string? rating, [NotNullWhen(true)] out RatingLevel? level)
     {
         level = null;
-        string code = region.Trim();
-        string value = rating.Trim();
+        string code = region?.Trim() ?? string.Empty;
+        string value = rating?.Trim() ?? string.Empty;
         if (value.Length == 0)
         {
             return false;

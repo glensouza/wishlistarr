@@ -40,7 +40,7 @@ public sealed class RatingScalePropertyTests
         select new ContentPolicy { MaxMovieRating = movie, MaxTvRating = tv, Unrated = unrated, Region = region };
 
     [Property]
-    public Property Each_us_family_is_strictly_increasing_in_its_listed_order() =>
+    public Property Each_us_family_is_strictly_increasing_in_rank_order() =>
         Prop.ForAll(
             (from family in Gen.Elements(RatingScale.UsMovieRatings, RatingScale.UsTvRatings)
              from lower in Gen.Choose(0, family.Count - 2)
@@ -128,13 +128,18 @@ public sealed class RatingScalePropertyTests
             {
                 ContentTitle title = new(new TitleKey(MediaKind.Show, 1), [.. ratings.Select(rating => new RegionCertification("US", rating))]);
                 ContentDecision decision = ContentPolicyEngine.Default.Evaluate(title, new ContentPolicy { MaxTvRating = max, Unrated = unrated });
-                ContentOutcome expected = unrated switch
-                {
-                    UnratedPolicy.Allow => ContentOutcome.Allowed,
-                    UnratedPolicy.Block => ContentOutcome.Blocked,
-                    _ => ContentOutcome.NeedsApproval,
-                };
-                return decision.Outcome == expected && decision.Reason.Code == ContentReasonCode.Unrated;
+                return decision.Outcome == ExpectedUnrated(unrated) && decision.Reason.Code == ContentReasonCode.Unrated;
+            });
+
+    [Property]
+    public Property Tv_y7_is_allowed_exactly_from_age_seven() =>
+        Prop.ForAll(
+            Gen.Choose(0, 120).ToArbitrary(),
+            age =>
+            {
+                ContentTitle title = new(new TitleKey(MediaKind.Show, 1), [new RegionCertification("US", "TV-Y7")]);
+                ContentDecision decision = ContentPolicyEngine.Default.Evaluate(title, ContentPolicy.FromAgeLimits(null, age));
+                return (decision.Outcome == ContentOutcome.Allowed) == (age >= 7);
             });
 
     [Property]
@@ -149,7 +154,7 @@ public sealed class RatingScalePropertyTests
                 {
                     ContentReasonCode.WithinRatingLimit or ContentReasonCode.NoRatingLimit or ContentReasonCode.ExplicitlyAllowed => decision.Outcome == ContentOutcome.Allowed,
                     ContentReasonCode.AboveRatingLimit => decision.Outcome == ContentOutcome.Blocked && decision.Reason.Level > decision.Reason.MaxLevel,
-                    ContentReasonCode.Unrated => decision.Reason.MaxLevel is not null,
+                    ContentReasonCode.Unrated => decision.Outcome == ExpectedUnrated(policy.Unrated) && decision.Reason.MaxLevel == policy.MaxRatingFor(title.Key.Kind),
                     _ => decision.Outcome == ContentOutcome.Blocked,
                 };
             });
@@ -178,6 +183,13 @@ public sealed class RatingScalePropertyTests
                 return (younger > RatingScale.MinimumAge(RatingLevel.Adult) || RatingScale.MinimumAge(level) >= younger)
                     && level <= RatingScale.LevelForMinimumAge(older);
             });
+
+    private static ContentOutcome ExpectedUnrated(UnratedPolicy unrated) => unrated switch
+    {
+        UnratedPolicy.Allow => ContentOutcome.Allowed,
+        UnratedPolicy.Block => ContentOutcome.Blocked,
+        _ => ContentOutcome.NeedsApproval,
+    };
 
     private static RatingLevel ParseUs(string rating) =>
         RatingScale.TryParse("US", rating, out RatingLevel? level) ? level.Value : throw new ArgumentException(rating);

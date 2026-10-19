@@ -11,7 +11,7 @@ public sealed class ContentPolicyEngine
             throw new ArgumentException("At least one rule is required.", nameof(rules));
         }
 
-        this.rules = rules;
+        this.rules = [.. rules];
     }
 
     public static ContentPolicyEngine Default { get; } = new([new RatingRule()]);

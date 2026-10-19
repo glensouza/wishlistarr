@@ -5,31 +5,40 @@ public sealed class RatingRule : IContentRule
     public ContentDecision Evaluate(ContentTitle title, ContentPolicy policy)
     {
         RatingLevel? max = policy.MaxRatingFor(title.Key.Kind);
-        if (max is null)
-        {
-            return new ContentDecision(ContentOutcome.Allowed, new ContentReason(ContentReasonCode.NoRatingLimit));
-        }
-
+        IEnumerable<RegionCertification> certifications = (title.Certifications ?? []).OfType<RegionCertification>();
         RegionCertification? unrecognized = null;
         foreach (string region in RegionOrder(policy.Region))
         {
-            foreach (RegionCertification certification in title.Certifications.Where(item => item.Region.Trim().Equals(region, StringComparison.OrdinalIgnoreCase)))
+            RegionCertification? strictest = null;
+            RatingLevel strictestLevel = default;
+            foreach (RegionCertification certification in certifications.Where(item => Normalize(item.Region) == region))
             {
-                if (RatingScale.TryParse(region, certification.Rating, out RatingLevel? level))
+                if (!RatingScale.TryParse(region, certification.Rating, out RatingLevel? level))
                 {
-                    bool within = level <= max;
-                    return new ContentDecision(
-                        within ? ContentOutcome.Allowed : ContentOutcome.Blocked,
-                        new ContentReason(
-                            within ? ContentReasonCode.WithinRatingLimit : ContentReasonCode.AboveRatingLimit,
-                            region,
-                            certification.Rating.Trim(),
-                            level,
-                            max));
+                    unrecognized ??= certification;
                 }
-
-                unrecognized ??= certification;
+                else if (strictest is null || level > strictestLevel)
+                {
+                    strictest = certification;
+                    strictestLevel = level.Value;
+                }
             }
+
+            if (strictest is null)
+            {
+                continue;
+            }
+
+            string rating = strictest.Rating.Trim();
+            if (max is null)
+            {
+                return new ContentDecision(ContentOutcome.Allowed, new ContentReason(ContentReasonCode.NoRatingLimit, region, rating, strictestLevel));
+            }
+
+            bool within = strictestLevel <= max;
+            return new ContentDecision(
+                within ? ContentOutcome.Allowed : ContentOutcome.Blocked,
+                new ContentReason(within ? ContentReasonCode.WithinRatingLimit : ContentReasonCode.AboveRatingLimit, region, rating, strictestLevel, max));
         }
 
         ContentOutcome outcome = policy.Unrated switch
@@ -40,13 +49,15 @@ public sealed class RatingRule : IContentRule
         };
         return new ContentDecision(
             outcome,
-            new ContentReason(ContentReasonCode.Unrated, unrecognized?.Region.Trim().ToUpperInvariant(), unrecognized?.Rating.Trim(), MaxLevel: max));
+            new ContentReason(ContentReasonCode.Unrated, unrecognized is null ? null : Normalize(unrecognized.Region), unrecognized?.Rating?.Trim(), MaxLevel: max));
     }
+
+    private static string Normalize(string? region) => region?.Trim().ToUpperInvariant() ?? string.Empty;
 
     private static IEnumerable<string> RegionOrder(string? configured)
     {
         yield return RatingScale.UsRegion;
-        string region = configured?.Trim().ToUpperInvariant() ?? string.Empty;
+        string region = Normalize(configured);
         if (region.Length > 0 && region != RatingScale.UsRegion)
         {
             yield return region;
