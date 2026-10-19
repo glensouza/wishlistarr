@@ -13,7 +13,7 @@ All of these require the Parent role.
 
 The web form picks the Plex user from `GET /api/v1/plex/users` (or None); if Plex is not connected the picker says so and the profile can still be saved without a mapping. `plexUserId` is stored as given, up to 100 characters, and saving never calls Plex.
 
-Names are 1 to 50 characters and unique among active profiles (case-insensitive). Avatars are 1 to 32 lowercase letters, digits or dashes. Age limits are 0 to 21 and a missing limit means no limit. Weekly allowances are 0 to 1000.
+Names are 1 to 50 characters and unique among active profiles (case-insensitive). Avatars are 1 to 32 lowercase letters, digits or dashes. Age limits are 0 to 21 and a missing limit means no rating limit; titles without a usable rating still follow the unrated policy (see [content policy](content-policy.md)). Weekly allowances are 0 to 1000.
 
 ### Plex label
 
