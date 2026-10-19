@@ -8,8 +8,10 @@ using Wishlistarr.Api;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
+using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Core;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Tmdb;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -51,6 +53,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
+builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi(options => options.AddSecuritySchemes());
 

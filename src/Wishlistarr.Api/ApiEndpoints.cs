@@ -1,6 +1,8 @@
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
+using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api;
 
@@ -16,6 +18,7 @@ public static class ApiEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
         v1.MapParentAuth();
+        v1.MapTmdb();
 
         v1.MapGet("/system/status", (SystemStatus status) => status.Get())
             .WithTags("System")
@@ -51,7 +54,7 @@ public static class ApiEndpoints
                     title: $"Keys starting with '{SettingsStore.ReservedPrefix}' are reserved.");
             }
 
-            await store.SetAsync(key, update.Value, update.IsSecret, ct);
+            await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);
             return Results.NoContent();
         })
             .WithName("PutSetting")
