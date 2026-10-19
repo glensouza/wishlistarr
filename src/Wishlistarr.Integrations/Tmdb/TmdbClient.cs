@@ -3,11 +3,10 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace Wishlistarr.Integrations.Tmdb;
 
-public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyProvider keys) : ITmdbClient
+public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProvider keys) : ITmdbClient
 {
     private static readonly TimeSpan SearchLifetime = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan ListLifetime = TimeSpan.FromHours(1);
@@ -85,7 +84,7 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
     public async Task<TmdbCertification?> GetCertificationAsync(TmdbMediaType type, int id, IReadOnlyList<string> regions, CancellationToken ct = default)
     {
         string cacheKey = $"tmdb:cert:{Segment(type)}:{id}";
-        if (!cache.TryGetValue(cacheKey, out IReadOnlyDictionary<string, TmdbCertification>? byRegion) || byRegion is null)
+        if (!cache.TryGet(cacheKey, out IReadOnlyDictionary<string, TmdbCertification>? byRegion) || byRegion is null)
         {
             byRegion = type == TmdbMediaType.Movie
                 ? ReadMovieCertifications(await this.FetchAsync<ReleaseDatesResponse>($"movie/{id}/release_dates", [], ct))
@@ -93,9 +92,9 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
             cache.Set(cacheKey, byRegion, CertificationLifetime);
         }
 
-        foreach (string region in regions)
+        foreach (string? region in regions)
         {
-            if (byRegion.TryGetValue(region.ToUpperInvariant(), out TmdbCertification? certification))
+            if (!string.IsNullOrWhiteSpace(region) && byRegion.TryGetValue(region.ToUpperInvariant(), out TmdbCertification? certification))
             {
                 return certification;
             }
@@ -107,9 +106,9 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
     private static Dictionary<string, TmdbCertification> ReadMovieCertifications(ReleaseDatesResponse response)
     {
         Dictionary<string, TmdbCertification> result = [];
-        foreach (ReleaseDatesRegion region in response.Results)
+        foreach (ReleaseDatesRegion region in (response.Results ?? []).Where(item => !string.IsNullOrWhiteSpace(item.Region)))
         {
-            ReleaseDateEntry? entry = region.ReleaseDates
+            ReleaseDateEntry? entry = (region.ReleaseDates ?? [])
                 .Where(item => !string.IsNullOrWhiteSpace(item.Certification))
                 .OrderBy(item => item.Type == 3 ? 0 : 1)
                 .FirstOrDefault();
@@ -126,7 +125,7 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
     private static Dictionary<string, TmdbCertification> ReadTvCertifications(ContentRatingsResponse response)
     {
         Dictionary<string, TmdbCertification> result = [];
-        foreach (ContentRatingEntry entry in response.Results.Where(item => !string.IsNullOrWhiteSpace(item.Rating)))
+        foreach (ContentRatingEntry entry in (response.Results ?? []).Where(item => !string.IsNullOrWhiteSpace(item.Rating) && !string.IsNullOrWhiteSpace(item.Region)))
         {
             string code = entry.Region.ToUpperInvariant();
             result[code] = new TmdbCertification(code, entry.Rating.Trim(), Clean(entry.Descriptors));
@@ -176,8 +175,8 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
         where T : class
     {
         List<(string Name, string Value)> ordered = [.. parameters.OrderBy(pair => pair.Name, StringComparer.Ordinal)];
-        string cacheKey = $"tmdb:{path}?{string.Join('&', ordered.Select(pair => $"{pair.Name}={pair.Value}"))}";
-        if (cache.TryGetValue(cacheKey, out T? cached) && cached is not null)
+        string cacheKey = $"tmdb:{path}?{string.Join('&', ordered.Select(pair => $"{Uri.EscapeDataString(pair.Name)}={Uri.EscapeDataString(pair.Value)}"))}";
+        if (cache.TryGet(cacheKey, out T? cached) && cached is not null)
         {
             return cached;
         }
@@ -202,11 +201,11 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
     }
 
     private sealed record ReleaseDatesResponse(
-        [property: JsonPropertyName("results")] IReadOnlyList<ReleaseDatesRegion> Results);
+        [property: JsonPropertyName("results")] IReadOnlyList<ReleaseDatesRegion>? Results);
 
     private sealed record ReleaseDatesRegion(
         [property: JsonPropertyName("iso_3166_1")] string Region,
-        [property: JsonPropertyName("release_dates")] IReadOnlyList<ReleaseDateEntry> ReleaseDates);
+        [property: JsonPropertyName("release_dates")] IReadOnlyList<ReleaseDateEntry>? ReleaseDates);
 
     private sealed record ReleaseDateEntry(
         [property: JsonPropertyName("certification")] string Certification,
@@ -214,7 +213,7 @@ public sealed class TmdbClient(HttpClient http, IMemoryCache cache, ITmdbApiKeyP
         [property: JsonPropertyName("type")] int Type);
 
     private sealed record ContentRatingsResponse(
-        [property: JsonPropertyName("results")] IReadOnlyList<ContentRatingEntry> Results);
+        [property: JsonPropertyName("results")] IReadOnlyList<ContentRatingEntry>? Results);
 
     private sealed record ContentRatingEntry(
         [property: JsonPropertyName("iso_3166_1")] string Region,

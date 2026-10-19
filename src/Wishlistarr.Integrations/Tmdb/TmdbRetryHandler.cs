@@ -9,6 +9,7 @@ public sealed class TmdbRetryHandler(IOptions<TmdbOptions> options, TimeProvider
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         TmdbOptions settings = options.Value;
+        TimeSpan waited = TimeSpan.Zero;
         for (int attempt = 0; ; attempt++)
         {
             HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
@@ -18,6 +19,12 @@ public sealed class TmdbRetryHandler(IOptions<TmdbOptions> options, TimeProvider
             }
 
             TimeSpan delay = this.GetDelay(response, attempt, settings);
+            if (waited + delay > settings.MaxTotalRetryDelay)
+            {
+                return response;
+            }
+
+            waited += delay;
             response.Dispose();
             await Task.Delay(delay, time, cancellationToken);
         }

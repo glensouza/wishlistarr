@@ -13,4 +13,8 @@ public sealed class TmdbOptions
     public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(1);
 
     public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    public TimeSpan MaxTotalRetryDelay { get; set; } = TimeSpan.FromSeconds(45);
+
+    public int CacheMaxEntries { get; set; } = 2000;
 }
