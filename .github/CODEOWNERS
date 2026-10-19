@@ -1,0 +1,7 @@
+/.github/ @glensouza
+/.devcontainer/ @glensouza
+**/Security/ @glensouza
+**/Policy/ @glensouza
+**/Labels/ @glensouza
+/src/Wishlistarr.Data/Migrations/ @glensouza
+/docs/authentication.md @glensouza

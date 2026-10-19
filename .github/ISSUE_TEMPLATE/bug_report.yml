@@ -1,0 +1,51 @@
+name: Bug report
+description: Something is not working as expected
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include API keys, tokens, Plex URLs with tokens or real family library data. For security problems, use a private vulnerability report instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Wishlistarr version
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - Docker
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, browser, and the Plex, Sonarr, Radarr or Seerr versions involved.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines with secrets removed.
+      render: text
