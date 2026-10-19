@@ -212,6 +212,12 @@ label {
   background: var(--color-accent);
   color: var(--color-on-accent);
   font-size: 2.75rem;
+  overflow: hidden;
+}
+
+.avatar svg {
+  width: 80%;
+  height: 80%;
 }
 
 .pin-pad {
