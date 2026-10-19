@@ -45,6 +45,12 @@ C# style is defined in `.editorconfig` and enforced as warnings (errors in the b
 
 Wishlistarr does not collect any telemetry or analytics.
 
+## Acknowledgements
+
+<a href="https://www.themoviedb.org/"><img src="site/tmdb.svg" alt="TMDB" width="140"></a>
+
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+
 ## License
 
 Copyright (C) Glen Souza. Licensed under the GNU General Public License v3.0; see [LICENSE](LICENSE).
