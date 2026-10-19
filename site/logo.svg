@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Wishlistarr">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B3DF5"/>
+      <stop offset="1" stop-color="#C13BF0"/>
+    </linearGradient>
+    <linearGradient id="star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE27A"/>
+      <stop offset="1" stop-color="#FFB02E"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <path d="M120 392 C170 330 215 290 262 250" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="14" stroke-linecap="round"/>
+  <path d="M96 340 C140 292 178 262 214 236" fill="none" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="10" stroke-linecap="round"/>
+  <path d="M300 96 L340.4 192.6 L445 201.6 L365.6 269.9 L389.6 372 L300 317.6 L210.4 372 L234.4 269.9 L155 201.6 L259.6 192.6 Z" fill="url(#star)"/>
+  <path d="M276 208 L276 296 L346 252 Z" fill="#5B3DF5"/>
+  <circle cx="404" cy="132" r="9" fill="#FFFFFF"/>
+  <circle cx="148" cy="156" r="6" fill="#FFFFFF" fill-opacity="0.8"/>
+  <circle cx="420" cy="392" r="5" fill="#FFFFFF" fill-opacity="0.7"/>
+</svg>
