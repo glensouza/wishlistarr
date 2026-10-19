@@ -1,0 +1,25 @@
+{
+  "id": 81726354,
+  "code": "x9q2kz7m4w8rv3ntb6hd5yc1p",
+  "product": "Wishlistarr",
+  "trusted": false,
+  "qr": "https://plex.tv/api/v2/pins/qr/x9q2kz7m4w8rv3ntb6hd5yc1p",
+  "clientIdentifier": "{{CLIENT}}",
+  "location": {
+    "code": "US",
+    "european_union_member": false,
+    "continent_code": "NA",
+    "country": "United States",
+    "city": "Springfield",
+    "time_zone": "America/Chicago",
+    "postal_code": "00000",
+    "in_privacy_restricted_country": false,
+    "subdivisions": "Illinois",
+    "coordinates": "0.0000, 0.0000"
+  },
+  "expiresIn": 1800,
+  "createdAt": "{{CREATED}}",
+  "expiresAt": "{{EXPIRES}}",
+  "authToken": {{AUTH_TOKEN}},
+  "newRegistration": null
+}

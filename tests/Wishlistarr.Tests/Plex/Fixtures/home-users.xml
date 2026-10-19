@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaContainer friendlyName="myPlex" identifier="com.plexapp.plugins.myplex" machineIdentifier="0a1b2c3d4e5f6a7b" totalSize="3" size="3">
+  <User id="5551001" uuid="0a1b2c3d4e5f6a7b" admin="1" guest="0" restricted="0" protected="1" title="Parent Fixture" username="parentfixture" email="parent@example.test" thumb="https://plex.tv/users/0a1b2c3d4e5f6a7b/avatar?c=1600000000" />
+  <User id="5551002" uuid="1b2c3d4e5f6a7b8c" admin="0" guest="0" restricted="1" protected="0" title="Sam" username="" email="" thumb="https://plex.tv/users/1b2c3d4e5f6a7b8c/avatar?c=1600000001" />
+  <User id="5551003" uuid="2c3d4e5f6a7b8c9d" admin="0" guest="0" restricted="0" protected="1" title="Alex" username="alexplays" email="alex@example.test" thumb="https://plex.tv/users/2c3d4e5f6a7b8c9d/avatar?c=1600000002" />
+</MediaContainer>
