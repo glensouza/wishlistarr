@@ -8,6 +8,7 @@ Wishlistarr stores its data in a SQLite database inside the data directory (`WIS
 - Removing or reshaping something is done in steps across releases: add the new structure, copy the data across, stop using the old structure. The old structure stays in the schema, unused.
 - Every migration must apply cleanly to a database created by any earlier release.
 - Migrations are append-only. A migration that has shipped in a release is never edited or deleted; fix problems with a new migration.
+- Down methods are never run in production; rollbacks are done by restoring a backup or shipping a forward migration.
 - Each migration is committed together with the model change that produced it, including the generated designer and model snapshot files.
 - Backfills and data conversions live in the migration itself so that startup produces a consistent database.
 

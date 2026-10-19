@@ -15,7 +15,7 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.Host.UseSerilog(
     (context, services, logging) =>
     {
-        DataDirectory directory = DataDirectory.Resolve(context.Configuration, context.HostingEnvironment.ContentRootPath);
+        DataDirectory directory = services.GetRequiredService<DataDirectory>();
         logging
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
@@ -63,7 +63,7 @@ using (IServiceScope scope = app.Services.CreateScope())
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
-app.UseSerilogRequestLogging();
+app.UseSerilogRequestLogging(options => options.Logger = app.Services.GetRequiredService<Serilog.ILogger>());
 app.UseDefaultFiles();
 app.UseStaticFiles();
 

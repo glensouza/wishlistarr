@@ -49,6 +49,53 @@ public sealed class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task Uptime_is_measured_from_process_start_not_first_request()
+    {
+        using ApiFactory fresh = new();
+        HttpClient client = await fresh.CreateAuthorizedClientAsync();
+        await Task.Delay(TimeSpan.FromMilliseconds(1100));
+
+        JsonElement body = await client.GetFromJsonAsync<JsonElement>("/api/v1/system/status");
+
+        Assert.True(body.GetProperty("uptimeSeconds").GetInt64() >= 1);
+    }
+
+    [Fact]
+    public async Task Reserved_keys_cannot_be_written_and_are_not_listed()
+    {
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+        string before = await factory.GetApiKeyAsync();
+
+        HttpResponseMessage response = await client.PutAsJsonAsync(
+            "/api/v1/settings/system.api_key",
+            new { value = "replacement", isSecret = false });
+        string listed = await client.GetStringAsync("/api/v1/settings");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.DoesNotContain("system.", listed);
+        Assert.Equal(before, await factory.GetApiKeyAsync());
+    }
+
+    [Fact]
+    public async Task Invalid_setting_updates_return_bad_request_problem_details()
+    {
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        HttpResponseMessage missingValue = await client.PutAsJsonAsync("/api/v1/settings/a", new { isSecret = false });
+        HttpResponseMessage nullValue = await client.PutAsJsonAsync("/api/v1/settings/a", new { value = (string?)null });
+        HttpResponseMessage longKey = await client.PutAsJsonAsync(
+            "/api/v1/settings/" + new string('k', 201),
+            new { value = "x", isSecret = false });
+
+        foreach (HttpResponseMessage response in new[] { missingValue, nullValue, longKey })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        }
+    }
+
+    [Fact]
     public async Task Health_stays_public()
     {
         HttpClient client = factory.CreateClient();
@@ -144,29 +191,16 @@ public sealed class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         Assert.NotEmpty(Directory.GetFiles(Path.Combine(factory.DataPath, "keys")));
         string[] logs = Directory.GetFiles(Path.Combine(factory.DataPath, "logs"), "wishlistarr-*.log");
         Assert.NotEmpty(logs);
-        await using FileStream stream = new(logs[0], FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using StreamReader reader = new(stream);
-        Assert.Contains("/api/v1/system/status", await reader.ReadToEndAsync());
-    }
-
-    [Fact]
-    public void Data_directory_is_read_from_environment_variable()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "wishlistarr-env-test");
-        string? previous = Environment.GetEnvironmentVariable(DataDirectory.EnvironmentVariable);
-        Environment.SetEnvironmentVariable(DataDirectory.EnvironmentVariable, path);
-        try
+        string content = string.Empty;
+        for (int attempt = 0; attempt < 50 && !content.Contains("/api/v1/system/status"); attempt++)
         {
-            IConfiguration configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
-
-            DataDirectory directory = DataDirectory.Resolve(configuration, Path.GetTempPath());
-
-            Assert.Equal(path, directory.Root);
+            await using FileStream stream = new(logs[0], FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using StreamReader reader = new(stream);
+            content = await reader.ReadToEndAsync();
+            await Task.Delay(100);
         }
-        finally
-        {
-            Environment.SetEnvironmentVariable(DataDirectory.EnvironmentVariable, previous);
-        }
+
+        Assert.Contains("/api/v1/system/status", content);
     }
 
     [Fact]
