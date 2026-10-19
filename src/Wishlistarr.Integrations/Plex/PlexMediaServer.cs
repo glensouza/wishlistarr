@@ -117,12 +117,14 @@ internal sealed partial class PlexMediaServer(
             return null;
         }
 
+        string serverToken = FirstNonEmpty(server.AccessToken)
+            ?? (server.Owned ? token : throw new MediaServerException("Plex did not provide an access token for this shared server."));
         foreach (MediaServerConnection connection in PlexConnections.Order(server))
         {
             if (await servers.GetMachineIdentifierAsync(connection.Uri, clientIdentifier, ct) == server.ClientIdentifier)
             {
                 SelectedMediaServer selected = new(server.ClientIdentifier!, FirstNonEmpty(server.Name) ?? server.ClientIdentifier!, connection);
-                await this.SaveServerAsync(selected, FirstNonEmpty(server.AccessToken) ?? token, ct);
+                await this.SaveServerAsync(selected, serverToken, ct);
                 return selected;
             }
         }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Plex;
 
@@ -11,12 +12,12 @@ public sealed class PlexServerSelectionTests
     {
         PlexResource server = Resource(
             false,
-            Connection("http", "http://203.0.113.10:32400", local: false),
-            Connection("https", "https://relay.plex.direct:8443", local: false, relay: true),
-            Connection("http", "http://192.168.1.20:32400", local: true),
-            Connection("https", "https://203-0-113-10.abc.plex.direct:32400", local: false),
-            Connection("https", "https://fd00--20.abc.plex.direct:32400", local: true, ipv6: true),
-            Connection("https", "https://192-168-1-20.abc.plex.direct:32400", local: true));
+            Connection("http://203.0.113.10:32400", local: false),
+            Connection("https://relay.plex.direct:8443", local: false, relay: true),
+            Connection("http://192.168.1.20:32400", local: true),
+            Connection("https://203-0-113-10.abc.plex.direct:32400", local: false),
+            Connection("https://fd00--20.abc.plex.direct:32400", local: true, ipv6: true),
+            Connection("https://192-168-1-20.abc.plex.direct:32400", local: true));
 
         IReadOnlyList<MediaServerConnection> ordered = PlexConnections.Order(server);
 
@@ -37,8 +38,8 @@ public sealed class PlexServerSelectionTests
     {
         PlexResource server = Resource(
             true,
-            Connection("http", "http://192.168.1.20:32400", local: true),
-            Connection("https", "https://203-0-113-10.abc.plex.direct:32400", local: false));
+            Connection("http://192.168.1.20:32400", local: true),
+            Connection("https://203-0-113-10.abc.plex.direct:32400", local: false));
 
         MediaServerConnection connection = Assert.Single(PlexConnections.Order(server));
 
@@ -114,6 +115,37 @@ public sealed class PlexServerSelectionTests
     }
 
     [Fact]
+    public async Task Shared_server_without_its_own_token_never_receives_the_account_token()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync();
+        JsonArray resources = JsonNode.Parse(harness.Server.ResourcesJson)!.AsArray();
+        resources[0]!["accessToken"] = null;
+        resources[0]!["owned"] = false;
+        harness.Server.ResourcesJson = resources.ToJsonString();
+        await harness.LinkAsync();
+
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Account.SelectServerAsync(FakePlexServer.MachineIdentifier));
+
+        Assert.DoesNotContain(harness.Server.Requests, request => !request.Path.StartsWith("/api/", StringComparison.Ordinal));
+        Assert.Empty(harness.Server.ImpostorRequests);
+        Assert.False(harness.Settings.Values.ContainsKey("plex.server_token"));
+    }
+
+    [Fact]
+    public async Task Owned_server_without_its_own_token_uses_the_account_token()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync();
+        JsonArray resources = JsonNode.Parse(harness.Server.ResourcesJson)!.AsArray();
+        resources[0]!["accessToken"] = null;
+        harness.Server.ResourcesJson = resources.ToJsonString();
+        await harness.LinkAsync();
+
+        Assert.NotNull(await harness.Account.SelectServerAsync(FakePlexServer.MachineIdentifier));
+
+        Assert.Equal(FakePlexServer.AccountToken, harness.Settings.Values["plex.server_token"].Value);
+    }
+
+    [Fact]
     public async Task Unknown_server_and_non_server_devices_are_not_selected()
     {
         await using PlexHarness harness = await PlexHarness.CreateAsync();
@@ -152,6 +184,6 @@ public sealed class PlexServerSelectionTests
     private static PlexResource Resource(bool httpsRequired, params PlexResourceConnection[] connections) =>
         new("Server", "machine", "server", "1.0", true, "token", httpsRequired, connections);
 
-    private static PlexResourceConnection Connection(string protocol, string uri, bool local, bool relay = false, bool ipv6 = false) =>
-        new(protocol, uri, local, relay, ipv6);
+    private static PlexResourceConnection Connection(string uri, bool local, bool relay = false, bool ipv6 = false) =>
+        new(uri, local, relay, ipv6);
 }
