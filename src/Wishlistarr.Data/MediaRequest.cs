@@ -21,6 +21,8 @@ public sealed class MediaRequest
 
     public int RequestCount { get; set; }
 
+    public bool CountsTowardAllowance { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset LastRequestedAt { get; set; }

@@ -31,6 +31,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         TitleKey title,
         string titleName,
         RequestActor actor,
+        bool countsTowardAllowance = false,
         CancellationToken ct = default)
     {
         ValidateActor(actor);
@@ -89,6 +90,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                 Title = titleName.Trim(),
                 State = RequestState.Pending,
                 RequestCount = 1,
+                CountsTowardAllowance = countsTowardAllowance,
                 CreatedAt = now,
                 LastRequestedAt = now,
                 StateChangedAt = now,
