@@ -39,7 +39,7 @@ The API serves the built frontend and exposes `GET /api/health`.
 
 For frontend development, run the API and then `npm run dev` in `web`; the Vite dev server proxies `/api` to `http://localhost:5082`.
 
-Optionally, start both with one command and view logs and traces in the Aspire dashboard:
+Optionally, start both with one command and view logs in the Aspire dashboard:
 
 ```sh
 cd web
