@@ -46,6 +46,9 @@ public sealed class SettingsStore(WishlistarrDbContext db, IDataProtectionProvid
         setting.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
     }
+
+    public async Task DeleteAsync(string key, CancellationToken ct = default) =>
+        await db.Settings.Where(row => row.Key == key).ExecuteDeleteAsync(ct);
 }
 
 public sealed record SettingSummary(string Key, bool IsSecret, string? Value);

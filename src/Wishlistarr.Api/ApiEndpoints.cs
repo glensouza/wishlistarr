@@ -1,7 +1,9 @@
+using Wishlistarr.Api.MediaServers;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api;
@@ -19,6 +21,7 @@ public static class ApiEndpoints
 
         v1.MapParentAuth();
         v1.MapTmdb();
+        v1.MapMediaServer();
 
         v1.MapGet("/system/status", (SystemStatus status) => status.Get())
             .WithTags("System")
@@ -52,6 +55,13 @@ public static class ApiEndpoints
                 return Results.Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: $"Keys starting with '{SettingsStore.ReservedPrefix}' are reserved.");
+            }
+
+            if (key.StartsWith(MediaServerSettings.KeyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: $"Keys starting with '{MediaServerSettings.KeyPrefix}' are managed by the Plex endpoints.");
             }
 
             await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);

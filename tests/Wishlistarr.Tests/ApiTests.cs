@@ -150,22 +150,22 @@ public sealed class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     public async Task Secret_is_encrypted_at_rest_and_not_returned()
     {
         HttpClient client = await factory.CreateAuthorizedClientAsync();
-        const string secret = "plex-token-12345";
+        const string secret = "seerr-key-12345";
 
         HttpResponseMessage put = await client.PutAsJsonAsync(
-            "/api/v1/settings/plex.token",
+            "/api/v1/settings/seerr.api_key",
             new { value = secret, isSecret = true });
-        await client.PutAsJsonAsync("/api/v1/settings/plex.url", new { value = "http://plex:32400", isSecret = false });
+        await client.PutAsJsonAsync("/api/v1/settings/seerr.url", new { value = "http://seerr:5055", isSecret = false });
         string listed = await client.GetStringAsync("/api/v1/settings");
 
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
         Assert.DoesNotContain(secret, listed);
         Assert.DoesNotContain(await factory.GetApiKeyAsync(), listed);
-        Assert.Contains("http://plex:32400", listed);
+        Assert.Contains("http://seerr:5055", listed);
 
         using IServiceScope scope = factory.Services.CreateScope();
         WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
-        Setting stored = await db.Settings.AsNoTracking().SingleAsync(setting => setting.Key == "plex.token");
+        Setting stored = await db.Settings.AsNoTracking().SingleAsync(setting => setting.Key == "seerr.api_key");
         Assert.True(stored.IsSecret);
         Assert.DoesNotContain(secret, stored.Value);
     }
