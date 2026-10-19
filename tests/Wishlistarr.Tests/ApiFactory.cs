@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
+using Wishlistarr.Integrations.Plex;
 
 namespace Wishlistarr.Tests;
 
@@ -37,8 +39,12 @@ public class ApiFactory : WebApplicationFactory<Program>
         return client;
     }
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
         builder.UseSetting("WISHLISTARR_DATA_DIR", this.DataPath);
+        builder.ConfigureTestServices(services => services.Configure<PlexOptions>(options =>
+            options.PlexTvBaseAddress = new Uri("http://127.0.0.1:9/")));
+    }
 
     protected override void Dispose(bool disposing)
     {

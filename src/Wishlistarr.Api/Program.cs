@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.Repositories;
@@ -11,6 +13,7 @@ using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Core;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Tmdb;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -54,6 +57,9 @@ builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
+builder.Services.AddPlex<StoredAppSettings>();
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi(options => options.AddSecuritySchemes());
 
