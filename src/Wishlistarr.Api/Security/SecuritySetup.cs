@@ -33,6 +33,9 @@ public static class SecuritySetup
         services.AddOptions<AuthOptions>()
             .Bind(configuration.GetSection(AuthOptions.SectionName))
             .Validate(options => options.IsValid(), "The Auth configuration section is invalid.")
+            .Validate(
+                options => options.HasTrustedHostsForBypass(),
+                "Auth:TrustedNetworkBypass requires Auth:TrustedHosts to list the host names used to reach Wishlistarr.")
             .ValidateOnStart();
 
         services.AddSingleton<ApiKeyService>();

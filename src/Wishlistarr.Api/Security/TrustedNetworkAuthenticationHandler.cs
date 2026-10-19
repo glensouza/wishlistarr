@@ -14,7 +14,7 @@ public sealed class TrustedNetworkAuthenticationHandler(
 {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!trustedNetworks.Contains(this.Context.Connection.RemoteIpAddress))
+        if (!trustedNetworks.IsTrusted(this.Context))
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }
@@ -32,9 +32,14 @@ public sealed class TrustedNetworks(IOptions<AuthOptions> options)
         ? [.. options.Value.TrustedNetworks.Select(network => IPNetwork.Parse(network))]
         : [];
 
-    public bool Contains(IPAddress? address)
+    private readonly HashSet<string> hosts = new(options.Value.TrustedHosts, StringComparer.OrdinalIgnoreCase);
+
+    public bool IsTrusted(HttpContext context)
     {
-        if (address is null)
+        IPAddress? address = context.Connection.RemoteIpAddress;
+
+        // Checking the Host header stops a DNS-rebinding page from borrowing a trusted browser's address.
+        if (address is null || !this.hosts.Contains(context.Request.Host.Host))
         {
             return false;
         }

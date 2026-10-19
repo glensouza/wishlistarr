@@ -54,6 +54,32 @@ public sealed class TrustedNetworkTests
     }
 
     [Fact]
+    public async Task Bypass_requires_a_trusted_host_name()
+    {
+        using AuthApiFactory factory = Create(enabled: true);
+        await factory.EnsureParentAsync();
+
+        HttpResponseMessage trustedHost = await SendAsync(factory, "192.168.1.5", host: "LOCALHOST:8080");
+        HttpResponseMessage rebound = await SendAsync(factory, "192.168.1.5", host: "attacker.example");
+        HttpResponseMessage address = await SendAsync(factory, "192.168.1.5", host: "192.168.1.10");
+
+        Assert.Equal(HttpStatusCode.OK, trustedHost.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, rebound.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, address.StatusCode);
+    }
+
+    [Fact]
+    public void Bypass_without_trusted_hosts_is_rejected()
+    {
+        Assert.True(new AuthOptions { TrustedHosts = [] }.HasTrustedHostsForBypass());
+        Assert.False(new AuthOptions { TrustedNetworkBypass = true, TrustedNetworks = ["192.168.1.0/24"] }.HasTrustedHostsForBypass());
+        Assert.True(new AuthOptions { TrustedNetworkBypass = true, TrustedHosts = ["wishlistarr.lan"] }.HasTrustedHostsForBypass());
+        Assert.False(new AuthOptions { TrustedHosts = ["*"] }.IsValid());
+        Assert.False(new AuthOptions { TrustedHosts = ["*.lan"] }.IsValid());
+        Assert.False(new AuthOptions { TrustedHosts = ["wishlistarr.lan:8080"] }.IsValid());
+    }
+
+    [Fact]
     public async Task Forwarded_for_is_ignored_without_configured_known_proxies()
     {
         using AuthApiFactory factory = Create(enabled: true);
@@ -111,6 +137,13 @@ public sealed class TrustedNetworkTests
         Assert.False(new AuthOptions { TrustedNetworks = ["not-a-network"] }.IsValid());
         Assert.False(new AuthOptions { TrustedNetworks = ["192.168.1.0/99"] }.IsValid());
         Assert.False(new AuthOptions { KnownProxies = ["proxy.local"] }.IsValid());
+        Assert.False(new AuthOptions { KnownProxies = ["1"] }.IsValid());
+        Assert.False(new AuthOptions { KnownProxies = ["10.1"] }.IsValid());
+        Assert.False(new AuthOptions { KnownProxies = ["0x0a.0.0.1"] }.IsValid());
+        Assert.False(new AuthOptions { TrustedNetworks = ["10.1/16"] }.IsValid());
+        Assert.False(new AuthOptions { TrustedNetworks = ["192.168.1.0"] }.IsValid());
+        Assert.False(new AuthOptions { TrustedNetworks = ["192.168.1.0/+24"] }.IsValid());
+        Assert.True(new AuthOptions { KnownProxies = ["::1", "fd00::2"] }.IsValid());
     }
 
     private static AuthApiFactory Create(bool enabled, string? knownProxy = null)
@@ -119,6 +152,7 @@ public sealed class TrustedNetworkTests
         {
             ["Auth:TrustedNetworkBypass"] = enabled ? "true" : "false",
             ["Auth:TrustedNetworks:0"] = "192.168.1.0/24",
+            ["Auth:TrustedHosts:0"] = "localhost",
         };
         if (knownProxy is not null)
         {
@@ -128,9 +162,18 @@ public sealed class TrustedNetworkTests
         return new AuthApiFactory { Settings = settings };
     }
 
-    private static async Task<HttpResponseMessage> SendAsync(AuthApiFactory factory, string? remoteIp, string? forwardedFor = null)
+    private static async Task<HttpResponseMessage> SendAsync(
+        AuthApiFactory factory,
+        string? remoteIp,
+        string? forwardedFor = null,
+        string? host = null)
     {
         HttpRequestMessage request = new(HttpMethod.Get, "/api/v1/system/status");
+        if (host is not null)
+        {
+            request.Headers.Host = host;
+        }
+
         if (remoteIp is not null)
         {
             request.Headers.Add(AuthApiFactory.RemoteIpHeader, remoteIp);
