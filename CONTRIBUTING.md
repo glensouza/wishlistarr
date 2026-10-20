@@ -19,6 +19,10 @@ You need the .NET SDK 10 and Node.js 24. The README explains how to [run locally
 
 Use a short prefix and a descriptive slug: `feat/plex-label-writer`, `fix/session-expiry`, `docs/setup-guide`, `chore/update-dependencies`.
 
+## Issues and labels
+
+Issues get an `area:` label during triage (`area:backend`, `area:frontend`, `area:security`, `area:integration`, `area:docs`, `area:devops`, `area:testing`). New reports start with `needs-triage` until a maintainer reviews them. Issues suited to newcomers are marked `good first issue`, and `help wanted` marks work that is open to anyone. Find them under [good first issue](https://github.com/glensouza/wishlistarr/labels/good%20first%20issue).
+
 ## Checks
 
 Pull requests must pass CI, which runs the same commands you can run locally:

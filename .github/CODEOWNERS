@@ -5,3 +5,7 @@
 **/Labels/ @glensouza
 /src/Wishlistarr.Data/Migrations/ @glensouza
 /docs/authentication.md @glensouza
+/docs/content-policy.md @glensouza
+/src/Wishlistarr.Api/AuthEndpoints.cs @glensouza
+/src/Wishlistarr.Core/Content/ @glensouza
+/src/Wishlistarr.Core/Kids/PlexLabelRules.cs @glensouza
