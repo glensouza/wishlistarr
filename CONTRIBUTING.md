@@ -21,7 +21,7 @@ Use a short prefix and a descriptive slug: `feat/plex-label-writer`, `fix/sessio
 
 ## Issues and labels
 
-Issues carry an `area:` label (`area:backend`, `area:frontend`, `area:security`, `area:integration`, `area:docs`, `area:devops`, `area:testing`). New reports start with `needs-triage` until a maintainer reviews them. Issues suited to newcomers are marked `good first issue`, and `help wanted` marks work that is open to anyone. Find the newcomer issues at https://github.com/glensouza/wishlistarr/labels/good%20first%20issue.
+Issues get an `area:` label during triage (`area:backend`, `area:frontend`, `area:security`, `area:integration`, `area:docs`, `area:devops`, `area:testing`). New reports start with `needs-triage` until a maintainer reviews them. Issues suited to newcomers are marked `good first issue`, and `help wanted` marks work that is open to anyone. Find them under [good first issue](https://github.com/glensouza/wishlistarr/labels/good%20first%20issue).
 
 ## Checks
 
