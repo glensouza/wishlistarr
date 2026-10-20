@@ -34,6 +34,8 @@ The image is published as `ghcr.io/glensouza/wishlistarr` for `linux/amd64` and 
 | `/data` | | Volume holding the database, keys and logs. Back it up. |
 | `8080` | | Port the web interface and API listen on. |
 
+The container must start as root (do not set `--user`, `user:` or `runAsNonRoot`): the entrypoint applies `PUID`/`PGID` and then drops privileges, so the app itself never runs as root.
+
 The container healthcheck calls `GET /api/health`.
 
 Tags: `1.2.3`, `1.2`, `1` and `latest` for stable releases; pre-releases such as `1.0.0-rc.1` only get their exact tag. See [docs/releasing.md](docs/releasing.md).

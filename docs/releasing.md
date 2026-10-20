@@ -13,6 +13,8 @@ Tags follow [Semantic Versioning](https://semver.org/) with a `v` prefix, for ex
 
 ## Cut a release
 
+Tags must be cut from commits on `main`; the workflow fails otherwise.
+
 1. Make sure `main` is green in CI and contains everything for the release.
 2. Create and push the tag from `main`:
 
@@ -32,11 +34,11 @@ Tags follow [Semantic Versioning](https://semver.org/) with a `v` prefix, for ex
 | Stable, `v1.2.3` | `1.2.3`, `1.2`, `1`, `latest` |
 | Pre-release, `v1.0.0-rc.1` | `1.0.0-rc.1` only |
 
-Pre-releases never move `latest`, `1` or `1.2`, and the GitHub release is marked as a pre-release. Stable releases are marked as the latest release.
+Publishing a stable patch on an older line, such as `v1.1.5` after `v1.2.0`, would still move `latest` and `1`, so avoid it. Pre-releases never move `latest`, `1` or `1.2`, and the GitHub release is marked as a pre-release. Stable releases are marked as the latest release.
 
 ## Version in the app
 
-The workflow passes the tag without its `v` as the `VERSION` build argument, which the Dockerfile hands to `dotnet publish` as the MSBuild `Version`. The app reports it as the assembly informational version, for example in the system status endpoint. Local builds report `0.0.0`.
+The workflow passes the tag without its `v` as the `VERSION` build argument, which the Dockerfile hands to `dotnet publish` as the MSBuild `Version`. The app reports it as the assembly informational version, for example at `GET /api/v1/system/status`, which requires a parent sign-in or the API key. An image built without the `VERSION` build argument reports `0.0.0`; `dotnet run` reports the default assembly version.
 
 To build an image yourself:
 

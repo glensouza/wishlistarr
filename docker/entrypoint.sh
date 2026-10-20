@@ -19,9 +19,17 @@ if [ "$PUID" -eq 0 ] || [ "$PGID" -eq 0 ]; then
     exit 1
 fi
 
-if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
-    ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
-    echo "$TZ" > /etc/timezone
+case "${TZ:-}" in
+    *..*) echo "TZ must not contain '..'" >&2; exit 1 ;;
+esac
+
+if [ -n "${TZ:-}" ]; then
+    if [ -f "/usr/share/zoneinfo/$TZ" ]; then
+        ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+        echo "$TZ" > /etc/timezone
+    else
+        echo "warning: time zone '$TZ' not found, using UTC" >&2
+    fi
 fi
 
 group_name="$(getent group "$PGID" | cut -d: -f1 || true)"
@@ -40,4 +48,4 @@ mkdir -p "$DATA_DIR"
 chown -R "$PUID:$PGID" "$DATA_DIR"
 
 export HOME="$DATA_DIR"
-exec setpriv --reuid="$PUID" --regid="$PGID" --init-groups "$@"
+exec setpriv --reuid="$PUID" --regid="$PGID" --clear-groups "$@"
