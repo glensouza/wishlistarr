@@ -6,6 +6,16 @@ permissions:
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - docs/**
+      - site/**
+      - .github/ISSUE_TEMPLATE/**
+      - .github/workflows/pages.yml
+      - .github/workflows/release.yml
+      - .github/FUNDING.yml
+      - .github/CODEOWNERS
+      - LICENSE
   pull_request:
 
 jobs:
