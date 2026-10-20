@@ -42,6 +42,10 @@ C# style is defined in `.editorconfig` and enforced by the build; see [Code styl
 - Follow the patterns of the surrounding code before introducing new ones.
 - Add or update tests for the behavior you change.
 
+## Releases
+
+Maintainers cut releases by tagging `main`; see [docs/releasing.md](docs/releasing.md).
+
 ## Pull requests
 
 - Keep a pull request to one logical change.

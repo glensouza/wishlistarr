@@ -18,6 +18,28 @@ Wishlistarr is a free and open source request app for families that share a Plex
 
 Wishlistarr is under active development and not yet released.
 
+## Docker
+
+```sh
+cp docker-compose.example.yml compose.yaml
+docker compose up -d
+```
+
+The image is published as `ghcr.io/glensouza/wishlistarr` for `linux/amd64` and `linux/arm64`. See [docker-compose.example.yml](docker-compose.example.yml).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `PUID` / `PGID` | `1000` / `1000` | User and group the app runs as. The data volume is chowned to them at start. Must not be `0`; the app never runs as root. |
+| `TZ` | `UTC` | Time zone, for example `America/Los_Angeles`. |
+| `/data` | | Volume holding the database, keys and logs. Back it up. |
+| `8080` | | Port the web interface and API listen on. |
+
+The container must start as root (do not set `--user`, `user:` or `runAsNonRoot`): the entrypoint applies `PUID`/`PGID` and then drops privileges, so the app itself never runs as root.
+
+The container healthcheck calls `GET /api/health`.
+
+Tags: `1.2.3`, `1.2`, `1` and `latest` for stable releases; pre-releases such as `1.0.0-rc.1` only get their exact tag. See [docs/releasing.md](docs/releasing.md).
+
 ## Requirements
 
 - .NET SDK 10
