@@ -1,13 +1,18 @@
 using System.Diagnostics;
 using System.Reflection;
+using Microsoft.Extensions.Options;
+using Wishlistarr.Api.Jobs;
 
 namespace Wishlistarr.Api.System;
 
-public sealed class SystemStatus(TimeProvider time)
+public sealed class SystemStatus(TimeProvider time, JobRunner jobs, IOptions<JobOptions> jobOptions)
 {
     private readonly DateTimeOffset startedAt = new(Process.GetCurrentProcess().StartTime.ToUniversalTime());
 
-    public StatusResponse Get() => new(GetVersion(), (long)(time.GetUtcNow() - this.startedAt).TotalSeconds);
+    public async Task<StatusResponse> GetAsync(CancellationToken ct = default) => new(
+        GetVersion(),
+        (long)(time.GetUtcNow() - this.startedAt).TotalSeconds,
+        await jobs.ListJobsAsync(jobOptions.Value, ct));
 
     private static string GetVersion()
     {
@@ -17,4 +22,4 @@ public sealed class SystemStatus(TimeProvider time)
     }
 }
 
-public sealed record StatusResponse(string Version, long UptimeSeconds);
+public sealed record StatusResponse(string Version, long UptimeSeconds, IReadOnlyList<JobSummary> Jobs);

@@ -1,3 +1,4 @@
+using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.MediaServers;
 using Wishlistarr.Api.Requests;
@@ -25,11 +26,12 @@ public static class ApiEndpoints
         v1.MapParentKidProfiles();
         v1.MapTmdb();
         v1.MapMediaServer();
+        v1.MapJobs();
 
-        v1.MapGet("/system/status", (SystemStatus status) => status.Get())
+        v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")
             .WithName("GetSystemStatus")
-            .WithSummary("Returns the application version and uptime.")
+            .WithSummary("Returns the application version, uptime and background jobs.")
             .Produces<StatusResponse>();
 
         RouteGroupBuilder settings = v1.MapGroup("/settings").WithTags("Settings");
