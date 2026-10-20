@@ -4,6 +4,9 @@
 
 # Wishlistarr
 
+[![CI](https://github.com/glensouza/wishlistarr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/glensouza/wishlistarr/actions/workflows/ci.yml)
+[![Release](https://github.com/glensouza/wishlistarr/actions/workflows/release.yml/badge.svg)](https://github.com/glensouza/wishlistarr/actions/workflows/release.yml)
+[![Pages](https://github.com/glensouza/wishlistarr/actions/workflows/pages.yml/badge.svg?branch=main)](https://github.com/glensouza/wishlistarr/actions/workflows/pages.yml)
 [![Sponsor](https://img.shields.io/badge/Sponsor-glensouza-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/glensouza)
 
 Seerr, but for kids. They wish, you approve, and Plex stays safe.
