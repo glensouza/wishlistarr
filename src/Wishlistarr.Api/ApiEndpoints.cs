@@ -1,3 +1,4 @@
+using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.MediaServers;
@@ -7,6 +8,7 @@ using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Core.MediaServers;
+using Wishlistarr.Integrations.Arr;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api;
@@ -26,6 +28,7 @@ public static class ApiEndpoints
         v1.MapParentKidProfiles();
         v1.MapTmdb();
         v1.MapMediaServer();
+        v1.MapArr();
         v1.MapJobs();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
@@ -67,6 +70,13 @@ public static class ApiEndpoints
                 return Results.Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: $"Keys starting with '{MediaServerSettings.KeyPrefix}' are managed by the Plex endpoints.");
+            }
+
+            if (ArrSettings.IsManagedKey(key))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Keys starting with 'sonarr.' or 'radarr.' are managed by the Sonarr and Radarr endpoints.");
             }
 
             if (key == KidRequestFlow.TimeZoneSetting && !KidRequestFlow.TryFindTimeZone(update.Value, out _))
