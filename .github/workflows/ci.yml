@@ -10,7 +10,7 @@ on:
 
 jobs:
   dotnet:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -21,7 +21,7 @@ jobs:
       - run: dotnet test --no-build --configuration Release
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
