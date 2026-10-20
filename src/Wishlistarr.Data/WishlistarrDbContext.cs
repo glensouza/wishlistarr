@@ -22,6 +22,8 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<MediaRequestEvent> MediaRequestEvents => this.Set<MediaRequestEvent>();
 
+    public DbSet<JobRun> JobRuns => this.Set<JobRun>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -120,6 +122,15 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(item => item.ActorKind).HasConversion<string>().HasMaxLength(16);
             entity.Property(item => item.ActorName).HasMaxLength(100);
             entity.Property(item => item.Reason).HasMaxLength(500);
+        });
+
+        modelBuilder.Entity<JobRun>(entity =>
+        {
+            entity.Property(run => run.JobName).HasMaxLength(100);
+            entity.Property(run => run.Trigger).HasConversion<string>().HasMaxLength(16);
+            entity.Property(run => run.Outcome).HasConversion<string>().HasMaxLength(16);
+            entity.Property(run => run.Error).HasMaxLength(JobRun.MaxErrorLength);
+            entity.HasIndex(run => new { run.JobName, run.Id });
         });
     }
 }
