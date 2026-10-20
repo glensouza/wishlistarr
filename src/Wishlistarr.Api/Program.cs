@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
+using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
@@ -59,6 +60,7 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SystemStatus>();
+builder.Services.AddBackgroundJobs(builder.Configuration);
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
