@@ -25,20 +25,35 @@ public sealed partial class TmdbDataService(
     {
         TimeSpan keep = await retention.GetAsync(ct);
         DateTimeOffset now = time.GetUtcNow();
+        List<Exception> failures = [];
         foreach (ITmdbDataStore store in stores)
         {
             try
             {
                 await store.RefreshAsync(now - (keep / 2), ct);
             }
-            catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 this.LogRefreshFailed(ex, store.EntityType.Name);
             }
 
-            await store.PurgeExpiredAsync(now - keep, ct);
+            try
+            {
+                await store.PurgeExpiredAsync(now - keep, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                this.LogPurgeFailed(ex, store.EntityType.Name);
+                failures.Add(ex);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("Purging stored TMDB data failed.", failures);
         }
     }
+
 
     public async Task<int> PurgeAllAsync(CancellationToken ct)
     {
@@ -54,6 +69,9 @@ public sealed partial class TmdbDataService(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refreshing stored TMDB data for {Entity} failed; records past the retention are purged regardless.")]
     private partial void LogRefreshFailed(Exception exception, string entity);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Purging stored TMDB data for {Entity} failed.")]
+    private partial void LogPurgeFailed(Exception exception, string entity);
 }
 
 public sealed class TmdbDataPurgeJob(TmdbDataService data) : IBackgroundJob

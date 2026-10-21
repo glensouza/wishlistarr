@@ -30,7 +30,7 @@ public sealed class RetentionHarness : IAsyncDisposable
 
     public ManualTime Time => (ManualTime)this.Provider.GetRequiredService<TimeProvider>();
 
-    public static async Task<RetentionHarness> CreateAsync()
+    public static async Task<RetentionHarness> CreateAsync(Action<IServiceCollection>? configure = null)
     {
         string directory = Directory.CreateTempSubdirectory("wishlistarr-retention").FullName;
         string database = Path.Combine(directory, "retention.db");
@@ -44,6 +44,7 @@ public sealed class RetentionHarness : IAsyncDisposable
         services.AddScoped<SettingsStore>();
         services.AddSingleton<FakeTmdbFinder>();
         services.AddSingleton<ITmdbClient>(provider => provider.GetRequiredService<FakeTmdbFinder>());
+        configure?.Invoke(services);
         services.AddTmdbDataRetention();
 
         ServiceProvider provider = services.BuildServiceProvider();
@@ -252,11 +253,79 @@ public sealed class TmdbRetentionTests
 
         await harness.MaintainAsync();
 
-        LibraryExternalId confirmed = Assert.Single(await harness.GetLookupsAsync());
-        Assert.Equal(("278", now), (confirmed.Value, confirmed.FetchedAt));
+        List<LibraryExternalId> lookups = await harness.GetLookupsAsync();
+        Assert.Equal([("278", (DateTimeOffset?)now), ("999", (DateTimeOffset?)now)], lookups.Select(id => (id.Value, id.FetchedAt)));
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            List<LibraryItem> items = await db.LibraryItems.AsNoTracking().Include(item => item.CanonicalTitle).OrderBy(item => item.RatingKey).ToListAsync();
+            Assert.Equal([278, 999], items.Select(item => item.CanonicalTitle!.TmdbId));
+            Assert.Equal([278, 999], await db.LibraryTitles.OrderBy(title => title.TmdbId).Select(title => title.TmdbId).ToListAsync());
+            return 0;
+        });
         List<MediaRequest> requests = await harness.GetRequestsAsync();
         Assert.Equal(("Fresh title", (DateTimeOffset?)now), (requests.Single(request => request.Id == open).Title, requests.Single(request => request.Id == open).TitleFetchedAt));
         Assert.Equal("Stored title", requests.Single(request => request.Id == closed).Title);
+    }
+
+    [Fact]
+    public async Task A_tmdb_timeout_does_not_stop_expired_data_from_being_purged()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        DateTimeOffset now = harness.Time.GetUtcNow();
+        await harness.AddLegacyItemAsync("1", now - TimeSpan.FromDays(100));
+        await harness.AddRequestAsync(now - TimeSpan.FromDays(100), RequestState.Pending);
+        harness.Tmdb.Failure = new TaskCanceledException("The request timed out.");
+        harness.Tmdb.DetailsFailure = new TaskCanceledException("The request timed out.");
+
+        await harness.MaintainAsync();
+
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.Null(Assert.Single(await harness.GetRequestsAsync()).Title);
+    }
+
+    [Fact]
+    public async Task An_unexpected_refresh_failure_in_one_store_does_not_skip_purging_the_others()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync(
+            services => services.AddScoped<ITmdbDataStore>(_ => new FaultyStore(failRefresh: true, failPurge: false)));
+        DateTimeOffset now = harness.Time.GetUtcNow();
+        await harness.AddLegacyItemAsync("1", now - TimeSpan.FromDays(100));
+        await harness.AddRequestAsync(now - TimeSpan.FromDays(100), RequestState.Labeled);
+
+        await harness.MaintainAsync();
+
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.Null(Assert.Single(await harness.GetRequestsAsync()).Title);
+    }
+
+    [Fact]
+    public async Task A_store_whose_purge_fails_does_not_stop_the_others_but_the_run_still_fails()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync(
+            services => services.AddScoped<ITmdbDataStore>(_ => new FaultyStore(failRefresh: false, failPurge: true)));
+        DateTimeOffset now = harness.Time.GetUtcNow();
+        await harness.AddLegacyItemAsync("1", now - TimeSpan.FromDays(100));
+        await harness.AddRequestAsync(now - TimeSpan.FromDays(100), RequestState.Labeled);
+
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(harness.MaintainAsync);
+
+        Assert.IsType<InvalidOperationException>(Assert.Single(failure.InnerExceptions));
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.Null(Assert.Single(await harness.GetRequestsAsync()).Title);
+    }
+
+    private sealed class FaultyStore(bool failRefresh, bool failPurge) : ITmdbDataStore
+    {
+        public Type EntityType => typeof(FaultyStore);
+
+        public Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct) =>
+            failRefresh ? throw new InvalidOperationException("Refresh failed.") : Task.CompletedTask;
+
+        public Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken ct) =>
+            failPurge ? throw new InvalidOperationException("Purge failed.") : Task.FromResult(0);
+
+        public Task<int> PurgeAllAsync(CancellationToken ct) => Task.FromResult(0);
     }
 
     [Fact]

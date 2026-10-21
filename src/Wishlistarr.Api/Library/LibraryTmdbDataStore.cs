@@ -23,6 +23,7 @@ public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tm
                 .ThenInclude(item => item!.ExternalIds)
                 .Where(row => chunk.Contains(row.Id))
                 .ToListAsync(ct);
+            Dictionary<(MediaKind Kind, int TmdbId), LibraryTitle> created = [];
             foreach (LibraryExternalId row in rows)
             {
                 if (await this.ResolveAsync(row, ct) is not int found)
@@ -34,9 +35,18 @@ public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tm
                 {
                     row.FetchedAt = time.GetUtcNow();
                 }
-                else
+                else if (row.Item is LibraryItem item)
                 {
-                    db.LibraryExternalIds.Remove(row);
+                    row.Value = found.ToString(CultureInfo.InvariantCulture);
+                    row.FetchedAt = time.GetUtcNow();
+                    if (!created.TryGetValue((item.Kind, found), out LibraryTitle? title))
+                    {
+                        title = await db.LibraryTitles.SingleOrDefaultAsync(existing => existing.Kind == item.Kind && existing.TmdbId == found, ct)
+                            ?? db.LibraryTitles.Add(new LibraryTitle { Kind = item.Kind, TmdbId = found }).Entity;
+                        created[(item.Kind, found)] = title;
+                    }
+
+                    item.CanonicalTitle = title;
                 }
             }
 
