@@ -11,7 +11,7 @@ using Wishlistarr.Data;
 namespace Wishlistarr.Data.Migrations
 {
     [DbContext(typeof(WishlistarrDbContext))]
-    [Migration("20261021172949_AddLibraryIndex")]
+    [Migration("20261021180724_AddLibraryIndex")]
     partial class AddLibraryIndex
     {
         /// <inheritdoc />
@@ -347,15 +347,7 @@ namespace Wishlistarr.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
                     b.Property<int>("TmdbId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("Year")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");

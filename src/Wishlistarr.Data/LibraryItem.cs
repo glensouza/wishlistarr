@@ -41,10 +41,6 @@ public sealed class LibraryTitle
 
     public int TmdbId { get; set; }
 
-    public required string Title { get; set; }
-
-    public int? Year { get; set; }
-
     public List<LibraryItem> Items { get; set; } = [];
 }
 

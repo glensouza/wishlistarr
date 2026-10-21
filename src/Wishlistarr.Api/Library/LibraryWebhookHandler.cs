@@ -22,13 +22,15 @@ public sealed class LibraryWebhookHandler(LibraryRefresh refresh, JobRunner jobs
         string? ratingKey = ReadRatingKey(webhookEvent.Payload);
         try
         {
-            if (ratingKey is null)
+            if (ratingKey is not null && await refresh.TryItemAsync(ratingKey, ct))
             {
-                await jobs.StartAsync(LibraryIncrementalRefreshJob.JobName, JobRunTrigger.Webhook, ct);
+                return;
             }
-            else
+
+            JobStartResult started = await jobs.StartAsync(LibraryIncrementalRefreshJob.JobName, JobRunTrigger.Webhook, ct);
+            if (started.Status is JobStartStatus.NotFound or JobStartStatus.Stopping)
             {
-                await refresh.ItemAsync(ratingKey, ct);
+                logger.LogWarning("The library refresh could not be started: {Status}.", started.Status);
             }
         }
         catch (MediaServerNotConfiguredException exception)
@@ -55,6 +57,7 @@ public sealed class LibraryWebhookHandler(LibraryRefresh refresh, JobRunner jobs
         }
         catch (JsonException)
         {
+            // A malformed payload falls back to the incremental refresh.
         }
 
         return null;

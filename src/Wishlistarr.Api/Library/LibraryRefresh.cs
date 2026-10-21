@@ -17,6 +17,8 @@ public sealed class LibraryRefreshGate
         return new Releaser(this.gate);
     }
 
+    public IDisposable? TryEnter() => this.gate.Wait(0) ? new Releaser(this.gate) : null;
+
     private sealed class Releaser(SemaphoreSlim gate) : IDisposable
     {
         public void Dispose() => gate.Release();
@@ -32,9 +34,9 @@ public sealed partial class LibraryRefresh(
     ILogger<LibraryRefresh> logger)
 {
     private const int BatchSize = 200;
-    private static readonly TimeSpan CursorOverlap = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CursorOverlap = TimeSpan.FromSeconds(1);
 
-    private readonly Dictionary<(MediaKind Kind, int TmdbId), LibraryTitle> titles = [];
+    private readonly Dictionary<(MediaKind Kind, int TmdbId), int> titleIds = [];
     private bool tmdbUnavailable;
 
     public async Task FullAsync(CancellationToken ct)
@@ -46,14 +48,14 @@ public sealed partial class LibraryRefresh(
     public async Task IncrementalAsync(CancellationToken ct)
     {
         using IDisposable held = await gate.EnterAsync(ct);
-        LibraryRefreshState? state = await db.LibraryRefreshStates.SingleOrDefaultAsync(ct);
-        if (state?.LastFullRefreshAt is not DateTimeOffset lastFull)
+        LibraryRefreshState? state = await db.LibraryRefreshStates.AsNoTracking().SingleOrDefaultAsync(ct);
+        if (state is not { LastFullRefreshAt: not null, UpdatedCursor: DateTimeOffset cursor })
         {
             await this.RunFullAsync(await scanner.ScanAsync(null, ct), ct);
             return;
         }
 
-        LibraryScan scan = await scanner.ScanAsync(state.UpdatedCursor ?? lastFull - CursorOverlap, ct);
+        LibraryScan scan = await scanner.ScanAsync(cursor - CursorOverlap, ct);
         if (state.ServerId != scan.ServerId)
         {
             await this.RunFullAsync(await scanner.ScanAsync(null, ct), ct);
@@ -62,35 +64,43 @@ public sealed partial class LibraryRefresh(
 
         DateTimeOffset? newest = await this.IndexAsync(scan, null, ct);
         await this.RemoveOrphanTitlesAsync(ct);
-        state.LastIncrementalRefreshAt = time.GetUtcNow();
-        state.UpdatedCursor = Latest(state.UpdatedCursor, newest);
+        LibraryRefreshState current = await db.LibraryRefreshStates.SingleAsync(ct);
+        current.LastIncrementalRefreshAt = time.GetUtcNow();
+        current.UpdatedCursor = Latest(current.UpdatedCursor, newest);
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task ItemAsync(string ratingKey, CancellationToken ct)
+    public async Task<bool> TryItemAsync(string ratingKey, CancellationToken ct)
     {
-        using IDisposable held = await gate.EnterAsync(ct);
-        string? serverId = await db.LibraryRefreshStates.Select(state => state.ServerId).SingleOrDefaultAsync(ct);
-        if (serverId is null)
+        if (gate.TryEnter() is not IDisposable held)
         {
-            return;
+            return false;
         }
 
-        LibrarySnapshot? snapshot = await scanner.GetEntryAsync(ratingKey, ct);
-        if (snapshot is null)
+        using (held)
         {
-            await db.LibraryItems.Where(item => item.ServerId == serverId && item.RatingKey == ratingKey).ExecuteDeleteAsync(ct);
-            await this.RemoveOrphanTitlesAsync(ct);
-            return;
-        }
+            string? serverId = await db.LibraryRefreshStates.Select(state => state.ServerId).SingleOrDefaultAsync(ct);
+            if (serverId is null)
+            {
+                return true;
+            }
 
-        if (snapshot.ServerId != serverId)
-        {
-            return;
-        }
+            LibrarySnapshot? snapshot = await scanner.GetEntryAsync(ratingKey, ct);
+            if (snapshot is null)
+            {
+                await db.LibraryItems.Where(item => item.ServerId == serverId && item.RatingKey == ratingKey).ExecuteDeleteAsync(ct);
+                await this.RemoveOrphanTitlesAsync(ct);
+                return true;
+            }
 
-        await this.UpsertAsync(snapshot.ServerId, [snapshot.Entry], ct);
-        await this.RemoveOrphanTitlesAsync(ct);
+            if (snapshot.ServerId == serverId)
+            {
+                await this.UpsertAsync(snapshot.ServerId, [snapshot.Entry], ct);
+                await this.RemoveOrphanTitlesAsync(ct);
+            }
+
+            return true;
+        }
     }
 
     private static DateTimeOffset? Latest(DateTimeOffset? first, DateTimeOffset? second) =>
@@ -131,6 +141,12 @@ public sealed partial class LibraryRefresh(
     {
         HashSet<string> seen = [];
         DateTimeOffset? newest = await this.IndexAsync(scan, seen, ct);
+
+        if (!scan.Report.Complete || (seen.Count == 0 && await db.LibraryItems.AnyAsync(ct)))
+        {
+            this.LogIncomplete(seen.Count);
+            return;
+        }
 
         await db.LibraryItems.Where(item => item.ServerId != scan.ServerId).ExecuteDeleteAsync(ct);
         var indexed = await db.LibraryItems
@@ -207,6 +223,7 @@ public sealed partial class LibraryRefresh(
         }
 
         await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
     }
 
     private async Task SyncIdsAsync(LibraryItem item, MediaItem media, DateTimeOffset now, CancellationToken ct)
@@ -263,26 +280,35 @@ public sealed partial class LibraryRefresh(
         string? tmdbValue = item.ExternalIds.FirstOrDefault(id => id.Source == LibraryIdSource.Tmdb)?.Value;
         if (tmdbValue is not null && int.TryParse(tmdbValue, NumberStyles.None, CultureInfo.InvariantCulture, out int tmdbId))
         {
-            item.CanonicalTitle = await this.FindTitleAsync(item, tmdbId, ct);
+            item.TitleId = await this.FindTitleIdAsync(item.Kind, tmdbId, ct);
         }
         else
         {
-            item.CanonicalTitle = null;
             item.TitleId = null;
         }
     }
 
-    private async Task<LibraryTitle> FindTitleAsync(LibraryItem item, int tmdbId, CancellationToken ct)
+    private async Task<int> FindTitleIdAsync(MediaKind kind, int tmdbId, CancellationToken ct)
     {
-        if (this.titles.TryGetValue((item.Kind, tmdbId), out LibraryTitle? known))
+        if (this.titleIds.TryGetValue((kind, tmdbId), out int known))
         {
             return known;
         }
 
-        LibraryTitle title = await db.LibraryTitles.SingleOrDefaultAsync(row => row.Kind == item.Kind && row.TmdbId == tmdbId, ct)
-            ?? db.LibraryTitles.Add(new LibraryTitle { Kind = item.Kind, TmdbId = tmdbId, Title = item.Title, Year = item.Year }).Entity;
-        this.titles[(item.Kind, tmdbId)] = title;
-        return title;
+        int? existing = await db.LibraryTitles
+            .Where(row => row.Kind == kind && row.TmdbId == tmdbId)
+            .Select(row => (int?)row.Id)
+            .SingleOrDefaultAsync(ct);
+        if (existing is null)
+        {
+            LibraryTitle created = new() { Kind = kind, TmdbId = tmdbId };
+            db.LibraryTitles.Add(created);
+            await db.SaveChangesAsync(ct);
+            existing = created.Id;
+        }
+
+        this.titleIds[(kind, tmdbId)] = existing.Value;
+        return existing.Value;
     }
 
     private async Task<string?> ResolveTmdbIdAsync(MediaItem media, CancellationToken ct)
@@ -317,6 +343,9 @@ public sealed partial class LibraryRefresh(
 
         return null;
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Library refresh read {Count} items but Plex reported more or the index would be emptied; nothing was removed.")]
+    private partial void LogIncomplete(int count);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Library refresh indexed {Count} items.")]
     private partial void LogRefreshed(int count);

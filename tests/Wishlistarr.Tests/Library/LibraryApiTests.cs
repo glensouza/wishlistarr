@@ -115,6 +115,44 @@ public sealed class LibraryApiTests(LibraryApiFactory factory) : IClassFixture<L
     }
 
     [Fact]
+    public async Task A_plex_library_webhook_does_not_wait_for_a_running_refresh()
+    {
+        factory.Scanner.Entries.Clear();
+        factory.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [new(ExternalIdSource.Tmdb, "603")], updatedAt: Updated));
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+        await RunJobAsync(client, LibraryFullRefreshJob.JobName);
+        factory.Scanner.Entries.Add(FakeScanner.Entry("103", MediaKind.Movie, "Late", [new(ExternalIdSource.Tmdb, "130")], updatedAt: Updated));
+        JobRunner runner = factory.Services.GetRequiredService<JobRunner>();
+        int earlier = (await runner.ListRunsAsync(LibraryIncrementalRefreshJob.JobName, 100)).Count;
+        IDisposable? held = factory.Services.GetRequiredService<LibraryRefreshGate>().TryEnter();
+        Assert.NotNull(held);
+
+        try
+        {
+            HttpResponseMessage response = await this.PostPlexEventAsync(
+                client,
+                $$$"""{"event":"library.new","Metadata":{"ratingKey":"103","note":"{{{Guid.NewGuid():N}}}"}}""");
+
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+            IReadOnlyList<JobRun> runs = await runner.ListRunsAsync(LibraryIncrementalRefreshJob.JobName, 100);
+            for (int attempt = 0; attempt < 100 && runs.Count == earlier; attempt++)
+            {
+                await Task.Delay(50);
+                runs = await runner.ListRunsAsync(LibraryIncrementalRefreshJob.JobName, 100);
+            }
+
+            Assert.Equal(earlier + 1, runs.Count);
+            Assert.Equal((JobRunTrigger.Webhook, JobRunOutcome.Running), (runs[0].Trigger, runs[0].Outcome));
+        }
+        finally
+        {
+            held.Dispose();
+        }
+
+        Assert.Equal("Late", (await this.WaitForItemAsync("103")).Title);
+    }
+
+    [Fact]
     public async Task Refresh_jobs_succeed_quietly_when_plex_is_not_configured()
     {
         using IServiceScope scope = factory.Services.CreateScope();

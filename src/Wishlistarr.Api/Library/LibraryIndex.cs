@@ -8,11 +8,11 @@ namespace Wishlistarr.Api.Library;
 
 public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanner) : ILibraryIndex
 {
+    private Task<string?>? readyServer;
+
     public async Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
     {
-        LibraryRefreshState? state = await db.LibraryRefreshStates.AsNoTracking().SingleOrDefaultAsync(ct);
-        if (state is not { LastFullRefreshAt: not null, ServerId: string serverId }
-            || await scanner.GetServerIdAsync(ct) != serverId)
+        if (await this.GetReadyServerAsync(ct) is not string serverId)
         {
             return null;
         }
@@ -62,6 +62,16 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
             await db.LibraryItems.CountAsync(ct),
             await db.LibraryItems.CountAsync(item => item.TitleId == null, ct),
             await db.LibraryItemLabels.Select(label => label.Label).Distinct().CountAsync(ct));
+    }
+
+    private Task<string?> GetReadyServerAsync(CancellationToken ct) => this.readyServer ??= this.LoadReadyServerAsync(ct);
+
+    private async Task<string?> LoadReadyServerAsync(CancellationToken ct)
+    {
+        LibraryRefreshState? state = await db.LibraryRefreshStates.AsNoTracking().SingleOrDefaultAsync(ct);
+        return state is { LastFullRefreshAt: not null, ServerId: string serverId } && await scanner.GetServerIdAsync(ct) == serverId
+            ? serverId
+            : null;
     }
 
     private static MediaItem ToMediaItem(LibraryItem item) => new(

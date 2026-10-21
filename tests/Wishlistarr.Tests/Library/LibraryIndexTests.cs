@@ -200,7 +200,7 @@ public sealed class LibraryIndexTests
         harness.Time.Advance(TimeSpan.FromDays(1));
         await harness.IncrementalAsync();
 
-        Assert.Equal<DateTimeOffset?>([null, Early], harness.Scanner.Scans);
+        Assert.Equal<DateTimeOffset?>([null, Early - TimeSpan.FromSeconds(1)], harness.Scanner.Scans);
         Assert.Equal("102", Assert.Single(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "2") ?? []).Id);
         Assert.Equal(2, (await harness.GetItemsAsync()).Count);
     }
@@ -311,11 +311,7 @@ public sealed class LibraryIndexTests
 
         harness.Scanner.ServerId = "server-b";
         harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Elsewhere", [Tmdb("129")]));
-        await harness.InScopeAsync(async services =>
-        {
-            await services.GetRequiredService<Wishlistarr.Api.Library.LibraryRefresh>().ItemAsync("102", CancellationToken.None);
-            return 0;
-        });
+        Assert.True(await harness.ItemAsync("102"));
 
         Assert.Equal("101", Assert.Single(await harness.GetItemsAsync()).RatingKey);
     }
@@ -335,6 +331,130 @@ public sealed class LibraryIndexTests
             .SelectMany(item => item.ExternalIds)
             .Where(id => id.Origin == LibraryIdOrigin.TmdbLookup)];
         Assert.NotNull(Assert.Single(derived).FetchedAt);
+    }
+
+    [Fact]
+    public async Task A_single_item_that_plex_no_longer_has_is_removed_with_its_title()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "Keep", [Tmdb("1")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Gone", [Tmdb("2")]));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.RemoveAt(1);
+        Assert.True(await harness.ItemAsync("102"));
+
+        Assert.Equal("101", Assert.Single(await harness.GetItemsAsync()).RatingKey);
+        Assert.Empty(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "2") ?? throw new InvalidOperationException());
+        await harness.InScopeAsync(async services =>
+        {
+            Assert.Equal(1, await services.GetRequiredService<WishlistarrDbContext>().LibraryTitles.CountAsync());
+            return 0;
+        });
+    }
+
+    [Fact]
+    public async Task A_looked_up_tmdb_id_is_dropped_when_plex_starts_reporting_its_own()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("301", MediaKind.Movie, "Legacy", [Imdb("tt0111161")], updatedAt: Early));
+        harness.Tmdb.Known[(TmdbMediaType.Movie, ExternalIdSource.Imdb, "tt0111161")] = 278;
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.Clear();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("301", MediaKind.Movie, "Legacy", [Imdb("tt0111161"), Tmdb("999")], updatedAt: Early.AddHours(1)));
+        harness.Time.Advance(TimeSpan.FromHours(1));
+        await harness.IncrementalAsync();
+
+        LibraryItem item = Assert.Single(await harness.GetItemsAsync());
+        LibraryExternalId tmdb = Assert.Single(item.ExternalIds, id => id.Source == LibraryIdSource.Tmdb);
+        Assert.Equal(("999", LibraryIdOrigin.Plex), (tmdb.Value, tmdb.Origin));
+        Assert.Empty(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "278") ?? throw new InvalidOperationException());
+        Assert.Single(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "999") ?? []);
+    }
+
+    [Fact]
+    public async Task A_looked_up_tmdb_id_is_resolved_again_when_plex_changes_the_legacy_id()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("401", MediaKind.Show, "Rematched", [Tvdb("100")], updatedAt: Early));
+        harness.Tmdb.Known[(TmdbMediaType.Tv, ExternalIdSource.Tvdb, "100")] = 1;
+        harness.Tmdb.Known[(TmdbMediaType.Tv, ExternalIdSource.Tvdb, "200")] = 2;
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.Clear();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("401", MediaKind.Show, "Rematched", [Tvdb("200")], updatedAt: Early.AddHours(1)));
+        harness.Time.Advance(TimeSpan.FromHours(1));
+        await harness.IncrementalAsync();
+
+        Assert.Empty(await harness.FindAsync(MediaKind.Show, ExternalIdSource.Tmdb, "1") ?? throw new InvalidOperationException());
+        Assert.Equal("401", Assert.Single(await harness.FindAsync(MediaKind.Show, ExternalIdSource.Tmdb, "2") ?? []).Id);
+    }
+
+    [Fact]
+    public async Task An_item_updated_in_the_same_second_as_the_cursor_is_still_picked_up()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "First", [Tmdb("1")], updatedAt: Early));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Same second", [Tmdb("2")], updatedAt: Early));
+        await harness.IncrementalAsync();
+
+        Assert.Equal("102", Assert.Single(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "2") ?? []).Id);
+    }
+
+    [Fact]
+    public async Task An_incomplete_full_scan_does_not_prune_or_mark_the_index_ready()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "One", [Tmdb("1")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Two", [Tmdb("2")]));
+        harness.Scanner.Complete = false;
+        await harness.FullAsync();
+        Assert.Null(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "1"));
+
+        harness.Scanner.Complete = true;
+        await harness.FullAsync();
+        harness.Scanner.Entries.RemoveAt(1);
+        harness.Scanner.Complete = false;
+        await harness.FullAsync();
+
+        Assert.Equal(["101", "102"], (await harness.GetItemsAsync()).Select(item => item.RatingKey));
+    }
+
+    [Fact]
+    public async Task A_full_scan_that_returns_nothing_does_not_empty_a_populated_index()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "One", [Tmdb("1")]));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.Clear();
+        await harness.FullAsync();
+
+        Assert.Single(await harness.GetItemsAsync());
+        Assert.NotNull(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "1"));
+    }
+
+    [Fact]
+    public async Task Large_refreshes_span_batches_and_share_titles_between_them()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        for (int number = 0; number < 450; number++)
+        {
+            harness.Scanner.Entries.Add(FakeScanner.Entry($"{1000 + number}", MediaKind.Movie, $"Movie {number}", [Tmdb($"{1 + (number % 300)}")], ["Kids-Ada"]));
+        }
+
+        await harness.FullAsync();
+
+        Assert.Equal(450, (await harness.GetItemsAsync()).Count);
+        Assert.Equal(2, (await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "1") ?? []).Count);
+        await harness.InScopeAsync(async services =>
+        {
+            Assert.Equal(300, await services.GetRequiredService<WishlistarrDbContext>().LibraryTitles.CountAsync());
+            return 0;
+        });
     }
 
     private static async Task<string> QueryPlanAsync(LibraryHarness harness, string sql)

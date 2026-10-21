@@ -33,9 +33,7 @@ public partial class AddLibraryIndex : Migration
                 Id = table.Column<int>(type: "INTEGER", nullable: false)
                     .Annotation("Sqlite:Autoincrement", true),
                 Kind = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
-                TmdbId = table.Column<int>(type: "INTEGER", nullable: false),
-                Title = table.Column<string>(type: "TEXT", maxLength: 500, nullable: false),
-                Year = table.Column<int>(type: "INTEGER", nullable: true)
+                TmdbId = table.Column<int>(type: "INTEGER", nullable: false)
             },
             constraints: table =>
             {

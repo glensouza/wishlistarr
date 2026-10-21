@@ -181,7 +181,6 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
         modelBuilder.Entity<LibraryTitle>(entity =>
         {
             entity.Property(title => title.Kind).HasConversion<string>().HasMaxLength(16);
-            entity.Property(title => title.Title).HasMaxLength(500);
             entity.HasIndex(title => new { title.Kind, title.TmdbId }).IsUnique();
         });
 

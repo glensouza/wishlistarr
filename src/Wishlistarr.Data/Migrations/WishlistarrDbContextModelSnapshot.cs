@@ -344,15 +344,7 @@ namespace Wishlistarr.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
                     b.Property<int>("TmdbId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("Year")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");

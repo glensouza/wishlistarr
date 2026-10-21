@@ -19,6 +19,8 @@ public sealed class FakeScanner : ILibraryScanner
 
     public string? SelectedServerId { get; set; }
 
+    public bool Complete { get; set; } = true;
+
     public List<LibraryEntry> Entries { get; } = [];
 
     public List<DateTimeOffset?> Scans { get; } = [];
@@ -39,8 +41,11 @@ public sealed class FakeScanner : ILibraryScanner
     public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
     {
         this.Scans.Add(updatedSince);
-        IEnumerable<LibraryEntry> matching = this.Entries.Where(entry => updatedSince is null || entry.UpdatedAt >= updatedSince);
-        return Task.FromResult(new LibraryScan(this.ServerId, matching.ToList().ToAsyncEnumerable()));
+        IEnumerable<LibraryEntry> matching = this.Entries.Where(entry => updatedSince is null || entry.UpdatedAt > updatedSince);
+        return Task.FromResult(new LibraryScan(this.ServerId, matching.ToList().ToAsyncEnumerable())
+        {
+            Report = new LibraryScanReport { Complete = this.Complete },
+        });
     }
 
     public Task<string?> GetServerIdAsync(CancellationToken ct = default) => Task.FromResult<string?>(this.SelectedServerId ?? this.ServerId);
@@ -200,6 +205,9 @@ public sealed class LibraryHarness : IAsyncDisposable
         await services.GetRequiredService<LibraryRefresh>().IncrementalAsync(CancellationToken.None);
         return 0;
     });
+
+    public Task<bool> ItemAsync(string ratingKey) =>
+        this.InScopeAsync(services => services.GetRequiredService<LibraryRefresh>().TryItemAsync(ratingKey, CancellationToken.None));
 
     public Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalIdSource source, string value) =>
         this.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindAsync(kind, new ExternalId(source, value)));
