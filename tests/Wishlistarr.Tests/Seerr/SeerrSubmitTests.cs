@@ -246,4 +246,49 @@ public sealed class SeerrSubmitTests
         Assert.True(result.Attached);
         Assert.Single(harness.Server.Sent("POST", "/api/v1/request"));
     }
+
+    [Fact]
+    public async Task A_blocklisted_season_in_seerr_counts_as_covered()
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.SetSeasonStatus(FakeSeerrServer.ShowTmdbId, 1, FakeSeerrServer.MediaBlocklisted);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1]));
+
+        Assert.Null(result.Id);
+        Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
+    }
+
+    [Fact]
+    public async Task A_deleted_season_in_overseerr_is_requested_again()
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Overseerr = true;
+        harness.Server.SetSeasonStatus(FakeSeerrServer.ShowTmdbId, 1, FakeSeerrServer.OverseerrMediaDeleted);
+        harness.Server.SetSeasonStatus(FakeSeerrServer.ShowTmdbId, 2, FakeSeerrServer.MediaAvailable);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1, 2]));
+
+        Assert.NotNull(result.Id);
+        Assert.False(result.Attached);
+        Assert.Single(harness.Server.Sent("POST", "/api/v1/request"));
+    }
+
+    [Theory]
+    [InlineData(false, FakeSeerrServer.MediaBlocklisted, SeerrAvailability.Blocklisted)]
+    [InlineData(false, FakeSeerrServer.MediaDeleted, SeerrAvailability.Deleted)]
+    [InlineData(true, FakeSeerrServer.OverseerrMediaDeleted, SeerrAvailability.Deleted)]
+    [InlineData(true, 7, SeerrAvailability.Unknown)]
+    [InlineData(true, FakeSeerrServer.MediaAvailable, SeerrAvailability.Available)]
+    public async Task Media_status_numbers_follow_the_servers_flavour(bool overseerr, int status, SeerrAvailability expected)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Overseerr = overseerr;
+        int id = harness.Server.SeedRequest("movie", FakeSeerrServer.MovieTmdbId);
+        harness.Server.SetMediaStatus("movie", FakeSeerrServer.MovieTmdbId, status);
+
+        SeerrTrackedRequest tracked = await harness.Backend.GetRequestAsync(id);
+
+        Assert.Equal(expected, tracked.Availability);
+    }
 }

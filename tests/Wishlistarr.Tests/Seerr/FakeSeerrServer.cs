@@ -44,6 +44,7 @@ public sealed class FakeSeerrServer : IAsyncDisposable
     public const int MediaAvailable = 5;
     public const int MediaBlocklisted = 6;
     public const int MediaDeleted = 7;
+    public const int OverseerrMediaDeleted = 6;
 
     private static readonly int[] ShowSeasons = [1, 2, 3];
 
@@ -82,6 +83,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
     public Uri? RedirectTo { get; set; }
 
     public string? PathBase { get; set; }
+
+    public bool Overseerr { get; set; }
 
     public Action? BeforeNextCreate { get; set; }
 
@@ -342,6 +345,17 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             return new Reply(StatusCodes.Status200OK, status);
         }
 
+        if (path == "/api/v1/settings/public" && method == "GET")
+        {
+            JsonObject settings = new() { ["applicationTitle"] = "Fixture", ["initialized"] = true };
+            if (!this.Overseerr)
+            {
+                settings["mediaServerType"] = 1;
+            }
+
+            return new Reply(StatusCodes.Status200OK, settings);
+        }
+
         int actor = AdminUserId;
         if (request.ApiUser is not null && !int.TryParse(request.ApiUser, NumberStyles.None, CultureInfo.InvariantCulture, out actor))
         {
@@ -434,7 +448,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
         bool approved = Has(this.users[actor], AutoApprove | ManageRequests | (movie ? AutoApproveMovie : AutoApproveTv));
         StoredMedia media = this.MediaFor(mediaType, tmdbId);
-        if (media.Status is MediaUnknown or MediaDeleted)
+        int deleted = this.Overseerr ? OverseerrMediaDeleted : MediaDeleted;
+        if (media.Status == MediaUnknown || media.Status == deleted)
         {
             media.Status = MediaPending;
         }
@@ -467,7 +482,7 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             HashSet<int> covered = [.. existing
                 .Where(item => item.Status is not (RequestDeclined or RequestCompleted))
                 .SelectMany(item => item.Seasons)];
-            covered.UnionWith(media.Seasons.Where(pair => pair.Value is not (MediaUnknown or MediaDeleted)).Select(pair => pair.Key));
+            covered.UnionWith(media.Seasons.Where(pair => pair.Value != MediaUnknown && pair.Value != deleted).Select(pair => pair.Key));
             seasons = [.. requested.Where(season => !covered.Contains(season))];
             if (seasons.Length == 0)
             {

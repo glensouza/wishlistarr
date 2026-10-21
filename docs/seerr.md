@@ -20,7 +20,7 @@ Wishlistarr can attach to requests in Seerr, and in Overseerr or Jellyseerr whic
 
 A Seerr API key on its own acts as the first admin account. New requests are therefore sent with the `X-Api-User` header set to the configured user id, so Seerr applies that user's permissions, quotas and auto-approval, and records them as the requester. The request body never carries `userId`, which Seerr only accepts from a caller with Manage Users or Manage Requests.
 
-Reads (the status, the user lookup, title details and request tracking) are made with the key alone. They do not depend on the user's permissions, and tracking can then read a request another Seerr user made.
+Reads (the status, the public settings, the user lookup, title details and request tracking) are made with the key alone. They do not depend on the user's permissions, and tracking can then read a request another Seerr user made.
 
 ## Test button
 
@@ -43,7 +43,7 @@ Before creating anything, the title is read from Seerr and an existing request i
 
 - Declined requests and 4K requests are ignored.
 - For a movie, a pending, approved or failed request is attached. A completed request is attached only while the movie is still available; when the movie was deleted, a new request is made.
-- For a show, the requested seasons must all be covered, either by pending, approved or failed requests or by seasons Seerr already lists as pending, processing, partially available or available. When they are, a request that holds one of those seasons is attached. When some are missing, a new request is made and Seerr keeps only the missing seasons on it.
+- For a show, the requested seasons must all be covered, either by pending, approved or failed requests or by seasons Seerr already lists with any status other than unknown or deleted, which is the rule Seerr itself applies. When they are, a request that holds one of those seasons is attached. When some are missing, a new request is made and Seerr keeps only the missing seasons on it.
 - When several requests match, the configured user's own request is preferred, then the oldest.
 - A title that is already available without a matching request is not requested again. The response then has no `id` or `status`.
 
@@ -79,7 +79,7 @@ The response is `{ "id", "status", "availability", "attached" }`. `attached` is 
 | 7 | `deleted` |
 | other | `unknown` |
 
-These are Seerr's values. Overseerr has no blocklist and uses 6 for deleted, so a deleted title in Overseerr is reported as `blocklisted`. Either way the title is not in the library and is not on its way.
+These are Seerr's and Jellyseerr's values. Overseerr has no blocklist and uses 6 for deleted. Before requesting or tracking, Wishlistarr reads `/api/v1/settings/public`: only Seerr and Jellyseerr report `mediaServerType` there, so when it is missing a 6 is read as `deleted` and a 7 as `unknown`. The version number cannot be used for this because develop builds report `develop-<commit>`.
 
 ## Errors
 

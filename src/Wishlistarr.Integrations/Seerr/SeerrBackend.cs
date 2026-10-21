@@ -11,6 +11,9 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
     public const string MovieAutoApproveWarning = "This user lacks auto-approve for movies, so movie requests made for them will wait for approval.";
     public const string ShowAutoApproveWarning = "This user lacks auto-approve for shows, so show requests made for them will wait for approval.";
     public const string MovieRequestWarning = "This user cannot request movies, so Seerr will refuse movie requests made for them.";
+    private const int UnknownStatus = (int)SeerrAvailability.Unknown;
+    private const int OverseerrDeletedStatus = 6;
+
     public const string ShowRequestWarning = "This user cannot request shows, so Seerr will refuse show requests made for them.";
 
     public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
@@ -64,9 +67,10 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         int[]? seasons = request.Kind == MediaKind.Show && request.Seasons is { Count: > 0 } given ? [.. given.Distinct().Order()] : null;
         SeerrConnection connection = await this.RequireAsync(ct);
         string mediaType = request.Kind == MediaKind.Movie ? "movie" : "tv";
+        ServerFlavour flavour = await this.FlavourAsync(connection, ct);
         JsonNode? title = await this.TitleAsync(connection, mediaType, request.TmdbId, ct);
         IReadOnlyList<int>? wanted = request.Kind == MediaKind.Show ? seasons ?? AllSeasons(title) : null;
-        if (Existing(title, request.Kind, wanted, connection.UserId) is { } existing)
+        if (Existing(title, request.Kind, wanted, connection.UserId, flavour) is { } existing)
         {
             return existing;
         }
@@ -88,13 +92,13 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         }
         catch (SeerrException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
         {
-            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, ct)
+            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, ct)
                 ?? throw new SeerrException("Seerr says a request for that title already exists but did not list it.");
         }
 
         if (created.Status == HttpStatusCode.Accepted)
         {
-            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, ct)
+            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, ct)
                 ?? throw new SeerrException("Seerr had no seasons of that show left to request.");
         }
 
@@ -103,7 +107,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             throw new SeerrException("Seerr did not return a request id.");
         }
 
-        return new SeerrSubmission(id, RequestStatus(created.Body?["status"]), Availability(created.Body?["media"]?["status"]), false);
+        return new SeerrSubmission(id, RequestStatus(created.Body?["status"]), Availability(created.Body?["media"]?["status"], flavour), false);
     }
 
     public async Task<SeerrTrackedRequest> GetRequestAsync(int requestId, CancellationToken ct = default)
@@ -114,6 +118,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         }
 
         SeerrConnection connection = await this.RequireAsync(ct);
+        ServerFlavour flavour = await this.FlavourAsync(connection, ct);
         JsonNode? body;
         try
         {
@@ -129,7 +134,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             throw new SeerrException("Seerr did not return a request id.");
         }
 
-        return new SeerrTrackedRequest(id, RequestStatus(body?["status"]), Availability(body?["media"]?["status"]));
+        return new SeerrTrackedRequest(id, RequestStatus(body?["status"]), Availability(body?["media"]?["status"], flavour));
     }
 
     private async Task<SeerrConnection> RequireAsync(CancellationToken ct) =>
@@ -159,14 +164,14 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         }
     }
 
-    private static SeerrSubmission? Existing(JsonNode? title, MediaKind kind, IReadOnlyList<int>? wanted, int userId)
+    private static SeerrSubmission? Existing(JsonNode? title, MediaKind kind, IReadOnlyList<int>? wanted, int userId, ServerFlavour flavour)
     {
         if (title?["mediaInfo"] is not JsonObject media)
         {
             return null;
         }
 
-        SeerrAvailability availability = Availability(media["status"]);
+        SeerrAvailability availability = Availability(media["status"], flavour);
         ExistingRequest[] requests = media["requests"] is JsonArray list
             ? [.. list.Select(ParseRequest).OfType<ExistingRequest>().Where(item => !item.Is4k && item.Status != SeerrRequestStatus.Declined)]
             : [];
@@ -189,8 +194,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         if (media["seasons"] is JsonArray mediaSeasons)
         {
             covered.UnionWith(mediaSeasons
-                .Where(season => Availability(season?["status"]) is SeerrAvailability.Pending or SeerrAvailability.Processing
-                    or SeerrAvailability.PartiallyAvailable or SeerrAvailability.Available)
+                .Where(season => Int(season?["status"]) is int status && status != UnknownStatus && status != flavour.DeletedStatus)
                 .Select(season => Int(season?["seasonNumber"]))
                 .OfType<int>());
         }
@@ -246,11 +250,23 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         string mediaType,
         int tmdbId,
         IReadOnlyList<int>? wanted,
+        ServerFlavour flavour,
         CancellationToken ct)
     {
         JsonNode? title = await this.TitleAsync(connection, mediaType, tmdbId, ct);
         IReadOnlyList<int>? seasons = kind == MediaKind.Show ? wanted ?? AllSeasons(title) : null;
-        return Existing(title, kind, seasons, connection.UserId);
+        return Existing(title, kind, seasons, connection.UserId, flavour);
+    }
+
+    private async Task<ServerFlavour> FlavourAsync(SeerrConnection connection, CancellationToken ct)
+    {
+        JsonNode? settings = await client.SendAsync(connection, HttpMethod.Get, "api/v1/settings/public", null, ct);
+
+        // Only Jellyseerr and Seerr report mediaServerType; they number media statuses with blocklisted at 6 and deleted at 7,
+        // while Overseerr uses 6 for deleted. Version strings cannot tell them apart on develop builds.
+        bool blocklist = settings?["mediaServerType"] is not null;
+        bool specials = settings?["enableSpecialEpisodes"] is not JsonValue flag || !flag.TryGetValue(out bool enabled) || enabled;
+        return new ServerFlavour(blocklist, specials);
     }
 
     private async Task<JsonNode?> TitleAsync(SeerrConnection connection, string mediaType, int tmdbId, CancellationToken ct)
@@ -275,10 +291,22 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         throw new SeerrException("Seerr returned something unexpected.");
     }
 
-    private static SeerrAvailability Availability(JsonNode? node) =>
-        node is JsonValue value && value.TryGetValue(out int code) && Enum.IsDefined((SeerrAvailability)code)
-            ? (SeerrAvailability)code
-            : SeerrAvailability.Unknown;
+    private static SeerrAvailability Availability(JsonNode? node, ServerFlavour flavour)
+    {
+        if (node is not JsonValue value || !value.TryGetValue(out int code))
+        {
+            return SeerrAvailability.Unknown;
+        }
+
+        if (!flavour.Blocklist)
+        {
+            return code == OverseerrDeletedStatus ? SeerrAvailability.Deleted
+                : code < OverseerrDeletedStatus && Enum.IsDefined((SeerrAvailability)code) ? (SeerrAvailability)code
+                : SeerrAvailability.Unknown;
+        }
+
+        return Enum.IsDefined((SeerrAvailability)code) ? (SeerrAvailability)code : SeerrAvailability.Unknown;
+    }
 
     private static long Permissions(JsonNode? node)
     {
@@ -307,6 +335,11 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         node is JsonValue value && value.TryGetValue(out string? text) && !string.IsNullOrWhiteSpace(text) ? text : null;
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed)
+    {
+        public int DeletedStatus => this.Blocklist ? (int)SeerrAvailability.Deleted : OverseerrDeletedStatus;
+    }
 
     private sealed record ExistingRequest(int Id, SeerrRequestStatus Status, bool Is4k, HashSet<int> Seasons, int? RequestedBy);
 }
