@@ -86,6 +86,23 @@ public sealed class SeerrApiTests
     }
 
     [Fact]
+    public async Task An_unknown_season_is_a_bad_request()
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/seerr/requests",
+            new { kind = "show", tmdbId = FakeSeerrServer.ShowTmdbId, seasons = new[] { 12 } });
+        JsonElement problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("That show has no season 12.", problem.GetProperty("title").GetString());
+        Assert.Empty(fake.Sent("POST", "/api/v1/request"));
+    }
+
+    [Fact]
     public async Task A_user_who_cannot_request_gets_seerrs_reason()
     {
         using ApiFactory factory = new();

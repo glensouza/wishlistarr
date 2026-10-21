@@ -69,6 +69,11 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         string mediaType = request.Kind == MediaKind.Movie ? "movie" : "tv";
         ServerFlavour flavour = await this.FlavourAsync(connection, ct);
         JsonNode? title = await this.TitleAsync(connection, mediaType, request.TmdbId, ct);
+        if (seasons is not null)
+        {
+            CheckSeasons(seasons, title, flavour);
+        }
+
         IReadOnlyList<int>? wanted = request.Kind == MediaKind.Show ? seasons ?? AllSeasons(title) : null;
         if (Existing(title, request.Kind, wanted, connection.UserId, flavour) is { } existing)
         {
@@ -227,6 +232,23 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             : [];
         bool is4k = node?["is4k"] is JsonValue flag && flag.TryGetValue(out bool value) && value;
         return new ExistingRequest(id, RequestStatus(node?["status"]), is4k, seasons, Int(node?["requestedBy"]?["id"]));
+    }
+
+    private static void CheckSeasons(int[] seasons, JsonNode? title, ServerFlavour flavour)
+    {
+        if (!flavour.SpecialsAllowed && seasons.Contains(0))
+        {
+            throw new ArgumentException("Seerr has special episodes turned off, so season 0 cannot be requested.");
+        }
+
+        int[] known = title?["seasons"] is JsonArray list ? [.. list.Select(season => Int(season?["seasonNumber"])).OfType<int>()] : [];
+        int[] unknown = [.. seasons.Where(season => !known.Contains(season))];
+        if (known.Length > 0 && unknown.Length > 0)
+        {
+            throw new ArgumentException(unknown.Length == 1
+                ? $"That show has no season {Number(unknown[0])}."
+                : $"That show has no seasons {string.Join(", ", unknown.Select(Number))}.");
+        }
     }
 
     private static int[]? AllSeasons(JsonNode? title)

@@ -39,6 +39,8 @@ It answers `409` when nothing is saved and `502` when Seerr cannot be reached, r
 
 `POST /api/v1/seerr/requests` takes `{ "kind": "movie", "tmdbId": 603 }` or `{ "kind": "show", "tmdbId": 1399, "seasons": [1, 2] }`. Season numbers are sent once each in ascending order. A show with no seasons, or an empty list, is requested with `"seasons": "all"`, which Seerr expands to every season except specials. Only non-4K requests are made.
 
+Given seasons are checked against the show's seasons as Seerr lists them, and a season the show does not have is refused with `400`. Season 0 holds specials. Seerr drops it from a request when special episodes are turned off, so it is refused with `400` when Seerr's public settings report `enableSpecialEpisodes` as false. Overseerr has no such setting and accepts it.
+
 Before creating anything, the title is read from Seerr and an existing request is attached when it matches:
 
 - Declined requests and 4K requests are ignored.

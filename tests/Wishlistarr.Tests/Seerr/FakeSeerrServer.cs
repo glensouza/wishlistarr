@@ -86,6 +86,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
     public bool Overseerr { get; set; }
 
+    public bool EnableSpecialEpisodes { get; set; }
+
     public Action? BeforeNextCreate { get; set; }
 
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
@@ -351,6 +353,7 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             if (!this.Overseerr)
             {
                 settings["mediaServerType"] = 1;
+                settings["enableSpecialEpisodes"] = this.EnableSpecialEpisodes;
             }
 
             return new Reply(StatusCodes.Status200OK, settings);
@@ -477,6 +480,11 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             else
             {
                 return Message(StatusCodes.Status500InternalServerError, "Cannot read properties of undefined (reading 'filter')");
+            }
+
+            if (!this.Overseerr && !this.EnableSpecialEpisodes)
+            {
+                requested = [.. requested.Where(season => season > 0)];
             }
 
             HashSet<int> covered = [.. existing

@@ -291,4 +291,59 @@ public sealed class SeerrSubmitTests
 
         Assert.Equal(expected, tracked.Availability);
     }
+
+    [Theory]
+    [InlineData(new[] { 0 })]
+    [InlineData(new[] { 0, 1 })]
+    public async Task Specials_are_refused_when_seerr_has_them_turned_off(int[] seasons)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.SeedRequest("tv", FakeSeerrServer.ShowTmdbId, seasons: [1]);
+
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(
+            () => harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, seasons)));
+
+        Assert.Equal("Seerr has special episodes turned off, so season 0 cannot be requested.", error.Message);
+        Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Specials_are_requested_when_the_server_allows_them(bool overseerr)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Overseerr = overseerr;
+        harness.Server.EnableSpecialEpisodes = true;
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [0]));
+
+        Assert.NotNull(result.Id);
+        Assert.Equal([0], Assert.Single(harness.Server.Sent("POST", "/api/v1/request")).Body!["seasons"]!.AsArray().Select(item => item!.GetValue<int>()));
+    }
+
+    [Fact]
+    public async Task Overseerr_without_the_setting_allows_specials()
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Overseerr = true;
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [0, 1]));
+
+        Assert.NotNull(result.Id);
+    }
+
+    [Theory]
+    [InlineData(new[] { 9 }, "That show has no season 9.")]
+    [InlineData(new[] { 1, 4, 9 }, "That show has no seasons 4, 9.")]
+    public async Task Seasons_the_show_does_not_have_are_refused(int[] seasons, string message)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(
+            () => harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, seasons)));
+
+        Assert.Equal(message, error.Message);
+        Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
+    }
 }
