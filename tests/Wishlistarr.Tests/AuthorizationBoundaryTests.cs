@@ -21,6 +21,7 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         "/api/v1/auth/login",
         "/api/v1/kid/profiles",
         "/api/v1/kid/signin",
+        "/api/v1/webhooks/{source}/{token}",
         "/api/{**path}",
     ];
 
