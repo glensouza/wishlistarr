@@ -17,6 +17,7 @@ using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Arr;
@@ -33,6 +34,7 @@ builder.Host.UseSerilog(
             .ReadFrom.Configuration(context.Configuration)
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
+            .Enrich.With<WebhookTokenRedactor>()
             .WriteTo.Console()
             .WriteTo.File(
                 Path.Combine(directory.LogsPath, "wishlistarr-.log"),
@@ -62,6 +64,7 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddBackgroundJobs(builder.Configuration);
+builder.Services.AddWebhooks(builder.Configuration);
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
@@ -86,6 +89,7 @@ using (IServiceScope scope = app.Services.CreateScope())
     await app.Services.GetRequiredService<ApiKeyService>()
         .EnsureAsync(scope.ServiceProvider.GetRequiredService<SettingsStore>());
     await scope.ServiceProvider.GetRequiredService<ParentAccounts>().LoadSetupStateAsync();
+    await scope.ServiceProvider.GetRequiredService<WebhookTokens>().EnsureAllAsync();
 }
 
 app.UseKnownProxies();
@@ -102,6 +106,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithSummary("Reports that the service is running.");
 app.MapAuth();
 app.MapKid();
+app.MapWebhookReceiver();
 app.MapApiV1();
 
 if (app.Environment.IsDevelopment())

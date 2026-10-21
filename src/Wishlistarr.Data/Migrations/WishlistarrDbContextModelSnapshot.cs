@@ -427,6 +427,47 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("Settings");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.WebhookEvent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeliveryKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ProcessedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProcessedAt");
+
+                    b.HasIndex("Source", "DeliveryKey")
+                        .IsUnique();
+
+                    b.ToTable("WebhookEvents");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.KidPinAttempt", b =>
                 {
                     b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
