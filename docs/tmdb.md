@@ -37,7 +37,9 @@ The TMDB key is only ever supplied by the settings store, so removing it through
 
 Retention is the `tmdb.retention_days` setting: a whole number of days, 90 by default and at most 180. `PUT /api/v1/settings/tmdb.retention_days` rejects anything else.
 
-A parent can remove all stored TMDB data at any time with `POST /api/v1/settings/tmdb/clear-data`, which returns `{ "purged": n }`. Removing the API key, by sending an empty value to `PUT /api/v1/settings/tmdb.api_key`, deletes the key and purges the same data.
+A parent can remove all stored TMDB data at any time with `POST /api/v1/settings/tmdb/clear-data`. Removing the API key, by sending an empty value to `PUT /api/v1/settings/tmdb.api_key`, deletes the key and purges the same data.
+
+Both run the purge independently of the HTTP request, so a client or proxy giving up never leaves data behind. Request titles are cleared first. Library data waits for any running library refresh, so when that takes more than a few seconds the endpoints answer `202` (`{ "purged": null, "pending": true }` for clear, an empty body for key removal) and the library data is deleted as soon as the refresh finishes. When nothing is waiting, clear answers `200` with `{ "purged": n, "pending": false }` and key removal answers `204`.
 
 Request titles must be read through `RequestTitles`, which checks the age and fetches the title again when it has been purged; reading `MediaRequest.Title` directly can return nothing. Requests that existed before the retention was introduced have their title age taken from the request creation time, so titles older than the retention are cleared by the first purge and fetched again when they are shown.
 

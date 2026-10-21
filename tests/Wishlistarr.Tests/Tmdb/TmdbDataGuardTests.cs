@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Jobs;
+using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Core.MediaServers;
@@ -140,6 +141,88 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
         Assert.Equal(0, await this.StoredLookupsAsync());
         using IServiceScope scope = factory.Services.CreateScope();
         Assert.Null(await scope.ServiceProvider.GetRequiredService<SettingsStore>().GetAsync("tmdb.api_key"));
+    }
+
+    [Fact]
+    public async Task A_client_that_gives_up_while_a_refresh_holds_the_gate_still_gets_everything_purged()
+    {
+        await this.SeedAsync();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        TmdbPurgeRunner runner = factory.Services.GetRequiredService<TmdbPurgeRunner>();
+        runner.WaitLimit = TimeSpan.FromMilliseconds(600);
+        IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+        try
+        {
+            using CancellationTokenSource giveUp = new(TimeSpan.FromMilliseconds(100));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => parent.PostAsync("/api/v1/settings/tmdb/clear-data", null, giveUp.Token));
+
+            await WaitForAsync(async () => (await this.StoredTitlesAsync()).Count == 0);
+            Assert.True(await this.StoredLookupsAsync() > 0);
+        }
+        finally
+        {
+            held.Dispose();
+            runner.WaitLimit = TimeSpan.FromSeconds(5);
+        }
+
+        await WaitForAsync(async () => await this.StoredLookupsAsync() == 0);
+    }
+
+    [Fact]
+    public async Task Clearing_and_key_removal_answer_202_while_library_data_waits_and_purge_it_afterwards()
+    {
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        TmdbPurgeRunner runner = factory.Services.GetRequiredService<TmdbPurgeRunner>();
+        runner.WaitLimit = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            await this.SeedAsync();
+            IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+            HttpResponseMessage clear = await parent.PostAsync("/api/v1/settings/tmdb/clear-data", null);
+            JsonElement body = await clear.Content.ReadFromJsonAsync<JsonElement>();
+            held.Dispose();
+            await WaitForAsync(async () => await this.StoredLookupsAsync() == 0);
+
+            await this.SeedAsync();
+            Assert.Equal(HttpStatusCode.NoContent, (await parent.PutAsJsonAsync("/api/v1/settings/tmdb.api_key", new { value = "a-test-key" })).StatusCode);
+            held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+            HttpResponseMessage removed = await parent.PutAsJsonAsync("/api/v1/settings/tmdb.api_key", new { value = "" });
+            held.Dispose();
+            await WaitForAsync(async () => await this.StoredLookupsAsync() == 0);
+
+            Assert.Equal(HttpStatusCode.Accepted, clear.StatusCode);
+            Assert.True(body.GetProperty("pending").GetBoolean());
+            Assert.Equal(HttpStatusCode.Accepted, removed.StatusCode);
+            Assert.Empty(await this.StoredTitlesAsync());
+        }
+        finally
+        {
+            runner.WaitLimit = TimeSpan.FromSeconds(5);
+        }
+    }
+
+    [Fact]
+    public void The_library_refresh_gate_has_one_registration_shared_by_both_features()
+    {
+        ServiceCollection services = new();
+        services.AddLibraryIndex();
+        services.AddTmdbDataRetention();
+        services.AddLibraryIndex();
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(LibraryRefreshGate));
+        Assert.Same(provider.GetRequiredService<LibraryRefreshGate>(), provider.GetRequiredService<LibraryRefreshGate>());
+    }
+
+    private static async Task WaitForAsync(Func<Task<bool>> condition)
+    {
+        for (int attempt = 0; attempt < 200 && !await condition(); attempt++)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.True(await condition(), "The condition was not met in time.");
     }
 
     private static IEnumerable<IEntityType> ModelEntities(IServiceScope scope) =>

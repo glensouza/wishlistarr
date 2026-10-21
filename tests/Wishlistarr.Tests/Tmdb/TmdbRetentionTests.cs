@@ -381,6 +381,8 @@ public sealed class TmdbRetentionTests
     {
         public Type EntityType => typeof(FaultyStore);
 
+        public bool WaitsForLibraryRefresh => false;
+
         public Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct) =>
             failRefresh ? throw new InvalidOperationException("Refresh failed.") : Task.CompletedTask;
 

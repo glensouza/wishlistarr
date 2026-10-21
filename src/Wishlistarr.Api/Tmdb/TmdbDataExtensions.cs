@@ -12,6 +12,7 @@ public static class TmdbDataExtensions
         services.TryAddSingleton<LibraryRefreshGate>();
         services.AddScoped<TmdbRetention>();
         services.AddScoped<TmdbDataService>();
+        services.TryAddSingleton<TmdbPurgeRunner>();
         services.AddScoped<RequestTitles>();
         services.AddScoped<ITmdbDataStore, LibraryTmdbDataStore>();
         services.AddScoped<ITmdbDataStore, RequestTmdbDataStore>();

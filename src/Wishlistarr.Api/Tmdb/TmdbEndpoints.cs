@@ -28,12 +28,18 @@ public static class TmdbEndpoints
             .Produces<TmdbTestResult>()
             .ProducesProblem(StatusCodes.Status502BadGateway);
 
-        v1.MapPost("/settings/tmdb/clear-data", async (TmdbDataService data, CancellationToken ct) =>
-            Results.Ok(new TmdbClearResult(await data.PurgeAllAsync(ct))))
+        v1.MapPost("/settings/tmdb/clear-data", async (TmdbPurgeRunner runner) =>
+        {
+            TmdbPurgeOutcome outcome = await runner.PurgeAllAsync();
+            return outcome.Completed
+                ? Results.Ok(new TmdbClearResult(outcome.Purged, false))
+                : Results.Json(new TmdbClearResult(null, true), statusCode: StatusCodes.Status202Accepted);
+        })
             .WithTags("Settings")
             .WithName("ClearTmdbData")
-            .WithSummary("Deletes all stored TMDB-derived data and empties the in-memory TMDB cache.")
-            .Produces<TmdbClearResult>();
+            .WithSummary("Deletes all stored TMDB-derived data and empties the in-memory TMDB cache. Answers 202 when library data is still waiting for a running library refresh; it is purged as soon as that finishes.")
+            .Produces<TmdbClearResult>()
+            .Produces<TmdbClearResult>(StatusCodes.Status202Accepted);
 
         v1.MapGet("/images/tmdb/{size}/{file}", ServeImageAsync)
             .WithTags("Images")
@@ -72,4 +78,4 @@ public static class TmdbEndpoints
 }
 
 public sealed record TmdbTestResult(bool Valid, string Message);
-public sealed record TmdbClearResult(int Purged);
+public sealed record TmdbClearResult(int? Purged, bool Pending);

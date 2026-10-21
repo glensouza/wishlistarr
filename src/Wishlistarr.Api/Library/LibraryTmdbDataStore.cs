@@ -13,6 +13,8 @@ public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tm
 
     public Type EntityType => typeof(LibraryExternalId);
 
+    public bool WaitsForLibraryRefresh => true;
+
     public async Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct)
     {
         using IDisposable held = await gate.EnterAsync(ct);

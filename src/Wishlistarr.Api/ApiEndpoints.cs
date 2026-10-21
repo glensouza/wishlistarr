@@ -46,7 +46,7 @@ public static class ApiEndpoints
             .WithSummary("Lists settings. Secret values are never returned.")
             .Produces<IReadOnlyList<SettingSummary>>();
 
-        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, TmdbDataService data, CancellationToken ct) =>
+        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, TmdbPurgeRunner purger, CancellationToken ct) =>
         {
             if (update?.Value is null)
             {
@@ -98,8 +98,8 @@ public static class ApiEndpoints
             if (key == TmdbOptions.ApiKeySetting && string.IsNullOrWhiteSpace(update.Value))
             {
                 await store.DeleteAsync(key, ct);
-                await data.PurgeAllAsync(ct);
-                return Results.NoContent();
+                TmdbPurgeOutcome purge = await purger.PurgeAllAsync();
+                return purge.Completed ? Results.NoContent() : Results.Accepted();
             }
 
             await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);

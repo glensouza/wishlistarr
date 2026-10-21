@@ -61,6 +61,8 @@ public sealed class RequestTmdbDataStore(WishlistarrDbContext db, RequestTitles 
 
     public Type EntityType => typeof(MediaRequest);
 
+    public bool WaitsForLibraryRefresh => false;
+
     public async Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct)
     {
         var open = await db.MediaRequests

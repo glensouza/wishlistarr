@@ -7,6 +7,8 @@ public interface ITmdbDataStore
 {
     Type EntityType { get; }
 
+    bool WaitsForLibraryRefresh { get; }
+
     Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct);
 
     Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken ct);
@@ -58,9 +60,23 @@ public sealed partial class TmdbDataService(
     {
         cache.Clear();
         int purged = 0;
-        foreach (ITmdbDataStore store in stores)
+        List<Exception> failures = [];
+        foreach (ITmdbDataStore store in stores.OrderBy(store => store.WaitsForLibraryRefresh))
         {
-            purged += await store.PurgeAllAsync(ct);
+            try
+            {
+                purged += await store.PurgeAllAsync(ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                this.LogPurgeFailed(ex, store.EntityType.Name);
+                failures.Add(ex);
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("Purging stored TMDB data failed.", failures);
         }
 
         return purged;
@@ -78,4 +94,37 @@ public sealed class TmdbDataPurgeJob(TmdbDataService data) : IBackgroundJob
     public const string JobName = "tmdb-data-purge";
 
     public Task RunAsync(CancellationToken ct) => data.MaintainAsync(ct);
+}
+
+public sealed record TmdbPurgeOutcome(bool Completed, int? Purged);
+
+public sealed partial class TmdbPurgeRunner(IServiceScopeFactory scopes, ILogger<TmdbPurgeRunner> logger)
+{
+    public TimeSpan WaitLimit { get; set; } = TimeSpan.FromSeconds(5);
+
+    public async Task<TmdbPurgeOutcome> PurgeAllAsync()
+    {
+        Task<int> purge = Task.Run(async () =>
+        {
+            try
+            {
+                await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+                return await scope.ServiceProvider.GetRequiredService<TmdbDataService>().PurgeAllAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                this.LogFailed(ex);
+                throw;
+            }
+        });
+        if (await Task.WhenAny(purge, Task.Delay(this.WaitLimit)) == purge)
+        {
+            return new TmdbPurgeOutcome(true, await purge);
+        }
+
+        return new TmdbPurgeOutcome(false, null);
+    }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Purging all stored TMDB data failed.")]
+    private partial void LogFailed(Exception exception);
 }
