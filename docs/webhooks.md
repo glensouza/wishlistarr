@@ -33,7 +33,7 @@ The host in the address is the one the settings request was made with, so open t
 - An unknown source returns `404`, a missing or wrong token returns `401`, an invalid payload returns `400` and a payload over the size limit returns `413`.
 - The event type is read from `event` (Plex), `eventType` (Sonarr and Radarr) or `notification_type` (Seerr), and is `unknown` when the field is missing.
 - A delivery whose payload is identical to one already received from the same source within the deduplication window is acknowledged with `200` and `{"status":"duplicate"}` and is not processed again. A new delivery returns `202`.
-- Accepted events are stored and handed to the `webhook-events` background job, which also runs every minute to pick up anything left over. Handlers currently only log the event type.
+- Accepted events are stored and handed to the `webhook-events` background job, which also runs every minute to pick up anything left over. The Plex `library.new` event refreshes the library index (see [library.md](library.md)); other events are only logged.
 - Tokens are not written to the logs: request paths are logged as `/api/v1/webhooks/{source}/***`. Avoid logging full URLs in a reverse proxy in front of Wishlistarr.
 
 ## Configuration

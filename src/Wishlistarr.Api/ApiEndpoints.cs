@@ -36,7 +36,7 @@ public static class ApiEndpoints
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")
             .WithName("GetSystemStatus")
-            .WithSummary("Returns the application version, uptime and background jobs.")
+            .WithSummary("Returns the application version, uptime, background jobs and library index status.")
             .Produces<StatusResponse>();
 
         RouteGroupBuilder settings = v1.MapGroup("/settings").WithTags("Settings");
