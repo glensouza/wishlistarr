@@ -149,7 +149,7 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
         await this.SeedAsync();
         HttpClient parent = await factory.CreateAuthorizedClientAsync();
         TmdbPurgeRunner runner = factory.Services.GetRequiredService<TmdbPurgeRunner>();
-        runner.WaitLimit = TimeSpan.FromMilliseconds(600);
+        runner.WaitLimit = TimeSpan.FromSeconds(5);
         IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
         try
         {

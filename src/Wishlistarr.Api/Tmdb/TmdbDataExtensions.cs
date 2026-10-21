@@ -13,6 +13,7 @@ public static class TmdbDataExtensions
         services.AddScoped<TmdbRetention>();
         services.AddScoped<TmdbDataService>();
         services.TryAddSingleton<TmdbPurgeRunner>();
+        services.AddHostedService<TmdbPurgeHostedService>();
         services.AddScoped<RequestTitles>();
         services.AddScoped<ITmdbDataStore, LibraryTmdbDataStore>();
         services.AddScoped<ITmdbDataStore, RequestTmdbDataStore>();

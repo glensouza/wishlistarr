@@ -29,6 +29,10 @@ public sealed class RetentionHarness : IAsyncDisposable
 
     public FakeTmdbFinder Tmdb => this.Provider.GetRequiredService<FakeTmdbFinder>();
 
+    public FixedKeyProvider Key => this.Provider.GetRequiredService<FixedKeyProvider>();
+
+    public TmdbPurgeRunner Runner => this.Provider.GetRequiredService<TmdbPurgeRunner>();
+
     public ManualTime Time => (ManualTime)this.Provider.GetRequiredService<TimeProvider>();
 
     public static async Task<RetentionHarness> CreateAsync(Action<IServiceCollection>? configure = null)
@@ -43,6 +47,8 @@ public sealed class RetentionHarness : IAsyncDisposable
         services.AddSingleton<TimeProvider>(new ManualTime(new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero)));
         services.AddDbContext<WishlistarrDbContext>(options => options.UseWishlistarrSqlite(database));
         services.AddScoped<SettingsStore>();
+        services.AddSingleton<FixedKeyProvider>();
+        services.AddSingleton<ITmdbApiKeyProvider>(provider => provider.GetRequiredService<FixedKeyProvider>());
         services.AddSingleton<FakeTmdbFinder>();
         services.AddSingleton<ITmdbClient>(provider => provider.GetRequiredService<FakeTmdbFinder>());
         configure?.Invoke(services);
@@ -68,6 +74,16 @@ public sealed class RetentionHarness : IAsyncDisposable
         await services.GetRequiredService<TmdbDataService>().MaintainAsync(CancellationToken.None);
         return 0;
     });
+
+    public Task SetPurgePendingAsync(bool pending) => this.InScopeAsync(async services =>
+    {
+        TmdbDataService data = services.GetRequiredService<TmdbDataService>();
+        await (pending ? data.MarkPurgePendingAsync(CancellationToken.None) : data.ClearPurgePendingAsync(CancellationToken.None));
+        return 0;
+    });
+
+    public Task<bool> IsPurgePendingAsync() =>
+        this.InScopeAsync(services => services.GetRequiredService<TmdbDataService>().IsPurgePendingAsync(CancellationToken.None));
 
     public Task SetRetentionAsync(string days) => this.InScopeAsync(async services =>
     {
@@ -331,6 +347,108 @@ public sealed class TmdbRetentionTests
     }
 
     [Fact]
+    public async Task A_pending_purge_flag_makes_the_daily_run_purge_everything_and_clear_the_flag()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        await harness.AddRequestAsync(harness.Time.GetUtcNow());
+        await harness.SetPurgePendingAsync(true);
+
+        await harness.MaintainAsync();
+
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.Null(Assert.Single(await harness.GetRequestsAsync()).Title);
+        Assert.False(await harness.IsPurgePendingAsync());
+    }
+
+    [Fact]
+    public async Task Without_a_tmdb_key_the_daily_run_purges_everything()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        await harness.AddRequestAsync(harness.Time.GetUtcNow());
+        harness.Key.Key = null;
+
+        await harness.MaintainAsync();
+
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.Null(Assert.Single(await harness.GetRequestsAsync()).Title);
+    }
+
+    [Fact]
+    public async Task With_a_key_and_no_pending_purge_data_inside_the_retention_is_kept()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        harness.Tmdb.Failure = new TmdbException("TMDB answered 500.");
+
+        await harness.MaintainAsync();
+
+        Assert.Single(await harness.GetLookupsAsync());
+    }
+
+    [Fact]
+    public async Task The_startup_check_resumes_a_pending_purge_and_leaves_clean_data_alone()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        TmdbPurgeHostedService hosted = new(harness.Runner);
+
+        await hosted.StartAsync(CancellationToken.None);
+        await hosted.StopAsync(CancellationToken.None);
+        Assert.Single(await harness.GetLookupsAsync());
+
+        await harness.SetPurgePendingAsync(true);
+        await hosted.StartAsync(CancellationToken.None);
+        await hosted.StopAsync(CancellationToken.None);
+
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.False(await harness.IsPurgePendingAsync());
+    }
+
+    [Fact]
+    public async Task A_purge_that_faults_leaves_the_flag_set_and_reports_the_failure()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync(
+            services => services.AddScoped<ITmdbDataStore>(_ => new FaultyStore(failRefresh: false, failPurge: true)));
+
+        TmdbPurgeOutcome outcome = await harness.Runner.PurgeAllAsync();
+
+        Assert.True(outcome.Failed);
+        Assert.True(await harness.IsPurgePendingAsync());
+    }
+
+    [Fact]
+    public async Task A_successful_purge_clears_the_flag()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+
+        TmdbPurgeOutcome outcome = await harness.Runner.PurgeAllAsync();
+
+        Assert.Equal(new TmdbPurgeOutcome(true, 1), outcome);
+        Assert.False(await harness.IsPurgePendingAsync());
+        Assert.Empty(await harness.GetLookupsAsync());
+    }
+
+    [Fact]
+    public async Task Shutting_down_while_a_purge_waits_leaves_it_pending_for_the_next_start()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        harness.Runner.WaitLimit = TimeSpan.FromMilliseconds(100);
+        IDisposable held = await harness.Provider.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+
+        TmdbPurgeOutcome outcome = await harness.Runner.PurgeAllAsync();
+        await harness.Runner.DrainAsync(TimeSpan.FromMilliseconds(100));
+        held.Dispose();
+
+        Assert.False(outcome.Completed);
+        Assert.True(await harness.IsPurgePendingAsync());
+        Assert.Single(await harness.GetLookupsAsync());
+    }
+
+    [Fact]
     public async Task A_tmdb_timeout_does_not_stop_expired_data_from_being_purged()
     {
         await using RetentionHarness harness = await RetentionHarness.CreateAsync();
@@ -389,7 +507,8 @@ public sealed class TmdbRetentionTests
         public Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken ct) =>
             failPurge ? throw new InvalidOperationException("Purge failed.") : Task.FromResult(0);
 
-        public Task<int> PurgeAllAsync(CancellationToken ct) => Task.FromResult(0);
+        public Task<int> PurgeAllAsync(CancellationToken ct) =>
+            failPurge ? throw new InvalidOperationException("Purge failed.") : Task.FromResult(0);
     }
 
     [Fact]
