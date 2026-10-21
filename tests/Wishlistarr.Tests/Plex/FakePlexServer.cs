@@ -146,14 +146,27 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         return context.Response.WriteAsync(body);
     }
 
-    private static string Page(string json, IQueryCollection query)
+    private string Page(string json, IQueryCollection query)
     {
         int start = int.TryParse(query["X-Plex-Container-Start"], CultureInfo.InvariantCulture, out int parsedStart) ? parsedStart : 0;
         int size = int.TryParse(query["X-Plex-Container-Size"], CultureInfo.InvariantCulture, out int parsedSize) ? parsedSize : int.MaxValue;
+        long? updatedSince = long.TryParse(query["updatedAt>>"], CultureInfo.InvariantCulture, out long parsedSince) ? parsedSince : null;
         JsonNode root = JsonNode.Parse(json)!;
         JsonObject container = root["MediaContainer"]!.AsObject();
         JsonArray items = container["Metadata"]!.AsArray();
-        JsonArray page = [.. items.Skip(start).Take(size).Select(item => item!.DeepClone())];
+        JsonArray page = [.. items
+            .Where(item => updatedSince is null || (item!["updatedAt"]?.GetValue<long>() ?? 0) >= updatedSince)
+            .Skip(start)
+            .Take(size)
+            .Select(item => item!.DeepClone())];
+        foreach (JsonNode? item in page)
+        {
+            if (this.items.TryGetValue(item!["ratingKey"]!.GetValue<string>(), out FakeItem? fake) && fake.Labels.Count > 0)
+            {
+                item["Label"] = new JsonArray([.. fake.Labels.Select(label => (JsonNode)new JsonObject { ["tag"] = label })]);
+            }
+        }
+
         container["Metadata"] = page;
         container["size"] = page.Count;
         container["offset"] = start;
@@ -234,7 +247,7 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         }
 
         string body = this.Render(Fixture(fixture));
-        await WriteAsync(context, path.EndsWith("/all", StringComparison.Ordinal) ? Page(body, context.Request.Query) : body);
+        await WriteAsync(context, path.EndsWith("/all", StringComparison.Ordinal) ? this.Page(body, context.Request.Query) : body);
     }
 
     private void AddItem(FakeItem item) => this.items[item.RatingKey] = item;

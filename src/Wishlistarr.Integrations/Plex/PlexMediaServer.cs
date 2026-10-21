@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Settings;
 
@@ -13,7 +15,7 @@ internal sealed partial class PlexMediaServer(
     PlexServerClient servers,
     IAppSettings settings,
     IOptions<PlexOptions> options,
-    TimeProvider time) : IMediaServer, IMediaServerAccount, IDisposable
+    TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IDisposable
 {
     private static readonly TimeSpan DefaultPinLifetime = TimeSpan.FromMinutes(30);
 
@@ -268,6 +270,48 @@ internal sealed partial class PlexMediaServer(
             ct);
     }
 
+    public async Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
+    {
+        PlexServerContext server = await this.RequireServerAsync(ct);
+        return new LibraryScan(server.ServerId, this.ReadEntriesAsync(server, updatedSince, ct));
+    }
+
+    public async Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
+    {
+        if (!IsValidKey(itemId))
+        {
+            return null;
+        }
+
+        return await this.WithServerAsync(
+            async (server, token) =>
+            {
+                PlexMetadata? item = await servers.GetMetadataAsync(server, itemId, token);
+                string? showKey = item?.Type switch
+                {
+                    "season" => item.ParentRatingKey,
+                    "episode" => item.GrandparentRatingKey,
+                    _ => null,
+                };
+                if (showKey is not null)
+                {
+                    item = IsValidKey(showKey) ? await servers.GetMetadataAsync(server, showKey, token) : null;
+                }
+
+                MediaKind? kind = item?.Type switch
+                {
+                    "movie" => MediaKind.Movie,
+                    "show" => MediaKind.Show,
+                    _ => null,
+                };
+                string? libraryId = item?.LibrarySectionId?.ToString(CultureInfo.InvariantCulture);
+                return item is null || kind is null || !IsValidKey(item.RatingKey) || !IsValidKey(libraryId)
+                    ? null
+                    : new LibrarySnapshot(server.ServerId, ToEntry(item, kind.Value, libraryId!));
+            },
+            ct);
+    }
+
     public void Dispose()
     {
         this.identifierLock.Dispose();
@@ -303,6 +347,39 @@ internal sealed partial class PlexMediaServer(
             libraryId!,
             [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)],
             (item.Fields ?? []).Any(field => field.Name == "label" && field.Locked));
+    }
+
+    private static LibraryEntry ToEntry(PlexMetadata item, MediaKind kind, string libraryId) => new(
+        new MediaItem(item.RatingKey!, item.Guid ?? string.Empty, item.Title ?? string.Empty, item.Year, kind, libraryId, PlexGuids.Collect(item)),
+        [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)],
+        item.UpdatedAt is long updated ? DateTimeOffset.FromUnixTimeSeconds(updated) : null);
+
+    private async IAsyncEnumerable<LibraryEntry> ReadEntriesAsync(
+        PlexServerContext server,
+        DateTimeOffset? updatedSince,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        int pageSize = Math.Max(1, options.Value.PageSize);
+        long? since = updatedSince?.ToUnixTimeSeconds();
+        PlexContainer sections = await servers.GetSectionsAsync(server, ct);
+        foreach (PlexSection section in (sections.Directory ?? []).Where(section => section.Type is "movie" or "show" && IsValidKey(section.Key)))
+        {
+            (MediaKind kind, int itemType) = section.Type == "movie" ? (MediaKind.Movie, 1) : (MediaKind.Show, 2);
+            for (int start = 0; ; start += pageSize)
+            {
+                PlexContainer page = await servers.GetSectionItemsAsync(server, section.Key!, itemType, start, pageSize, ct, since);
+                IReadOnlyList<PlexMetadata> items = page.Metadata ?? [];
+                foreach (PlexMetadata item in items.Where(item => IsValidKey(item.RatingKey)))
+                {
+                    yield return ToEntry(item, kind, section.Key!);
+                }
+
+                if (items.Count < pageSize || (page.TotalSize is int total && start + items.Count >= total))
+                {
+                    break;
+                }
+            }
+        }
     }
 
     private static MediaLibraryType ToLibraryType(string? type) => type switch

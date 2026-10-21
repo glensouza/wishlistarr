@@ -46,11 +46,12 @@ internal sealed class PlexServerClient(IHttpClientFactory factory, IOptions<Plex
     public Task<PlexContainer> GetSectionsAsync(PlexServerContext server, CancellationToken ct) =>
         this.GetAsync(server, "library/sections", ct);
 
-    public Task<PlexContainer> GetSectionItemsAsync(PlexServerContext server, string sectionKey, int type, int start, int size, CancellationToken ct) =>
+    public Task<PlexContainer> GetSectionItemsAsync(PlexServerContext server, string sectionKey, int type, int start, int size, CancellationToken ct, long? updatedSince = null) =>
         this.GetAsync(
             server,
             $"library/sections/{Uri.EscapeDataString(sectionKey)}/all?type={Number(type)}&includeGuids=1"
-                + $"&X-Plex-Container-Start={Number(start)}&X-Plex-Container-Size={Number(size)}",
+                + $"&X-Plex-Container-Start={Number(start)}&X-Plex-Container-Size={Number(size)}"
+                + (updatedSince is long since ? $"&updatedAt%3E%3E={since.ToString(CultureInfo.InvariantCulture)}" : string.Empty),
             ct);
 
     public async Task<PlexMetadata?> GetMetadataAsync(PlexServerContext server, string ratingKey, CancellationToken ct)
