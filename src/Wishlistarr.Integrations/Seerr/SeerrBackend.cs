@@ -17,6 +17,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
     private const int OverseerrDeletedStatus = 6;
 
     private static readonly Version EmptySeasonsDroppedFrom = new(3, 5, 0);
+    private static readonly Version SpecialsInAllFrom = new(2, 2, 0);
+    private static readonly Version SpecialsInAllUntil = new(2, 6, 0);
 
     private volatile CachedFlavour? cachedFlavour;
 
@@ -315,7 +317,12 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
 
         int[] seasons = [.. list
-            .Where(season => Int(season?["seasonNumber"]) > 0 && (!flavour.DropsEmptySeasons || Int(season?["episodeCount"]) > 0))
+            .Where(season => Int(season?["seasonNumber"]) switch
+            {
+                0 => flavour.AllIncludesSpecials,
+                > 0 => !flavour.DropsEmptySeasons || Int(season?["episodeCount"]) > 0,
+                _ => false,
+            })
             .Select(season => Int(season?["seasonNumber"])!.Value)
             .Distinct()
             .Order()];
@@ -361,9 +368,11 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         // Only Jellyseerr and Seerr report mediaServerType. Across that line 6 is blacklisted or blocklisted, and 7 is deleted
         // from Jellyseerr 2.6 on, while Overseerr uses 6 for deleted. Version strings cannot tell them apart on develop builds.
         bool blocklist = settings?["mediaServerType"] is not null;
-        bool specials = settings?["enableSpecialEpisodes"] is not JsonValue flag || !flag.TryGetValue(out bool enabled) || enabled;
-        bool dropsEmptySeasons = blocklist && ReleaseVersion(status) is { } version && version >= EmptySeasonsDroppedFrom;
-        ServerFlavour flavour = new(blocklist, specials, dropsEmptySeasons);
+        bool? specialsSetting = settings?["enableSpecialEpisodes"] is JsonValue flag && flag.TryGetValue(out bool enabled) ? enabled : null;
+        Version? version = blocklist ? ReleaseVersion(status) : null;
+        bool dropsEmptySeasons = version is not null && version >= EmptySeasonsDroppedFrom;
+        bool allIncludesSpecials = specialsSetting == true && version is not null && version >= SpecialsInAllFrom && version < SpecialsInAllUntil;
+        ServerFlavour flavour = new(blocklist, specialsSetting != false, dropsEmptySeasons, allIncludesSpecials);
         this.cachedFlavour = new CachedFlavour(connection.Url, revision, now + FlavourLifetime, flavour);
         return flavour;
     }
@@ -450,9 +459,9 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed, bool DropsEmptySeasons)
+    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed, bool DropsEmptySeasons, bool AllIncludesSpecials)
     {
-        public static ServerFlavour Fallback { get; } = new(true, true, false);
+        public static ServerFlavour Fallback { get; } = new(true, true, false, false);
 
         public int DeletedStatus => this.Blocklist ? (int)SeerrAvailability.Deleted : OverseerrDeletedStatus;
     }

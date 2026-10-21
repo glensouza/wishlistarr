@@ -96,6 +96,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
     public bool DropsEmptySeasons { get; set; }
 
+    public bool AllIncludesSpecials { get; set; }
+
     public Action? BeforeNextCreate { get; set; }
 
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
@@ -490,6 +492,10 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             if (payload["seasons"] is JsonValue all && all.TryGetValue(out string? word) && word == "all")
             {
                 requested = this.AnnouncedSeason && !this.DropsEmptySeasons ? [.. ShowSeasons, AnnouncedSeasonNumber] : ShowSeasons;
+                if (this.AllIncludesSpecials && this.EnableSpecialEpisodes)
+                {
+                    requested = [0, .. requested];
+                }
             }
             else if (payload["seasons"] is JsonArray list)
             {

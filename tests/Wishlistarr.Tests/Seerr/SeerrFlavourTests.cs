@@ -137,6 +137,27 @@ public sealed class SeerrFlavourTests
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
     }
 
+    [Theory]
+    [InlineData("2.2.0", true, true)]
+    [InlineData("2.5.2", true, true)]
+    [InlineData("2.5.2", false, false)]
+    [InlineData("2.6.0", true, false)]
+    [InlineData("2.1.0", true, false)]
+    [InlineData("3.4.1", true, false)]
+    public async Task All_seasons_include_specials_only_where_the_server_puts_them_in_all(string version, bool specials, bool included)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Version = version;
+        harness.Server.EnableSpecialEpisodes = specials;
+        harness.Server.AllIncludesSpecials = version.StartsWith("2.2", StringComparison.Ordinal) || version.StartsWith("2.5", StringComparison.Ordinal);
+        harness.Server.SeedRequest("tv", FakeSeerrServer.ShowTmdbId, seasons: [1, 2, 3]);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, null));
+
+        Assert.Equal(included ? SeerrSubmitOutcome.Created : SeerrSubmitOutcome.Attached, result.Outcome);
+        Assert.Equal(included ? 1 : 0, harness.Server.Sent("POST", "/api/v1/request").Count());
+    }
+
     [Fact]
     public async Task A_develop_build_that_has_nothing_left_to_request_is_attached()
     {
