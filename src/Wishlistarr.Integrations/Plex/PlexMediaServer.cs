@@ -277,6 +277,56 @@ internal sealed partial class PlexMediaServer(
         return new LibraryScan(server.ServerId, this.ReadEntriesAsync(server, updatedSince, report, ct)) { Report = report };
     }
 
+    public async Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default)
+    {
+        PlexServerContext server = await this.RequireServerAsync(ct);
+        int pageSize = Math.Max(1, options.Value.PageSize);
+        Dictionary<string, List<string>> byItem = new(StringComparer.Ordinal);
+        bool complete = true;
+        PlexContainer sections = await servers.GetSectionsAsync(server, ct);
+        foreach (PlexSection section in (sections.Directory ?? []).Where(section => section.Type is "movie" or "show" && IsValidKey(section.Key)))
+        {
+            int itemType = section.Type == "movie" ? 1 : 2;
+            PlexContainer labels = await servers.GetSectionLabelsAsync(server, section.Key!, ct);
+            foreach (PlexSection label in (labels.Directory ?? []).Where(label => !string.IsNullOrWhiteSpace(label.Key) && !string.IsNullOrWhiteSpace(label.Title)))
+            {
+                HashSet<string?> received = [];
+                int? announced = null;
+                for (int start = 0; ; start += pageSize)
+                {
+                    PlexContainer page = await servers.GetSectionItemsAsync(server, section.Key!, itemType, start, pageSize, ct, label: label.Key);
+                    IReadOnlyList<PlexMetadata> items = page.Metadata ?? [];
+                    announced = page.TotalSize ?? announced;
+                    foreach (PlexMetadata item in items.Where(item => IsValidKey(item.RatingKey)))
+                    {
+                        received.Add(item.RatingKey);
+                        if (!byItem.TryGetValue(item.RatingKey!, out List<string>? tags))
+                        {
+                            byItem[item.RatingKey!] = tags = [];
+                        }
+
+                        tags.Add(label.Title!);
+                    }
+
+                    if (items.Count < pageSize || (announced is int total && start + items.Count >= total))
+                    {
+                        break;
+                    }
+                }
+
+                if (announced is int expected && received.Count < expected)
+                {
+                    complete = false;
+                }
+            }
+        }
+
+        return new LibraryLabelScan(
+            server.ServerId,
+            byItem.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value, StringComparer.Ordinal),
+            complete);
+    }
+
     public Task<string?> GetServerIdAsync(CancellationToken ct = default) => settings.GetAsync(PlexSettingKeys.ServerId, ct);
 
     public async Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
@@ -310,7 +360,7 @@ internal sealed partial class PlexMediaServer(
                 string? libraryId = item?.LibrarySectionId?.ToString(CultureInfo.InvariantCulture);
                 return item is null || kind is null || !IsValidKey(item.RatingKey) || !IsValidKey(libraryId)
                     ? null
-                    : new LibrarySnapshot(server.ServerId, ToEntry(item, kind.Value, libraryId!));
+                    : new LibrarySnapshot(server.ServerId, ToEntry(item, kind.Value, libraryId!, true));
             },
             ct);
     }
@@ -352,9 +402,9 @@ internal sealed partial class PlexMediaServer(
             (item.Fields ?? []).Any(field => field.Name == "label" && field.Locked));
     }
 
-    private static LibraryEntry ToEntry(PlexMetadata item, MediaKind kind, string libraryId) => new(
+    private static LibraryEntry ToEntry(PlexMetadata item, MediaKind kind, string libraryId, bool detailed) => new(
         new MediaItem(item.RatingKey!, item.Guid ?? string.Empty, item.Title ?? string.Empty, item.Year, kind, libraryId, PlexGuids.Collect(item)),
-        [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)],
+        detailed ? [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)] : null,
         item.UpdatedAt is long updated ? DateTimeOffset.FromUnixTimeSeconds(updated) : null);
 
     private async IAsyncEnumerable<LibraryEntry> ReadEntriesAsync(
@@ -381,7 +431,7 @@ internal sealed partial class PlexMediaServer(
                     received.Add(item.RatingKey);
                     if (IsValidKey(item.RatingKey))
                     {
-                        yield return ToEntry(item, kind, section.Key!);
+                        yield return ToEntry(item, kind, section.Key!, false);
                     }
                 }
 

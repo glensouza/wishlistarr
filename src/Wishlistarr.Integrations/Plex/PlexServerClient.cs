@@ -46,12 +46,16 @@ internal sealed class PlexServerClient(IHttpClientFactory factory, IOptions<Plex
     public Task<PlexContainer> GetSectionsAsync(PlexServerContext server, CancellationToken ct) =>
         this.GetAsync(server, "library/sections", ct);
 
-    public Task<PlexContainer> GetSectionItemsAsync(PlexServerContext server, string sectionKey, int type, int start, int size, CancellationToken ct, long? updatedSince = null) =>
+    public Task<PlexContainer> GetSectionLabelsAsync(PlexServerContext server, string sectionKey, CancellationToken ct) =>
+        this.GetAsync(server, $"library/sections/{Uri.EscapeDataString(sectionKey)}/label", ct);
+
+    public Task<PlexContainer> GetSectionItemsAsync(PlexServerContext server, string sectionKey, int type, int start, int size, CancellationToken ct, long? updatedSince = null, string? label = null) =>
         this.GetAsync(
             server,
             $"library/sections/{Uri.EscapeDataString(sectionKey)}/all?type={Number(type)}&includeGuids=1"
                 + $"&X-Plex-Container-Start={Number(start)}&X-Plex-Container-Size={Number(size)}"
-                + (updatedSince is long since ? $"&updatedAt%3E%3E={since.ToString(CultureInfo.InvariantCulture)}" : string.Empty),
+                + (updatedSince is long since ? $"&updatedAt%3E%3E={since.ToString(CultureInfo.InvariantCulture)}" : string.Empty)
+                + (label is null ? string.Empty : $"&label={Uri.EscapeDataString(label)}"),
             ct);
 
     public async Task<PlexMetadata?> GetMetadataAsync(PlexServerContext server, string ratingKey, CancellationToken ct)

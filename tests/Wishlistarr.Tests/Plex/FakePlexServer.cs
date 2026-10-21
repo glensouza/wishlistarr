@@ -153,28 +153,47 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         int start = int.TryParse(query["X-Plex-Container-Start"], CultureInfo.InvariantCulture, out int parsedStart) ? parsedStart : 0;
         int size = int.TryParse(query["X-Plex-Container-Size"], CultureInfo.InvariantCulture, out int parsedSize) ? parsedSize : int.MaxValue;
         long? updatedSince = long.TryParse(query["updatedAt>>"], CultureInfo.InvariantCulture, out long parsedSince) ? parsedSince : null;
+        string? labelKey = query["label"].ToString() is { Length: > 0 } requested ? requested : null;
         JsonNode root = JsonNode.Parse(json)!;
         JsonObject container = root["MediaContainer"]!.AsObject();
         JsonArray items = container["Metadata"]!.AsArray();
-        JsonArray page = [.. items
-            .Where(item => !this.HiddenKeys.ContainsKey(item!["ratingKey"]!.GetValue<string>()))
+        List<JsonNode> matching = [.. items
             .Where(item => updatedSince is null || (item!["updatedAt"]?.GetValue<long>() ?? 0) > updatedSince)
+            .Where(item => labelKey is null || this.HasLabel(item!["ratingKey"]!.GetValue<string>(), labelKey))
+            .Select(item => item!)];
+        JsonArray page = [.. matching
+            .Where(item => !this.HiddenKeys.ContainsKey(item["ratingKey"]!.GetValue<string>()))
             .Skip(start)
             .Take(size)
-            .Select(item => item!.DeepClone())];
-        foreach (JsonNode? item in page)
-        {
-            if (this.items.TryGetValue(item!["ratingKey"]!.GetValue<string>(), out FakeItem? fake) && fake.Labels.Count > 0)
-            {
-                item["Label"] = new JsonArray([.. fake.Labels.Select(label => (JsonNode)new JsonObject { ["tag"] = label })]);
-            }
-        }
-
+            .Select(item => item.DeepClone())];
         container["Metadata"] = page;
         container["size"] = page.Count;
+        container["totalSize"] = matching.Count;
         container["offset"] = start;
         return root.ToJsonString();
     }
+
+    private string KeyOf(string tag) =>
+        (1000 + this.items.Values.SelectMany(item => item.Labels).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList()
+            .FindIndex(label => string.Equals(label, tag, StringComparison.OrdinalIgnoreCase))).ToString(CultureInfo.InvariantCulture);
+
+    private bool HasLabel(string ratingKey, string labelKey) =>
+        this.items.TryGetValue(ratingKey, out FakeItem? fake) && fake.Labels.Any(label => this.KeyOf(label) == labelKey);
+
+    private string RenderLabels(int section)
+    {
+        JsonArray directories = [.. this.items.Values
+            .Where(item => item.Section == section)
+            .SelectMany(item => item.Labels)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .Select(label => (JsonNode)new JsonObject { ["fastKey"] = $"/library/sections/{section}/all?label={this.KeyOf(label)}", ["key"] = this.KeyOf(label), ["title"] = label })];
+        return new JsonObject
+        {
+            ["MediaContainer"] = new JsonObject { ["size"] = directories.Count, ["title1"] = "Label", ["Directory"] = directories },
+        }.ToJsonString();
+    }
+
 
     private string Render(string template) => template
         .Replace("{{MACHINE}}", MachineIdentifier, StringComparison.Ordinal)
@@ -228,6 +247,14 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         if (request.Method == HttpMethods.Put && path.StartsWith("/library/sections/", StringComparison.Ordinal) && path.EndsWith("/all", StringComparison.Ordinal))
         {
             this.HandleEdit(context, path["/library/sections/".Length..^"/all".Length], request.Query);
+            this.AfterRequest?.Invoke(request);
+            return;
+        }
+
+        Match labelRoute = LabelRoute().Match(path);
+        if (labelRoute.Success && request.Method == HttpMethods.Get)
+        {
+            await WriteAsync(context, this.RenderLabels(int.Parse(labelRoute.Groups[1].Value, CultureInfo.InvariantCulture)));
             this.AfterRequest?.Invoke(request);
             return;
         }
@@ -409,6 +436,9 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     [GeneratedRegex(@"^label\[(\d+)\]\.tag\.tag$", RegexOptions.CultureInvariant)]
     private static partial Regex LabelKey();
+
+    [GeneratedRegex(@"^/library/sections/([0-9]+)/label$", RegexOptions.CultureInvariant)]
+    private static partial Regex LabelRoute();
 
     public sealed record RecordedRequest(
         string Method,

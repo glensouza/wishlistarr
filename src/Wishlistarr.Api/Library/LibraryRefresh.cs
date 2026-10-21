@@ -34,7 +34,7 @@ public sealed partial class LibraryRefresh(
     ILogger<LibraryRefresh> logger)
 {
     private const int BatchSize = 200;
-    private static readonly TimeSpan CursorOverlap = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan CursorOverlap = TimeSpan.FromSeconds(5);
 
     private readonly Dictionary<(MediaKind Kind, int TmdbId), int> titleIds = [];
     private bool tmdbUnavailable;
@@ -63,6 +63,7 @@ public sealed partial class LibraryRefresh(
         }
 
         DateTimeOffset? newest = await this.IndexAsync(scan, null, ct);
+        await this.SyncLabelMembershipAsync(scan.ServerId, ct);
         await this.RemoveOrphanTitlesAsync(ct);
         LibraryRefreshState current = await db.LibraryRefreshStates.SingleAsync(ct);
         current.LastIncrementalRefreshAt = time.GetUtcNow();
@@ -159,6 +160,7 @@ public sealed partial class LibraryRefresh(
         }
 
         await this.RemoveOrphanTitlesAsync(ct);
+        await this.SyncLabelMembershipAsync(scan.ServerId, ct);
 
         LibraryRefreshState state = await db.LibraryRefreshStates.SingleOrDefaultAsync(ct) ?? db.LibraryRefreshStates.Add(new()).Entity;
         state.ServerId = scan.ServerId;
@@ -166,6 +168,49 @@ public sealed partial class LibraryRefresh(
         state.UpdatedCursor = newest;
         await db.SaveChangesAsync(ct);
         this.LogRefreshed(seen.Count);
+    }
+
+    private async Task SyncLabelMembershipAsync(string serverId, CancellationToken ct)
+    {
+        LibraryLabelScan labels = await scanner.ScanLabelsAsync(ct);
+        if (labels.ServerId != serverId || !labels.Complete)
+        {
+            return;
+        }
+
+        Dictionary<string, int> itemIds = (await db.LibraryItems
+            .Where(item => item.ServerId == serverId)
+            .Select(item => new { item.Id, item.RatingKey })
+            .ToListAsync(ct)).ToDictionary(item => item.RatingKey, item => item.Id, StringComparer.Ordinal);
+        Dictionary<(int ItemId, string Label), string> desired = [];
+        foreach ((string ratingKey, IReadOnlyList<string> tags) in labels.LabelsByItem)
+        {
+            if (!itemIds.TryGetValue(ratingKey, out int itemId))
+            {
+                continue;
+            }
+
+            foreach (string tag in tags.Select(tag => tag.Trim()).Where(tag => tag.Length is > 0 and <= LibraryItemLabel.MaxLength))
+            {
+                desired.TryAdd((itemId, tag.ToUpperInvariant()), tag);
+            }
+        }
+
+        var existing = await db.LibraryItemLabels
+            .Where(label => label.Item!.ServerId == serverId)
+            .Select(label => new { label.Id, label.ItemId, label.Label })
+            .ToListAsync(ct);
+        foreach (int[] chunk in existing.Where(row => !desired.ContainsKey((row.ItemId, row.Label.ToUpperInvariant()))).Select(row => row.Id).Chunk(500))
+        {
+            await db.LibraryItemLabels.Where(label => chunk.Contains(label.Id)).ExecuteDeleteAsync(ct);
+        }
+
+        HashSet<(int, string)> present = [.. existing.Select(row => (row.ItemId, row.Label.ToUpperInvariant()))];
+        db.LibraryItemLabels.AddRange(desired
+            .Where(pair => !present.Contains(pair.Key))
+            .Select(pair => new LibraryItemLabel { ItemId = pair.Key.ItemId, Label = pair.Value }));
+        await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
     }
 
     private async Task<DateTimeOffset?> IndexAsync(LibraryScan scan, HashSet<string>? seen, CancellationToken ct)
@@ -218,7 +263,11 @@ public sealed partial class LibraryRefresh(
             item.Year = media.Year;
             item.PlexUpdatedAt = entry.UpdatedAt;
             item.IndexedAt = now;
-            SyncLabels(item, entry.Labels);
+            if (entry.Labels is not null)
+            {
+                SyncLabels(item, entry.Labels);
+            }
+
             await this.SyncIdsAsync(item, media, now, ct);
         }
 

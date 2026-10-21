@@ -2,7 +2,8 @@ using Wishlistarr.Core.MediaServers;
 
 namespace Wishlistarr.Core.Library;
 
-public sealed record LibraryEntry(MediaItem Item, IReadOnlyList<string> Labels, DateTimeOffset? UpdatedAt);
+// Labels is null when the source does not carry them, as in section listings, so the stored labels are left alone.
+public sealed record LibraryEntry(MediaItem Item, IReadOnlyList<string>? Labels, DateTimeOffset? UpdatedAt);
 
 public sealed class LibraryScanReport
 {
@@ -15,11 +16,16 @@ public sealed record LibraryScan(string ServerId, IAsyncEnumerable<LibraryEntry>
     public LibraryScanReport Report { get; init; } = new();
 }
 
+public sealed record LibraryLabelScan(string ServerId, IReadOnlyDictionary<string, IReadOnlyList<string>> LabelsByItem, bool Complete);
+
 public interface ILibraryScanner
 {
-    // A null updatedSince reads every movie and show. Otherwise only items changed after that time are read; callers
-    // step the bound back to allow for servers that treat it as exclusive.
+    // A null updatedSince reads every movie and show. Otherwise only items changed strictly after that time are read,
+    // so callers step the bound back to cover items changed in the same second.
     Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default);
+
+    // Reads which items carry which labels without depending on when items last changed.
+    Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default);
 
     Task<string?> GetServerIdAsync(CancellationToken ct = default);
 

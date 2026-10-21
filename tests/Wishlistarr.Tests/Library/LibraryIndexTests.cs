@@ -190,6 +190,39 @@ public sealed class LibraryIndexTests
     }
 
     [Fact]
+    public async Task Label_changes_are_picked_up_even_when_plex_does_not_bump_the_item()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")], ["Kids-Ada"], Early));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Other", [Tmdb("604")], [], Early));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.Clear();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")], [], Early));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Other", [Tmdb("604")], ["Kids-Bo"], Early));
+        await harness.IncrementalAsync();
+
+        List<LibraryItem> items = await harness.GetItemsAsync();
+        Assert.Empty(items.Single(item => item.RatingKey == "101").Labels);
+        Assert.Equal(["Kids-Bo"], items.Single(item => item.RatingKey == "102").Labels.Select(label => label.Label));
+        Assert.Equal(2, harness.Scanner.LabelScans);
+    }
+
+    [Fact]
+    public async Task An_incomplete_label_read_leaves_the_stored_labels_alone()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")], ["Kids-Ada"], Early));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries[0] = FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")], [], Early);
+        harness.Scanner.Complete = false;
+        await harness.IncrementalAsync();
+
+        Assert.Equal(["Kids-Ada"], (await harness.GetItemsAsync()).Single().Labels.Select(label => label.Label));
+    }
+
+    [Fact]
     public async Task An_incremental_refresh_reads_only_items_changed_since_the_cursor()
     {
         await using LibraryHarness harness = await LibraryHarness.CreateAsync();
@@ -200,7 +233,7 @@ public sealed class LibraryIndexTests
         harness.Time.Advance(TimeSpan.FromDays(1));
         await harness.IncrementalAsync();
 
-        Assert.Equal<DateTimeOffset?>([null, Early - TimeSpan.FromSeconds(1)], harness.Scanner.Scans);
+        Assert.Equal<DateTimeOffset?>([null, Early - TimeSpan.FromSeconds(5)], harness.Scanner.Scans);
         Assert.Equal("102", Assert.Single(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "2") ?? []).Id);
         Assert.Equal(2, (await harness.GetItemsAsync()).Count);
     }

@@ -218,6 +218,9 @@ public sealed class LibraryApiTests(LibraryApiFactory factory) : IClassFixture<L
 
         public Task<string?> GetServerIdAsync(CancellationToken ct = default) => Task.FromResult<string?>(null);
 
+        public Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default) =>
+            throw new MediaServerNotConfiguredException("No Plex server is selected.");
+
         public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
         {
             this.Scans++;

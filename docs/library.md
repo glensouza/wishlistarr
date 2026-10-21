@@ -27,7 +27,11 @@ Two jobs run through the [job runner](jobs.md):
 
 The two jobs never run at the same time. Both finish quietly when Plex is not linked or no server is selected. Change the intervals or turn a job off under `Jobs:Schedules` as described in the job documentation; a parent can also start either job with `POST /api/v1/jobs/{name}/run`.
 
-A Plex `library.new` [webhook](webhooks.md) refreshes the announced item straight away, resolving a season or episode to its show. When the event does not name an item, or another refresh is already running, an incremental refresh is started instead so webhook processing never waits. Plex does not announce label edits, so those are picked up by the next incremental refresh.
+A Plex `library.new` [webhook](webhooks.md) refreshes the announced item straight away, resolving a season or episode to its show. When the event does not name an item, or another refresh is already running, an incremental refresh is started instead so webhook processing never waits. Plex does not announce label edits.
+
+## How labels are read
+
+Plex section listings do not include labels; they only appear on an item's detail. Reading every item would cost one request per item, so each full and incremental refresh instead asks every movie and show library for its labels and then lists the items carrying each label (`/library/sections/{id}/all?label={key}`). That is a few requests per label rather than one per item, and it does not depend on Plex changing an item's last-changed time when a label is edited, so label changes are picked up by the next incremental refresh. If Plex returns fewer items for a label than it announced, the stored labels are left as they were for that run. A webhook item refresh reads the item detail, which carries its labels.
 
 Until the first full refresh completes the index reports that it cannot answer and requests fall back to asking Plex directly.
 

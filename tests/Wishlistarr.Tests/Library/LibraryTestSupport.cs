@@ -21,6 +21,8 @@ public sealed class FakeScanner : ILibraryScanner
 
     public bool Complete { get; set; } = true;
 
+    public int LabelScans { get; private set; }
+
     public List<LibraryEntry> Entries { get; } = [];
 
     public List<DateTimeOffset?> Scans { get; } = [];
@@ -41,11 +43,22 @@ public sealed class FakeScanner : ILibraryScanner
     public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
     {
         this.Scans.Add(updatedSince);
-        IEnumerable<LibraryEntry> matching = this.Entries.Where(entry => updatedSince is null || entry.UpdatedAt > updatedSince);
+        IEnumerable<LibraryEntry> matching = this.Entries
+            .Where(entry => updatedSince is null || entry.UpdatedAt > updatedSince)
+            .Select(entry => entry with { Labels = null });
         return Task.FromResult(new LibraryScan(this.ServerId, matching.ToList().ToAsyncEnumerable())
         {
             Report = new LibraryScanReport { Complete = this.Complete },
         });
+    }
+
+    public Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default)
+    {
+        this.LabelScans++;
+        Dictionary<string, IReadOnlyList<string>> byItem = this.Entries
+            .Where(entry => entry.Labels is { Count: > 0 })
+            .ToDictionary(entry => entry.Item.Id, entry => entry.Labels!);
+        return Task.FromResult(new LibraryLabelScan(this.ServerId, byItem, this.Complete));
     }
 
     public Task<string?> GetServerIdAsync(CancellationToken ct = default) => Task.FromResult<string?>(this.SelectedServerId ?? this.ServerId);

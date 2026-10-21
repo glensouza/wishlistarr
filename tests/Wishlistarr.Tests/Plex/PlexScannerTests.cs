@@ -10,7 +10,7 @@ public sealed class PlexScannerTests
     private const long FixtureUpdatedAt = 1727740800;
 
     [Fact]
-    public async Task A_scan_reads_every_movie_and_show_with_ids_and_labels()
+    public async Task A_scan_reads_every_movie_and_show_with_ids_but_without_labels()
     {
         await using PlexHarness harness = await PlexHarness.CreateAsync(options => options.PageSize = 2);
         await harness.LinkAndSelectAsync();
@@ -23,13 +23,50 @@ public sealed class PlexScannerTests
         Assert.Equal(FakePlexServer.MachineIdentifier, scan.ServerId);
         Assert.Equal(["101", "102", "103", "201", "202", "301", "302", "401", "402"], entries.Select(entry => entry.Item.Id).Order());
         LibraryEntry matrix = entries.Single(entry => entry.Item.Id == "101");
-        Assert.Equal(["Favourite", "Kids-Ada"], matrix.Labels.Order());
+        Assert.Null(matrix.Labels);
         Assert.Contains(new ExternalId(ExternalIdSource.Tmdb, "603"), matrix.Item.ExternalIds);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(FixtureUpdatedAt), matrix.UpdatedAt);
         Assert.Equal(MediaKind.Show, entries.Single(entry => entry.Item.Id == "401").Item.Kind);
         Assert.Equal([new ExternalId(ExternalIdSource.Tvdb, "74852")], entries.Single(entry => entry.Item.Id == "401").Item.ExternalIds);
         Assert.Equal([new ExternalId(ExternalIdSource.Imdb, "tt0111161")], entries.Single(entry => entry.Item.Id == "301").Item.ExternalIds);
         Assert.Empty(entries.Single(entry => entry.Item.Id == "402").Item.ExternalIds);
+    }
+
+    [Fact]
+    public async Task Labels_are_read_per_label_from_filtered_listings_without_fetching_each_item()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync(options => options.PageSize = 1);
+        await harness.LinkAndSelectAsync();
+        harness.Server.Item("101").SetLabels("Kids-Ada", "Favourite");
+        harness.Server.Item("102").SetLabels("Kids-Ada");
+        harness.Server.Item("201").SetLabels("kids-ada");
+        ILibraryScanner scanner = harness.Provider.GetRequiredService<ILibraryScanner>();
+
+        LibraryLabelScan scan = await scanner.ScanLabelsAsync();
+
+        Assert.True(scan.Complete);
+        Assert.Equal(FakePlexServer.MachineIdentifier, scan.ServerId);
+        Assert.Equal(["Favourite", "Kids-Ada"], scan.LabelsByItem["101"].Order());
+        Assert.Equal(["Kids-Ada"], scan.LabelsByItem["102"]);
+        Assert.Equal(["kids-ada"], scan.LabelsByItem["201"]);
+        Assert.Equal(3, scan.LabelsByItem.Count);
+        Assert.DoesNotContain(harness.Server.Requests, request => request.Path.StartsWith("/library/metadata/", StringComparison.Ordinal));
+        Assert.Equal(4, harness.Server.Requests.Count(request => request.Path == "/library/sections/1/label" || request.Path == "/library/sections/2/label" || request.Path == "/library/sections/3/label" || request.Path == "/library/sections/4/label"));
+    }
+
+    [Fact]
+    public async Task Listings_never_carry_labels_so_only_the_item_detail_does()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync();
+        await harness.LinkAndSelectAsync();
+        harness.Server.Item("101").SetLabels("Kids-Ada");
+        ILibraryScanner scanner = harness.Provider.GetRequiredService<ILibraryScanner>();
+
+        List<LibraryEntry> listed = await ReadAsync(await scanner.ScanAsync(null));
+        LibrarySnapshot? detail = await scanner.GetEntryAsync("101");
+
+        Assert.All(listed, entry => Assert.Null(entry.Labels));
+        Assert.Equal(["Kids-Ada"], detail?.Entry.Labels);
     }
 
     [Fact]
