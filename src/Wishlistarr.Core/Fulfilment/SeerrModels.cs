@@ -81,9 +81,10 @@ public sealed record SeerrSubmission(
     int? Id,
     SeerrRequestStatus? Status,
     SeerrAvailability Availability,
+    SeerrAvailability? SeasonsAvailability,
     bool Attached);
 
-public sealed record SeerrTrackedRequest(int Id, SeerrRequestStatus Status, SeerrAvailability Availability);
+public sealed record SeerrTrackedRequest(int Id, SeerrRequestStatus Status, SeerrAvailability Availability, SeerrAvailability? SeasonsAvailability);
 
 public interface ISeerrBackend
 {

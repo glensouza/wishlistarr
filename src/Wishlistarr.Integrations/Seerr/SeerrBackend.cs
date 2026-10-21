@@ -127,7 +127,21 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             throw new SeerrException("Seerr did not return a request id.");
         }
 
-        return new SeerrSubmission(SeerrSubmitOutcome.Created, id, RequestStatus(created.Body?["status"]), Availability(created.Body?["media"]?["status"], flavour), false);
+        JsonNode? createdMedia = created.Body?["media"] ?? title?["mediaInfo"];
+        SeerrAvailability? createdSeasons = null;
+        if (request.Kind == MediaKind.Show && ParseRequest(created.Body) is { } made)
+        {
+            ExistingRequest[] holders = [made, .. Requests(title?["mediaInfo"])];
+            createdSeasons = SeasonsAvailability(wanted ?? made.Seasons, createdMedia, holders, flavour);
+        }
+
+        return new SeerrSubmission(
+            SeerrSubmitOutcome.Created,
+            id,
+            RequestStatus(created.Body?["status"]),
+            Availability(created.Body?["media"]?["status"], flavour),
+            createdSeasons,
+            false);
     }
 
     public async Task<SeerrTrackedRequest> GetRequestAsync(int requestId, CancellationToken ct = default)
@@ -154,7 +168,10 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             throw new SeerrException("Seerr did not return a request id.");
         }
 
-        return new SeerrTrackedRequest(id, RequestStatus(body?["status"]), Availability(body?["media"]?["status"], flavour));
+        SeerrAvailability? seasons = Text(body?["type"]) == "tv" && ParseRequest(body) is { } tracked
+            ? SeasonsAvailability(tracked.Seasons, body?["media"], [tracked], flavour)
+            : null;
+        return new SeerrTrackedRequest(id, RequestStatus(body?["status"]), Availability(body?["media"]?["status"], flavour), seasons);
     }
 
     private async Task<SeerrConnection> RequireAsync(CancellationToken ct) =>
@@ -198,22 +215,24 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
 
         SeerrAvailability availability = Availability(media["status"], flavour);
-        ExistingRequest[] requests = media["requests"] is JsonArray list
-            ? [.. list.Select(ParseRequest).OfType<ExistingRequest>().Where(item => !item.Is4k && item.Status != SeerrRequestStatus.Declined)]
-            : [];
+        ExistingRequest[] requests = Requests(media);
         ExistingRequest[] active = [.. requests.Where(item => item.Status != SeerrRequestStatus.Completed)];
         ExistingRequest[] completed = [.. requests.Where(item => item.Status == SeerrRequestStatus.Completed)];
-        SeerrSubmission? alreadyAvailable = availability == SeerrAvailability.Available ? AlreadyAvailable(availability) : null;
 
         if (kind == MediaKind.Movie)
         {
-            ExistingRequest? movie = Preferred(active, userId) ?? (alreadyAvailable is not null ? Preferred(completed, userId) : null);
-            return movie is not null ? Attach(movie, availability) : alreadyAvailable;
+            ExistingRequest? movie = Preferred(active, userId)
+                ?? (availability == SeerrAvailability.Available ? Preferred(completed, userId) : null);
+            return movie is not null ? new SeerrSubmission(SeerrSubmitOutcome.Attached, movie.Id, movie.Status, availability, null, true)
+                : availability == SeerrAvailability.Available ? new SeerrSubmission(SeerrSubmitOutcome.AlreadyAvailable, null, null, availability, null, false)
+                : null;
         }
 
         if (wanted is null && !seerrSaysCovered)
         {
-            return alreadyAvailable;
+            return availability == SeerrAvailability.Available
+                ? new SeerrSubmission(SeerrSubmitOutcome.AlreadyAvailable, null, null, availability, SeerrAvailability.Available, false)
+                : null;
         }
 
         HashSet<int> covered = [.. active.SelectMany(item => item.Seasons)];
@@ -230,22 +249,34 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             return null;
         }
 
-        ExistingRequest? show = Preferred(active.Where(item => wanted is null || item.Seasons.Overlaps(wanted)), userId)
-            ?? Preferred(completed.Where(item => wanted is null || item.Seasons.Overlaps(wanted)), userId);
-        return show is not null ? Attach(show, availability) : Covered(media, wanted, flavour, availability);
-    }
-
-    private static SeerrSubmission Covered(JsonObject media, IReadOnlyList<int>? wanted, ServerFlavour flavour, SeerrAvailability title)
-    {
-        if (wanted is null)
+        ExistingRequest? show = Preferred(active.Where(item => wanted is null || wanted.Any(item.SeasonStatus.ContainsKey)), userId)
+            ?? Preferred(completed.Where(item => wanted is null || wanted.Any(item.SeasonStatus.ContainsKey)), userId);
+        IEnumerable<int> asked = wanted ?? show?.Seasons ?? [.. LibrarySeasons(media, flavour).Keys.Where(season => season > 0)];
+        SeerrAvailability seasons = SeasonsAvailability(asked, media, requests, flavour);
+        if (show is not null)
         {
-            return title == SeerrAvailability.Available
-                ? AlreadyAvailable(title)
-                : new SeerrSubmission(SeerrSubmitOutcome.AlreadyCovered, null, null, title, false);
+            return new SeerrSubmission(SeerrSubmitOutcome.Attached, show.Id, show.Status, availability, seasons, true);
         }
 
+        bool available = seasons == SeerrAvailability.Available || (wanted is null && availability == SeerrAvailability.Available);
+        return new SeerrSubmission(
+            available ? SeerrSubmitOutcome.AlreadyAvailable : SeerrSubmitOutcome.AlreadyCovered,
+            null,
+            null,
+            availability,
+            seasons,
+            false);
+    }
+
+    private static ExistingRequest[] Requests(JsonNode? media) =>
+        media?["requests"] is JsonArray list
+            ? [.. list.Select(ParseRequest).OfType<ExistingRequest>().Where(item => !item.Is4k && item.Status != SeerrRequestStatus.Declined)]
+            : [];
+
+    private static Dictionary<int, SeerrAvailability> LibrarySeasons(JsonNode? media, ServerFlavour flavour)
+    {
         Dictionary<int, SeerrAvailability> library = [];
-        if (media["seasons"] is JsonArray seasons)
+        if (media?["seasons"] is JsonArray seasons)
         {
             foreach (JsonNode? season in seasons)
             {
@@ -256,29 +287,46 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             }
         }
 
-        SeerrAvailability[] statuses = [.. wanted.Select(season => library.GetValueOrDefault(season, SeerrAvailability.Unknown))];
+        return library;
+    }
+
+    private static SeerrAvailability SeasonsAvailability(
+        IEnumerable<int> seasons,
+        JsonNode? media,
+        IReadOnlyCollection<ExistingRequest> requests,
+        ServerFlavour flavour)
+    {
+        Dictionary<int, SeerrAvailability> library = LibrarySeasons(media, flavour);
+        SeerrAvailability[] statuses = [.. seasons.Distinct().Select(season =>
+            library.TryGetValue(season, out SeerrAvailability known) && known != SeerrAvailability.Unknown
+                ? known
+                : requests
+                    .Where(item => item.SeasonStatus.ContainsKey(season))
+                    .Select(item => item.SeasonStatus[season] switch
+                    {
+                        SeerrRequestStatus.Completed => SeerrAvailability.Available,
+                        SeerrRequestStatus.Approved => SeerrAvailability.Processing,
+                        SeerrRequestStatus.Pending => SeerrAvailability.Pending,
+                        _ => SeerrAvailability.Unknown,
+                    })
+                    .DefaultIfEmpty(SeerrAvailability.Unknown)
+                    .Max())];
+
         if (statuses.Length > 0 && statuses.All(status => status == SeerrAvailability.Available))
         {
-            return AlreadyAvailable(SeerrAvailability.Available);
+            return SeerrAvailability.Available;
         }
 
-        SeerrAvailability furthest =
-            statuses.Any(status => status is SeerrAvailability.Available or SeerrAvailability.PartiallyAvailable) ? SeerrAvailability.PartiallyAvailable
+        return statuses.Any(status => status is SeerrAvailability.Available or SeerrAvailability.PartiallyAvailable) ? SeerrAvailability.PartiallyAvailable
             : statuses.Contains(SeerrAvailability.Processing) ? SeerrAvailability.Processing
             : statuses.Contains(SeerrAvailability.Pending) ? SeerrAvailability.Pending
             : statuses.Contains(SeerrAvailability.Blocklisted) ? SeerrAvailability.Blocklisted
+            : statuses.Contains(SeerrAvailability.Deleted) ? SeerrAvailability.Deleted
             : SeerrAvailability.Unknown;
-        return new SeerrSubmission(SeerrSubmitOutcome.AlreadyCovered, null, null, furthest, false);
     }
 
     private static ExistingRequest? Preferred(IEnumerable<ExistingRequest> requests, int userId) =>
         requests.OrderBy(item => item.RequestedBy == userId ? 0 : 1).ThenBy(item => item.Id).FirstOrDefault();
-
-    private static SeerrSubmission Attach(ExistingRequest request, SeerrAvailability availability) =>
-        new(SeerrSubmitOutcome.Attached, request.Id, request.Status, availability, true);
-
-    private static SeerrSubmission AlreadyAvailable(SeerrAvailability availability) =>
-        new(SeerrSubmitOutcome.AlreadyAvailable, null, null, availability, false);
 
     private static ExistingRequest? ParseRequest(JsonNode? node)
     {
@@ -287,9 +335,20 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             return null;
         }
 
-        HashSet<int> seasons = node?["seasons"] is JsonArray list
-            ? [.. list.Select(season => Int(season?["seasonNumber"])).OfType<int>()]
-            : [];
+        Dictionary<int, SeerrRequestStatus> seasons = [];
+        if (node?["seasons"] is JsonArray list)
+        {
+            foreach (JsonNode? season in list)
+            {
+                if (Int(season?["seasonNumber"]) is int number)
+                {
+                    seasons[number] = Int(season?["status"]) is int code && Enum.IsDefined((SeerrRequestStatus)code)
+                        ? (SeerrRequestStatus)code
+                        : SeerrRequestStatus.Unknown;
+                }
+            }
+        }
+
         bool is4k = node?["is4k"] is JsonValue flag && flag.TryGetValue(out bool value) && value;
         return new ExistingRequest(id, RequestStatus(node?["status"]), is4k, seasons, Int(node?["requestedBy"]?["id"]));
     }
@@ -477,5 +536,13 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     private sealed record CachedFlavour(Uri Url, long Revision, DateTimeOffset Expires, ServerFlavour Flavour);
 
-    private sealed record ExistingRequest(int Id, SeerrRequestStatus Status, bool Is4k, HashSet<int> Seasons, int? RequestedBy);
+    private sealed record ExistingRequest(
+        int Id,
+        SeerrRequestStatus Status,
+        bool Is4k,
+        IReadOnlyDictionary<int, SeerrRequestStatus> SeasonStatus,
+        int? RequestedBy)
+    {
+        public IReadOnlyCollection<int> Seasons => [.. this.SeasonStatus.Keys];
+    }
 }

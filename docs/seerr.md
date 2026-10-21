@@ -59,18 +59,23 @@ Before creating anything, the title is read from Seerr and an existing request i
 
 When another request is made between the read and the create, Seerr answers `409` (a movie that already has a request) or `202` (a show with no seasons left to request). The title is then read again and the matching request is attached, or the outcome is `alreadyAvailable` or `alreadyCovered` as above.
 
-The response is `{ "outcome", "id", "status", "availability", "attached" }`. `outcome` is one of:
+The response is `{ "outcome", "id", "status", "availability", "seasonsAvailability", "attached" }`.
+
+- `availability` is always the media status of the whole title, as Seerr reports it.
+- `seasonsAvailability` is null for movies. For shows it rolls up the requested seasons (or, when Wishlistarr cannot tell which seasons "all" means, the seasons of the request): `available` when every one is available, `partiallyAvailable` when some are, otherwise the furthest any has got among `processing`, `pending`, `blocklisted`, `deleted` and `unknown`. Each season takes its status from Seerr's library when it has one there, and otherwise from the request that holds it: completed counts as `available`, approved as `processing`, pending as `pending`.
+
+`outcome` is one of:
 
 - `created`: a new request was made. `id` and `status` are set.
 - `attached`: an existing request was used. `id` and `status` are set and `attached` is true.
-- `alreadyAvailable`: nothing was requested because the movie, or every requested season, is available. `id` and `status` are null and `availability` is `available`.
-- `alreadyCovered`: nothing was requested and there is no request to track, but the title is not available yet. `id` and `status` are null. For a show, `availability` describes the requested seasons rather than the whole show: `partiallyAvailable` when some are available, otherwise `processing`, `pending`, `blocklisted` or `unknown` for the furthest any of them has got. A dispatcher should treat this as still on its way, not as in the library.
+- `alreadyAvailable`: nothing was requested because the movie, or every requested season, is available. `id` and `status` are null. For a movie `availability` is `available`; for a show `seasonsAvailability` is `available`, while `availability` may still be `partiallyAvailable` when other seasons are missing.
+- `alreadyCovered`: shows only. Nothing was requested and there is no request to track, because Seerr already lists every requested season, but not all of them are available. `id` and `status` are null and `seasonsAvailability` says how far they have got. A dispatcher should treat this as still on its way, not as in the library, and can watch the title rather than a request.
 
 `attached` is kept for callers that only need to know whether an existing request was used.
 
 ## Tracking
 
-`GET /api/v1/seerr/requests/{id}` answers `{ "id", "status", "availability" }`, so a title that has arrived can be detected.
+`GET /api/v1/seerr/requests/{id}` answers `{ "id", "status", "availability", "seasonsAvailability" }`, so a title that has arrived can be detected. `availability` is the whole title. For a show request, `seasonsAvailability` rolls up that request's own seasons as described above, so it reaches `available` when the seasons that were asked for have arrived even if the show is only partially available. It is null for a movie request.
 
 `status` is the request status:
 
@@ -83,7 +88,7 @@ The response is `{ "outcome", "id", "status", "availability", "attached" }`. `ou
 | 5 | `completed` |
 | other | `unknown` |
 
-`availability` is the media status of the title, not of the request:
+`availability` and `seasonsAvailability` use these names:
 
 | Seerr value | Name |
 | --- | --- |

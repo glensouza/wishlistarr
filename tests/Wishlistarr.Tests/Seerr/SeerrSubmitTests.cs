@@ -150,7 +150,8 @@ public sealed class SeerrSubmitTests
         Assert.True(all.Attached);
         Assert.Equal(SeerrAvailability.PartiallyAvailable, all.Availability);
         Assert.Equal(SeerrSubmitOutcome.AlreadyAvailable, available.Outcome);
-        Assert.Equal(SeerrAvailability.Available, available.Availability);
+        Assert.Equal(SeerrAvailability.PartiallyAvailable, available.Availability);
+        Assert.Equal(SeerrAvailability.Available, available.SeasonsAvailability);
         Assert.Null(available.Id);
         Assert.False(available.Attached);
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
@@ -261,7 +262,8 @@ public sealed class SeerrSubmitTests
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1]));
 
         Assert.Equal(SeerrSubmitOutcome.AlreadyCovered, result.Outcome);
-        Assert.Equal(SeerrAvailability.Blocklisted, result.Availability);
+        Assert.Equal(SeerrAvailability.Pending, result.Availability);
+        Assert.Equal(SeerrAvailability.Blocklisted, result.SeasonsAvailability);
         Assert.Null(result.Id);
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
     }
@@ -280,7 +282,8 @@ public sealed class SeerrSubmitTests
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1, 2]));
 
         Assert.Equal(SeerrSubmitOutcome.AlreadyCovered, result.Outcome);
-        Assert.Equal(expected, result.Availability);
+        Assert.Equal(SeerrAvailability.PartiallyAvailable, result.Availability);
+        Assert.Equal(expected, result.SeasonsAvailability);
         Assert.Null(result.Id);
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
     }

@@ -124,7 +124,8 @@ public sealed class SeerrApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("alreadyCovered", body.GetProperty("outcome").GetString());
-        Assert.Equal("processing", body.GetProperty("availability").GetString());
+        Assert.Equal("pending", body.GetProperty("availability").GetString());
+        Assert.Equal("processing", body.GetProperty("seasonsAvailability").GetString());
         Assert.Equal(JsonValueKind.Null, body.GetProperty("id").ValueKind);
     }
 
@@ -270,6 +271,7 @@ public sealed class SeerrApiTests
         JsonElement body = await GetRequestAsync(client, id);
 
         Assert.Equal(expected, body.GetProperty("availability").GetString());
+        Assert.Equal("processing", body.GetProperty("seasonsAvailability").GetString());
     }
 
     [Fact]
@@ -299,6 +301,7 @@ public sealed class SeerrApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("unknown", body.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("seasonsAvailability").ValueKind);
     }
 
     [Fact]

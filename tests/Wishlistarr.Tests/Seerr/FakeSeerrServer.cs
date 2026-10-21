@@ -199,6 +199,17 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
     private static bool Has(long permissions, long wanted) => (permissions & (Admin | wanted)) != 0;
 
+    private static JsonArray MediaSeasons(StoredMedia media)
+    {
+        JsonArray seasons = [];
+        foreach ((int season, int status) in media.Seasons.OrderBy(pair => pair.Key))
+        {
+            seasons.Add(new JsonObject { ["seasonNumber"] = season, ["status"] = status, ["status4k"] = MediaUnknown });
+        }
+
+        return seasons;
+    }
+
     private StoredMedia MediaFor(string mediaType, int tmdbId)
     {
         if (!this.media.TryGetValue((mediaType, tmdbId), out StoredMedia? found))
@@ -236,6 +247,7 @@ public sealed class FakeSeerrServer : IAsyncDisposable
                 ["mediaType"] = request.MediaType,
                 ["status"] = media.Status,
                 ["status4k"] = MediaUnknown,
+                ["seasons"] = MediaSeasons(media),
             };
         }
 
@@ -276,12 +288,7 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             requests.Add(this.RequestJson(match, false));
         }
 
-        JsonArray seasons = [];
-        foreach ((int season, int status) in stored.Seasons.OrderBy(pair => pair.Key))
-        {
-            seasons.Add(new JsonObject { ["seasonNumber"] = season, ["status"] = status, ["status4k"] = MediaUnknown });
-        }
-
+        JsonArray seasons = MediaSeasons(stored);
         title["mediaInfo"] = new JsonObject
         {
             ["tmdbId"] = tmdbId,
