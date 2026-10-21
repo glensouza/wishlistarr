@@ -3,6 +3,7 @@ using Wishlistarr.Core.Requests;
 
 namespace Wishlistarr.Data;
 
+[TmdbData(nameof(TitleFetchedAt), nameof(Title))]
 public sealed class MediaRequest
 {
     public int Id { get; set; }
@@ -15,7 +16,9 @@ public sealed class MediaRequest
 
     public int TmdbId { get; set; }
 
-    public required string Title { get; set; }
+    public string? Title { get; set; }
+
+    public DateTimeOffset? TitleFetchedAt { get; set; }
 
     public RequestState State { get; set; }
 

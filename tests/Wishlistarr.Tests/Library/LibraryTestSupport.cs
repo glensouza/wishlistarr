@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Globalization;
+using System.Net;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -115,7 +116,24 @@ public sealed class FakeTmdbFinder : ITmdbClient
 
     public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
-    public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+    public Dictionary<(TmdbMediaType Type, int Id), string> Titles { get; } = [];
+
+    public Exception? DetailsFailure { get; set; }
+
+    public int DetailCalls { get; private set; }
+
+    public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default)
+    {
+        this.DetailCalls++;
+        if (this.DetailsFailure is not null)
+        {
+            throw this.DetailsFailure;
+        }
+
+        return this.Titles.TryGetValue((type, id), out string? title)
+            ? Task.FromResult(new TmdbDetails(id, title, null, null, null, null, null, null, null, null, null, null, null, 0))
+            : throw new TmdbException("TMDB answered 404.", HttpStatusCode.NotFound);
+    }
 
     public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 

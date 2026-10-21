@@ -59,6 +59,7 @@ public enum LibraryIdOrigin
     TmdbLookup,
 }
 
+[TmdbData(nameof(FetchedAt), nameof(Value))]
 public sealed class LibraryExternalId
 {
     public int Id { get; set; }

@@ -46,7 +46,7 @@ public static class ApiEndpoints
             .WithSummary("Lists settings. Secret values are never returned.")
             .Produces<IReadOnlyList<SettingSummary>>();
 
-        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, CancellationToken ct) =>
+        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, TmdbDataService data, CancellationToken ct) =>
         {
             if (update?.Value is null)
             {
@@ -88,11 +88,25 @@ public static class ApiEndpoints
                     title: "The time zone is not recognized. Use an IANA name such as America/Chicago.");
             }
 
+            if (key == TmdbRetention.SettingKey && !TmdbRetention.TryParse(update.Value, out _))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: $"The retention is a whole number of days from 1 to {TmdbRetention.MaxDays}.");
+            }
+
+            if (key == TmdbOptions.ApiKeySetting && string.IsNullOrWhiteSpace(update.Value))
+            {
+                await store.DeleteAsync(key, ct);
+                await data.PurgeAllAsync(ct);
+                return Results.NoContent();
+            }
+
             await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);
             return Results.NoContent();
         })
             .WithName("PutSetting")
-            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret.")
+            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest);
     }

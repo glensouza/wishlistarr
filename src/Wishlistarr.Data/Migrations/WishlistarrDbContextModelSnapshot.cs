@@ -396,8 +396,10 @@ namespace Wishlistarr.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
-                        .IsRequired()
                         .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("TitleFetchedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("TmdbId")

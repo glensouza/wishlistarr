@@ -28,6 +28,13 @@ public static class TmdbEndpoints
             .Produces<TmdbTestResult>()
             .ProducesProblem(StatusCodes.Status502BadGateway);
 
+        v1.MapPost("/settings/tmdb/clear-data", async (TmdbDataService data, CancellationToken ct) =>
+            Results.Ok(new TmdbClearResult(await data.PurgeAllAsync(ct))))
+            .WithTags("Settings")
+            .WithName("ClearTmdbData")
+            .WithSummary("Deletes all stored TMDB-derived data and empties the in-memory TMDB cache.")
+            .Produces<TmdbClearResult>();
+
         v1.MapGet("/images/tmdb/{size}/{file}", ServeImageAsync)
             .WithTags("Images")
             .WithName("GetTmdbImage")
@@ -65,3 +72,4 @@ public static class TmdbEndpoints
 }
 
 public sealed record TmdbTestResult(bool Valid, string Message);
+public sealed record TmdbClearResult(int Purged);
