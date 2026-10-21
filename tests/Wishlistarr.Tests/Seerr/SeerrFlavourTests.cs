@@ -79,11 +79,31 @@ public sealed class SeerrFlavourTests
         SeerrTrackedRequest first = await harness.Backend.GetRequestAsync(id);
         harness.Server.BlockPublicSettings = false;
         harness.Server.Overseerr = true;
+        harness.Time.Advance(SeerrBackend.FallbackLifetime);
         SeerrTrackedRequest second = await harness.Backend.GetRequestAsync(id);
 
         Assert.Equal(SeerrAvailability.Blocklisted, first.Availability);
         Assert.Equal(SeerrRequestStatus.Approved, first.Status);
         Assert.Equal(SeerrAvailability.Deleted, second.Availability);
+        Assert.Equal(2, harness.Server.Sent("GET", SettingsPath).Count());
+    }
+
+    [Fact]
+    public async Task A_failed_settings_read_is_not_retried_until_the_fallback_expires()
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.BlockPublicSettings = true;
+        int id = harness.Server.SeedRequest("movie", FakeSeerrServer.MovieTmdbId);
+
+        await harness.Backend.GetRequestAsync(id);
+        await harness.Backend.GetRequestAsync(id);
+        harness.Time.Advance(SeerrBackend.FallbackLifetime - TimeSpan.FromSeconds(1));
+        await harness.Backend.GetRequestAsync(id);
+        int beforeExpiry = harness.Server.Sent("GET", SettingsPath).Count();
+        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        await harness.Backend.GetRequestAsync(id);
+
+        Assert.Equal(1, beforeExpiry);
         Assert.Equal(2, harness.Server.Sent("GET", SettingsPath).Count());
     }
 
@@ -101,10 +121,15 @@ public sealed class SeerrFlavourTests
         Assert.Equal("all", Assert.Single(harness.Server.Sent("POST", "/api/v1/request")).Body!["seasons"]!.GetValue<string>());
     }
 
-    [Fact]
-    public async Task All_seasons_skip_an_announced_season_from_seerr_3_5()
+    [Theory]
+    [InlineData("3.5.0")]
+    [InlineData("v3.5.0")]
+    [InlineData("3.5")]
+    [InlineData("3.6.1-beta.2")]
+    [InlineData("4")]
+    public async Task All_seasons_skip_an_announced_season_from_seerr_3_5(string version)
     {
-        await using SeerrHarness harness = await AnnouncedShowAsync(false, "3.5.0", true);
+        await using SeerrHarness harness = await AnnouncedShowAsync(false, version, true);
 
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, null));
 

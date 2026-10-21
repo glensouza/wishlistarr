@@ -22,6 +22,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     public static TimeSpan FlavourLifetime { get; } = TimeSpan.FromMinutes(5);
 
+    public static TimeSpan FallbackLifetime { get; } = TimeSpan.FromMinutes(1);
+
     public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
     {
         SeerrConnection connection = await this.RequireAsync(ct);
@@ -352,6 +354,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
         catch (SeerrException)
         {
+            this.cachedFlavour = new CachedFlavour(connection.Url, revision, now + FallbackLifetime, ServerFlavour.Fallback);
             return ServerFlavour.Fallback;
         }
 
@@ -369,7 +372,15 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
     {
         string? text = Text(status?["version"])?.TrimStart('v');
         int suffix = text?.IndexOf('-', StringComparison.Ordinal) ?? -1;
-        return Version.TryParse(suffix >= 0 ? text![..suffix] : text, out Version? version) ? version : null;
+        string? release = suffix >= 0 ? text![..suffix] : text;
+        if (release is not null && !release.Contains('.', StringComparison.Ordinal))
+        {
+            release += ".0";
+        }
+
+        return Version.TryParse(release, out Version? version)
+            ? new Version(version.Major, version.Minor, Math.Max(version.Build, 0))
+            : null;
     }
 
     private async Task<JsonNode?> TitleAsync(SeerrConnection connection, string mediaType, int tmdbId, CancellationToken ct)
