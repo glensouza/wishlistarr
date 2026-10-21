@@ -12,6 +12,7 @@ public enum JobRunTrigger
 {
     Schedule,
     Manual,
+    Webhook,
 }
 
 public sealed class JobRun

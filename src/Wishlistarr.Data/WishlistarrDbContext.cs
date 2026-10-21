@@ -24,6 +24,8 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<JobRun> JobRuns => this.Set<JobRun>();
 
+    public DbSet<WebhookEvent> WebhookEvents => this.Set<WebhookEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -131,6 +133,15 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(run => run.Outcome).HasConversion<string>().HasMaxLength(16);
             entity.Property(run => run.Error).HasMaxLength(JobRun.MaxErrorLength);
             entity.HasIndex(run => new { run.JobName, run.Id });
+        });
+
+        modelBuilder.Entity<WebhookEvent>(entity =>
+        {
+            entity.Property(item => item.Source).HasMaxLength(WebhookEvent.MaxSourceLength);
+            entity.Property(item => item.DeliveryKey).HasMaxLength(WebhookEvent.KeyLength);
+            entity.Property(item => item.EventType).HasMaxLength(WebhookEvent.MaxEventTypeLength);
+            entity.HasIndex(item => new { item.Source, item.DeliveryKey }).IsUnique();
+            entity.HasIndex(item => item.ProcessedAt);
         });
     }
 }
