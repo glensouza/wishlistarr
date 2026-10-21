@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using Wishlistarr.Core.MediaServers;
 
 namespace Wishlistarr.Integrations.Tmdb;
 
@@ -80,6 +81,28 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
 
     public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
         this.GetAsync<TmdbWatchProviders>($"{Segment(type)}/{id}/watch/providers", [], DetailLifetime, ct);
+
+    public async Task<int?> FindIdAsync(TmdbMediaType type, ExternalIdSource source, string externalId, CancellationToken ct = default)
+    {
+        string? externalSource = source switch
+        {
+            ExternalIdSource.Tvdb => "tvdb_id",
+            ExternalIdSource.Imdb => "imdb_id",
+            _ => null,
+        };
+        if (externalSource is null)
+        {
+            throw new ArgumentOutOfRangeException(nameof(source), "Only TVDB and IMDb ids can be looked up.");
+        }
+
+        FindResponse response = await this.GetAsync<FindResponse>(
+            $"find/{Uri.EscapeDataString(externalId)}",
+            [("external_source", externalSource)],
+            DetailLifetime,
+            ct);
+        IReadOnlyList<FindResult>? results = type == TmdbMediaType.Movie ? response.MovieResults : response.TvResults;
+        return results is { Count: > 0 } ? results[0].Id : null;
+    }
 
     public async Task<TmdbCertification?> GetCertificationAsync(TmdbMediaType type, int id, IReadOnlyList<string> regions, CancellationToken ct = default)
     {
@@ -199,6 +222,13 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
 
         return await response.Content.ReadFromJsonAsync<T>(ct) ?? throw new TmdbException("TMDB returned an empty response.");
     }
+
+    private sealed record FindResponse(
+        [property: JsonPropertyName("movie_results")] IReadOnlyList<FindResult>? MovieResults,
+        [property: JsonPropertyName("tv_results")] IReadOnlyList<FindResult>? TvResults);
+
+    private sealed record FindResult(
+        [property: JsonPropertyName("id")] int Id);
 
     private sealed record ReleaseDatesResponse(
         [property: JsonPropertyName("results")] IReadOnlyList<ReleaseDatesRegion>? Results);

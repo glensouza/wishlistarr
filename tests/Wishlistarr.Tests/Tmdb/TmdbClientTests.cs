@@ -1,4 +1,5 @@
 using System.Net;
+using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Tests.Tmdb;
@@ -278,6 +279,29 @@ public sealed class TmdbClientTests
 
         Assert.Equal(2, harness.Server.Count("/3/search/multi"));
         Assert.Equal("a&page=2=b", harness.Server.Requests[0].Query["query"]);
+    }
+
+    [Fact]
+    public async Task External_ids_are_resolved_through_the_find_endpoint_per_media_type()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+        harness.Server.SetBody("/3/find/tt0111161", """{"movie_results":[{"id":278}],"tv_results":[]}""");
+        harness.Server.SetBody("/3/find/74852", """{"movie_results":[],"tv_results":[{"id":246}]}""");
+        harness.Server.SetBody("/3/find/1", """{"movie_results":[],"tv_results":[]}""");
+
+        int? movie = await harness.Client.FindIdAsync(TmdbMediaType.Movie, ExternalIdSource.Imdb, "tt0111161");
+        int? show = await harness.Client.FindIdAsync(TmdbMediaType.Tv, ExternalIdSource.Tvdb, "74852");
+        int? wrongType = await harness.Client.FindIdAsync(TmdbMediaType.Tv, ExternalIdSource.Imdb, "tt0111161");
+        int? unknown = await harness.Client.FindIdAsync(TmdbMediaType.Tv, ExternalIdSource.Tvdb, "1");
+
+        Assert.Equal(278, movie);
+        Assert.Equal(246, show);
+        Assert.Null(wrongType);
+        Assert.Null(unknown);
+        Assert.Equal("imdb_id", harness.Server.Requests[0].Query["external_source"]);
+        Assert.Equal("tvdb_id", harness.Server.Requests[1].Query["external_source"]);
+        Assert.All(harness.Server.Requests, request => Assert.Equal("false", request.Query["include_adult"]));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => harness.Client.FindIdAsync(TmdbMediaType.Movie, ExternalIdSource.Tmdb, "603"));
     }
 
     [Fact]
