@@ -71,7 +71,7 @@ public static class SeerrEndpoints
             RunAsync(() => seerr.TestAsync(ct)))
             .WithTags("Settings")
             .WithName("TestSeerrConnection")
-            .WithSummary("Checks the saved Seerr address and API key, and warns when the user lacks auto-approve.")
+            .WithSummary("Checks the saved Seerr address and API key, and warns for each kind the user cannot request or that will wait for approval.")
             .Produces<SeerrTestResult>()
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status502BadGateway);
@@ -89,7 +89,7 @@ public static class SeerrEndpoints
                 return seerr.SubmitAsync(request, ct);
             }))
             .WithName("SubmitSeerrRequest")
-            .WithSummary("Attaches to an existing Seerr request for the title, or creates one as the configured user.")
+            .WithSummary("Attaches to an existing Seerr request for the title, or creates one acting as the configured user.")
             .Produces<SeerrSubmission>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status409Conflict)

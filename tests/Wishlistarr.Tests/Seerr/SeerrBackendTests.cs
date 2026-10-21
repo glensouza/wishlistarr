@@ -6,17 +6,43 @@ namespace Wishlistarr.Tests.Seerr;
 public sealed class SeerrBackendTests
 {
     [Theory]
-    [InlineData(0, false)]
-    [InlineData(32, false)]
-    [InlineData(32768, false)]
-    [InlineData(SeerrPermissions.Admin, true)]
-    [InlineData(SeerrPermissions.AutoApprove, true)]
-    [InlineData(SeerrPermissions.AutoApproveMovie, true)]
-    [InlineData(SeerrPermissions.AutoApproveTv, true)]
-    [InlineData(SeerrPermissions.Admin | SeerrPermissions.AutoApprove, true)]
-    [InlineData(SeerrPermissions.AutoApproveMovie | SeerrPermissions.AutoApproveTv, true)]
-    public void Auto_approve_is_admin_or_any_auto_approve_bit(long permissions, bool expected) =>
-        Assert.Equal(expected, SeerrPermissions.HasAutoApprove(permissions));
+    [InlineData(SeerrPermissions.Admin, false, false)]
+    [InlineData(SeerrPermissions.ManageRequests, false, false)]
+    [InlineData(SeerrPermissions.AutoApprove, false, false)]
+    [InlineData(SeerrPermissions.AutoApproveMovie, false, true)]
+    [InlineData(SeerrPermissions.AutoApproveTv, true, false)]
+    [InlineData(SeerrPermissions.AutoApproveMovie | SeerrPermissions.AutoApproveTv, false, false)]
+    [InlineData(32768, true, true)]
+    [InlineData(0, true, true)]
+    public void Auto_approve_is_decided_per_kind(long permissions, bool movieWaits, bool showWaits)
+    {
+        Assert.Equal(!movieWaits, SeerrPermissions.AutoApproves(permissions, MediaKind.Movie));
+        Assert.Equal(!showWaits, SeerrPermissions.AutoApproves(permissions, MediaKind.Show));
+    }
+
+    [Theory]
+    [InlineData(SeerrPermissions.Admin, true, true)]
+    [InlineData(SeerrPermissions.Request, true, true)]
+    [InlineData(SeerrPermissions.RequestMovie, true, false)]
+    [InlineData(SeerrPermissions.RequestTv, false, true)]
+    [InlineData(SeerrPermissions.AutoApprove, false, false)]
+    [InlineData(0, false, false)]
+    public void Request_permission_is_decided_per_kind(long permissions, bool movie, bool show)
+    {
+        Assert.Equal(movie, SeerrPermissions.CanRequest(permissions, MediaKind.Movie));
+        Assert.Equal(show, SeerrPermissions.CanRequest(permissions, MediaKind.Show));
+    }
+
+    [Fact]
+    public async Task Test_reads_the_user_without_impersonating_it()
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+
+        await harness.Backend.TestAsync();
+
+        Assert.All(harness.Server.Requests, request => Assert.Null(request.ApiUser));
+        Assert.Single(harness.Server.Sent("GET", "/api/v1/user/" + FakeSeerrServer.DefaultUserId));
+    }
 
     [Fact]
     public void A_connection_does_not_print_its_api_key()
@@ -37,7 +63,7 @@ public sealed class SeerrBackendTests
         SeerrTestResult result = await harness.Backend.TestAsync();
 
         Assert.Equal("1.34.0-dev", result.Version);
-        Assert.Null(result.Warning);
+        Assert.Empty(result.Warnings);
     }
 
     [Fact]

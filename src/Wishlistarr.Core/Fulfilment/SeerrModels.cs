@@ -6,13 +6,21 @@ namespace Wishlistarr.Core.Fulfilment;
 public static class SeerrPermissions
 {
     public const long Admin = 2;
+    public const long ManageRequests = 16;
+    public const long Request = 32;
     public const long AutoApprove = 128;
     public const long AutoApproveMovie = 256;
     public const long AutoApproveTv = 512;
+    public const long RequestMovie = 262144;
+    public const long RequestTv = 524288;
 
-    private const long AutoApproveMask = Admin | AutoApprove | AutoApproveMovie | AutoApproveTv;
+    public static bool CanRequest(long permissions, MediaKind kind) =>
+        HasAny(permissions, Request | (kind == MediaKind.Movie ? RequestMovie : RequestTv));
 
-    public static bool HasAutoApprove(long permissions) => (permissions & AutoApproveMask) != 0;
+    public static bool AutoApproves(long permissions, MediaKind kind) =>
+        HasAny(permissions, AutoApprove | ManageRequests | (kind == MediaKind.Movie ? AutoApproveMovie : AutoApproveTv));
+
+    private static bool HasAny(long permissions, long wanted) => (permissions & (Admin | wanted)) != 0;
 }
 
 public sealed record SeerrConnection(Uri Url, string ApiKey, int UserId)
@@ -22,7 +30,7 @@ public sealed record SeerrConnection(Uri Url, string ApiKey, int UserId)
 
 public sealed record SeerrSettingsView(string? Url, bool HasApiKey, int? UserId);
 
-public sealed record SeerrTestResult(string Version, string? Warning);
+public sealed record SeerrTestResult(string Version, IReadOnlyList<string> Warnings);
 
 public enum SeerrRequestStatus
 {

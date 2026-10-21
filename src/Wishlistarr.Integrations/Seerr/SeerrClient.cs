@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -11,7 +12,24 @@ public sealed class SeerrClient(IHttpClientFactory httpClients)
 {
     public const string HttpClientName = "Wishlistarr.Seerr";
 
-    public async Task<JsonNode?> SendAsync(SeerrConnection connection, HttpMethod method, string path, JsonNode? body, CancellationToken ct)
+    public const string ApiUserHeader = "X-Api-User";
+
+    public async Task<JsonNode?> SendAsync(
+        SeerrConnection connection,
+        HttpMethod method,
+        string path,
+        JsonNode? body,
+        CancellationToken ct,
+        int? actAs = null) =>
+        (await this.SendForResponseAsync(connection, method, path, body, ct, actAs)).Body;
+
+    public async Task<SeerrResponse> SendForResponseAsync(
+        SeerrConnection connection,
+        HttpMethod method,
+        string path,
+        JsonNode? body,
+        CancellationToken ct,
+        int? actAs = null)
     {
         Uri target = new(connection.Url, path);
         if (!SameOrigin(connection.Url, target))
@@ -34,6 +52,11 @@ public sealed class SeerrClient(IHttpClientFactory httpClients)
         try
         {
             request.Headers.Add("X-Api-Key", connection.ApiKey);
+            if (actAs is int userId)
+            {
+                request.Headers.Add(ApiUserHeader, userId.ToString(CultureInfo.InvariantCulture));
+            }
+
             using HttpClient client = httpClients.CreateClient(HttpClientName);
             using HttpResponseMessage response = await client.SendAsync(request, ct);
             if ((int)response.StatusCode is >= 300 and < 400)
@@ -47,7 +70,7 @@ public sealed class SeerrClient(IHttpClientFactory httpClients)
                 throw new SeerrException(Describe(response.StatusCode, text, connection.ApiKey), response.StatusCode);
             }
 
-            return string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+            return new SeerrResponse(response.StatusCode, string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text));
         }
         catch (SeerrException)
         {
@@ -79,9 +102,10 @@ public sealed class SeerrClient(IHttpClientFactory httpClients)
     private static string Describe(HttpStatusCode status, string body, string apiKey) => Redact(
         status switch
         {
+            HttpStatusCode.BadRequest or HttpStatusCode.Forbidden or HttpStatusCode.Conflict
+                when ValidationMessage(body) is { } message => $"Seerr refused the request: {message}",
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Seerr rejected the API key.",
             HttpStatusCode.NotFound => "Seerr answered 404. Check the address, including any URL base.",
-            HttpStatusCode.BadRequest when ValidationMessage(body) is { } message => $"Seerr refused the request: {message}",
             _ => $"Seerr answered {(int)status}.",
         },
         apiKey);
@@ -102,3 +126,5 @@ public sealed class SeerrClient(IHttpClientFactory httpClients)
         }
     }
 }
+
+public sealed record SeerrResponse(HttpStatusCode Status, JsonNode? Body);

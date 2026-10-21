@@ -25,21 +25,23 @@ public sealed class SeerrApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(FakeSeerrServer.ReportedVersion, result.GetProperty("version").GetString());
-        Assert.Equal(JsonValueKind.Null, result.GetProperty("warning").ValueKind);
+        Assert.Empty(result.GetProperty("warnings").EnumerateArray());
         Assert.DoesNotContain(FakeSeerrServer.ApiKey, body, StringComparison.Ordinal);
         Assert.DoesNotContain("not-the-saved-key", body, StringComparison.Ordinal);
         Assert.All(fake.Requests, request => Assert.Equal(FakeSeerrServer.ApiKey, request.ApiKey));
     }
 
     [Theory]
-    [InlineData(0, true)]
-    [InlineData(32, true)]
-    [InlineData(32768, true)]
-    [InlineData(SeerrPermissions.Admin, false)]
-    [InlineData(SeerrPermissions.AutoApprove, false)]
-    [InlineData(SeerrPermissions.AutoApproveMovie, false)]
-    [InlineData(SeerrPermissions.AutoApproveTv, false)]
-    public async Task Test_warns_when_the_user_lacks_auto_approve(long permissions, bool warns)
+    [InlineData(FakeSeerrServer.Admin, "")]
+    [InlineData(FakeSeerrServer.ManageRequests | FakeSeerrServer.Request, "")]
+    [InlineData(FakeSeerrServer.Request | FakeSeerrServer.AutoApprove, "")]
+    [InlineData(FakeSeerrServer.Request, "movie-waits show-waits")]
+    [InlineData(FakeSeerrServer.Request | FakeSeerrServer.AutoApproveMovie, "show-waits")]
+    [InlineData(FakeSeerrServer.Request | FakeSeerrServer.AutoApproveTv, "movie-waits")]
+    [InlineData(FakeSeerrServer.RequestMovie | FakeSeerrServer.AutoApproveMovie, "show-refused")]
+    [InlineData(FakeSeerrServer.RequestTv, "movie-refused show-waits")]
+    [InlineData(0, "movie-refused show-refused")]
+    public async Task Test_warns_per_kind_when_the_user_cannot_request_or_lacks_auto_approve(long permissions, string expected)
     {
         using ApiFactory factory = new();
         await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
@@ -51,14 +53,51 @@ public sealed class SeerrApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(FakeSeerrServer.ReportedVersion, result.GetProperty("version").GetString());
-        if (warns)
+        string[] warnings = [.. expected.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(code => code switch
         {
-            Assert.Equal(SeerrBackend.AutoApproveWarning, result.GetProperty("warning").GetString());
-        }
-        else
-        {
-            Assert.Equal(JsonValueKind.Null, result.GetProperty("warning").ValueKind);
-        }
+            "movie-waits" => SeerrBackend.MovieAutoApproveWarning,
+            "show-waits" => SeerrBackend.ShowAutoApproveWarning,
+            "movie-refused" => SeerrBackend.MovieRequestWarning,
+            _ => SeerrBackend.ShowRequestWarning,
+        })];
+        Assert.Equal(warnings, result.GetProperty("warnings").EnumerateArray().Select(item => item.GetString()));
+    }
+
+    [Theory]
+    [InlineData("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.Request, "pending")]
+    [InlineData("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.Request | FakeSeerrServer.AutoApproveMovie, "approved")]
+    [InlineData("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.Request | FakeSeerrServer.AutoApproveTv, "pending")]
+    [InlineData("show", FakeSeerrServer.ShowTmdbId, FakeSeerrServer.Request | FakeSeerrServer.AutoApproveTv, "approved")]
+    [InlineData("show", FakeSeerrServer.ShowTmdbId, FakeSeerrServer.Request | FakeSeerrServer.AutoApproveMovie, "pending")]
+    [InlineData("show", FakeSeerrServer.ShowTmdbId, FakeSeerrServer.ManageRequests | FakeSeerrServer.Request, "approved")]
+    public async Task A_new_request_follows_the_configured_users_auto_approve(string kind, int tmdbId, long permissions, string expected)
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.Permissions = permissions;
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        HttpResponseMessage response = await client.PostAsync("/api/v1/seerr/requests", RequestContent(kind, tmdbId));
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expected, body.GetProperty("status").GetString());
+        Assert.False(body.GetProperty("attached").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_user_who_cannot_request_gets_seerrs_reason()
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.Permissions = FakeSeerrServer.RequestTv;
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        HttpResponseMessage response = await client.PostAsync("/api/v1/seerr/requests", RequestContent("movie", FakeSeerrServer.MovieTmdbId));
+        JsonElement problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Equal("Seerr refused the request: You do not have permission to make movie requests.", problem.GetProperty("title").GetString());
     }
 
     [Theory]
@@ -98,13 +137,15 @@ public sealed class SeerrApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(created.GetProperty("id").GetInt32() > 0);
-        Assert.Equal("pending", created.GetProperty("status").GetString());
+        Assert.Equal("approved", created.GetProperty("status").GetString());
         Assert.False(created.GetProperty("attached").GetBoolean());
         Assert.Equal(created.GetProperty("id").GetInt32(), attached.GetProperty("id").GetInt32());
         Assert.True(attached.GetProperty("attached").GetBoolean());
         Assert.Equal(mediaType, post.Body!["mediaType"]!.GetValue<string>());
         Assert.Equal(tmdbId, post.Body["mediaId"]!.GetValue<int>());
-        Assert.Equal(FakeSeerrServer.DefaultUserId, post.Body["userId"]!.GetValue<int>());
+        Assert.Equal(FakeSeerrServer.DefaultUserId.ToString(System.Globalization.CultureInfo.InvariantCulture), post.ApiUser);
+        Assert.Null(post.Body["userId"]);
+        Assert.All(fake.Requests.Where(request => request.Method == "GET"), request => Assert.Null(request.ApiUser));
         if (kind == "show")
         {
             Assert.Equal([1, 2], post.Body["seasons"]!.AsArray().Select(item => item!.GetValue<int>()));
@@ -120,6 +161,7 @@ public sealed class SeerrApiTests
     {
         using ApiFactory factory = new();
         await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.Permissions = FakeSeerrServer.Request;
         HttpClient client = await ConfigureAsync(factory, fake);
         JsonElement created = await (await client.PostAsync("/api/v1/seerr/requests", RequestContent("movie", FakeSeerrServer.MovieTmdbId)))
             .Content.ReadFromJsonAsync<JsonElement>();

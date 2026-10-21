@@ -8,7 +8,10 @@ namespace Wishlistarr.Integrations.Seerr;
 
 public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store) : ISeerrBackend
 {
-    public const string AutoApproveWarning = "This user lacks auto-approve, so requests made for them will wait for approval.";
+    public const string MovieAutoApproveWarning = "This user lacks auto-approve for movies, so movie requests made for them will wait for approval.";
+    public const string ShowAutoApproveWarning = "This user lacks auto-approve for shows, so show requests made for them will wait for approval.";
+    public const string MovieRequestWarning = "This user cannot request movies, so Seerr will refuse movie requests made for them.";
+    public const string ShowRequestWarning = "This user cannot request shows, so Seerr will refuse show requests made for them.";
 
     public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
     {
@@ -30,8 +33,29 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             throw new SeerrException("Seerr has no user with that id.");
         }
 
-        string? warning = SeerrPermissions.HasAutoApprove(Permissions(user?["permissions"])) ? null : AutoApproveWarning;
-        return new SeerrTestResult(version, warning);
+        return new SeerrTestResult(version, Warnings(Permissions(user?["permissions"])));
+    }
+
+    public static IReadOnlyList<string> Warnings(long permissions)
+    {
+        List<string> warnings = [];
+        foreach ((MediaKind kind, string cannotRequest, string waits) in new[]
+        {
+            (MediaKind.Movie, MovieRequestWarning, MovieAutoApproveWarning),
+            (MediaKind.Show, ShowRequestWarning, ShowAutoApproveWarning),
+        })
+        {
+            if (!SeerrPermissions.CanRequest(permissions, kind))
+            {
+                warnings.Add(cannotRequest);
+            }
+            else if (!SeerrPermissions.AutoApproves(permissions, kind))
+            {
+                warnings.Add(waits);
+            }
+        }
+
+        return warnings;
     }
 
     public async Task<SeerrSubmission> SubmitAsync(SeerrSubmitRequest request, CancellationToken ct = default)
@@ -59,14 +83,13 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         {
             ["mediaType"] = mediaType,
             ["mediaId"] = request.TmdbId,
-            ["userId"] = connection.UserId,
         };
         if (seasons.Count > 0)
         {
             body["seasons"] = new JsonArray([.. seasons.Select(season => (JsonNode)JsonValue.Create(season))]);
         }
 
-        JsonNode? created = await client.SendAsync(connection, HttpMethod.Post, "api/v1/request", body, ct);
+        JsonNode? created = await client.SendAsync(connection, HttpMethod.Post, "api/v1/request", body, ct, actAs: connection.UserId);
         if (Int(created?["id"]) is not int id || id <= 0)
         {
             throw new SeerrException("Seerr did not return a request id.");
