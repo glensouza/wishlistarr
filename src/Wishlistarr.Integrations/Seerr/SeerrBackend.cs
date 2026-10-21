@@ -129,7 +129,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             throw new SeerrException("Seerr did not return a request id.");
         }
 
-        return new SeerrTrackedRequest(id, RequestStatus(body?["status"]));
+        return new SeerrTrackedRequest(id, RequestStatus(body?["status"]), Availability(body?["media"]?["status"]));
     }
 
     private async Task<SeerrConnection> RequireAsync(CancellationToken ct) =>

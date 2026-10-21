@@ -169,15 +169,59 @@ public sealed class SeerrApiTests
         int id = created.GetProperty("id").GetInt32();
 
         JsonElement pending = await GetRequestAsync(client, id);
-        fake.SetStatus(id, 2);
+        fake.SetStatus(id, FakeSeerrServer.RequestApproved);
+        fake.SetMediaStatus("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.MediaProcessing);
         JsonElement approved = await GetRequestAsync(client, id);
-        fake.SetStatus(id, 3);
+        fake.SetStatus(id, FakeSeerrServer.RequestFailed);
+        JsonElement failed = await GetRequestAsync(client, id);
+        fake.SetStatus(id, FakeSeerrServer.RequestCompleted);
+        fake.SetMediaStatus("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.MediaAvailable);
+        JsonElement completed = await GetRequestAsync(client, id);
+        fake.SetStatus(id, FakeSeerrServer.RequestDeclined);
+        fake.SetMediaStatus("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.MediaUnknown);
         JsonElement declined = await GetRequestAsync(client, id);
 
-        Assert.Equal("pending", pending.GetProperty("status").GetString());
-        Assert.Equal("approved", approved.GetProperty("status").GetString());
-        Assert.Equal("declined", declined.GetProperty("status").GetString());
+        Assert.Equal(("pending", "pending"), Read(pending));
+        Assert.Equal(("approved", "processing"), Read(approved));
+        Assert.Equal(("failed", "processing"), Read(failed));
+        Assert.Equal(("completed", "available"), Read(completed));
+        Assert.Equal(("declined", "unknown"), Read(declined));
         Assert.Equal(id, approved.GetProperty("id").GetInt32());
+
+        static (string?, string?) Read(JsonElement body) =>
+            (body.GetProperty("status").GetString(), body.GetProperty("availability").GetString());
+    }
+
+    [Theory]
+    [InlineData(FakeSeerrServer.MediaPartiallyAvailable, "partiallyAvailable")]
+    [InlineData(FakeSeerrServer.MediaBlocklisted, "blocklisted")]
+    [InlineData(FakeSeerrServer.MediaDeleted, "deleted")]
+    [InlineData(42, "unknown")]
+    public async Task Tracking_reports_availability_by_name(int status, string expected)
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        int id = fake.SeedRequest("tv", FakeSeerrServer.ShowTmdbId, seasons: [1]);
+        fake.SetMediaStatus("tv", FakeSeerrServer.ShowTmdbId, status);
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        JsonElement body = await GetRequestAsync(client, id);
+
+        Assert.Equal(expected, body.GetProperty("availability").GetString());
+    }
+
+    [Fact]
+    public async Task Tracking_can_read_a_request_made_by_another_seerr_user()
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.Permissions = FakeSeerrServer.Request;
+        int id = fake.SeedRequest("movie", FakeSeerrServer.MovieTmdbId, requestedBy: 9);
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        JsonElement body = await GetRequestAsync(client, id);
+
+        Assert.Equal("approved", body.GetProperty("status").GetString());
     }
 
     [Fact]

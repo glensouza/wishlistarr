@@ -98,7 +98,7 @@ public static class SeerrEndpoints
         group.MapGet("/requests/{id}", (int id, ISeerrBackend seerr, CancellationToken ct) =>
             RunAsync(() => seerr.GetRequestAsync(id, ct)))
             .WithName("GetSeerrRequest")
-            .WithSummary("Reads the status of a Seerr request.")
+            .WithSummary("Reads the status of a Seerr request and whether its title is available.")
             .Produces<SeerrTrackedRequest>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status409Conflict)

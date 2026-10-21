@@ -57,7 +57,7 @@ public sealed record SeerrSubmitRequest(MediaKind Kind, int TmdbId, IReadOnlyLis
 
 public sealed record SeerrSubmission(int? Id, SeerrRequestStatus? Status, SeerrAvailability Availability, bool Attached);
 
-public sealed record SeerrTrackedRequest(int Id, SeerrRequestStatus Status);
+public sealed record SeerrTrackedRequest(int Id, SeerrRequestStatus Status, SeerrAvailability Availability);
 
 public interface ISeerrBackend
 {
