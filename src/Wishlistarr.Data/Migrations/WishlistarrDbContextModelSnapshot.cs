@@ -190,6 +190,179 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("KidSessions");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.LibraryExternalId", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("FetchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Source", "Value");
+
+                    b.HasIndex("ItemId", "Source", "Value")
+                        .IsUnique();
+
+                    b.ToTable("LibraryExternalIds");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Guid")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("IndexedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LibraryId")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PlexUpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RatingKey")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TitleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TitleId");
+
+                    b.HasIndex("ServerId", "RatingKey")
+                        .IsUnique();
+
+                    b.ToTable("LibraryItems");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryItemLabel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ItemId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Label");
+
+                    b.HasIndex("ItemId", "Label")
+                        .IsUnique();
+
+                    b.ToTable("LibraryItemLabels");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryRefreshState", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("LastFullRefreshAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastIncrementalRefreshAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedCursor")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("LibraryRefreshStates");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryTitle", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "TmdbId")
+                        .IsUnique();
+
+                    b.ToTable("LibraryTitles");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
                 {
                     b.Property<int>("Id")
@@ -490,6 +663,38 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("KidProfile");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.LibraryExternalId", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.LibraryItem", "Item")
+                        .WithMany("ExternalIds")
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryItem", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.LibraryTitle", "CanonicalTitle")
+                        .WithMany("Items")
+                        .HasForeignKey("TitleId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("CanonicalTitle");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryItemLabel", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.LibraryItem", "Item")
+                        .WithMany("Labels")
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Item");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
                 {
                     b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
@@ -539,6 +744,18 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("PinAttempts");
 
                     b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryItem", b =>
+                {
+                    b.Navigation("ExternalIds");
+
+                    b.Navigation("Labels");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryTitle", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
