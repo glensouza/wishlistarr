@@ -16,6 +16,7 @@ public sealed class SeerrSubmitTests
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, null));
         await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, 1400, []));
 
+        Assert.Equal(SeerrSubmitOutcome.Created, result.Outcome);
         Assert.False(result.Attached);
         Assert.Equal(SeerrRequestStatus.Approved, result.Status);
         Assert.All(harness.Server.Sent("POST", "/api/v1/request"), post => Assert.Equal("all", post.Body!["seasons"]!.GetValue<string>()));
@@ -126,6 +127,7 @@ public sealed class SeerrSubmitTests
 
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [2]));
 
+        Assert.Equal(SeerrSubmitOutcome.Attached, result.Outcome);
         Assert.True(result.Attached);
         Assert.Equal(existing, result.Id);
         Assert.Equal(SeerrRequestStatus.Pending, result.Status);
@@ -147,6 +149,7 @@ public sealed class SeerrSubmitTests
         Assert.Equal(existing, all.Id);
         Assert.True(all.Attached);
         Assert.Equal(SeerrAvailability.PartiallyAvailable, all.Availability);
+        Assert.Equal(SeerrSubmitOutcome.AlreadyAvailable, available.Outcome);
         Assert.Null(available.Id);
         Assert.False(available.Attached);
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
@@ -172,6 +175,7 @@ public sealed class SeerrSubmitTests
 
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Movie, FakeSeerrServer.MovieTmdbId, null));
 
+        Assert.Equal(SeerrSubmitOutcome.AlreadyAvailable, result.Outcome);
         Assert.Null(result.Id);
         Assert.Null(result.Status);
         Assert.Equal(SeerrAvailability.Available, result.Availability);
@@ -223,7 +227,7 @@ public sealed class SeerrSubmitTests
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Movie, FakeSeerrServer.MovieTmdbId, null));
 
         Assert.Equal(raced, result.Id);
-        Assert.True(result.Attached);
+        Assert.Equal(SeerrSubmitOutcome.Attached, result.Outcome);
         Assert.Equal(SeerrRequestStatus.Pending, result.Status);
         Assert.Single(harness.Server.Sent("POST", "/api/v1/request"));
         Assert.Equal(2, harness.Server.Sent("GET", "/api/v1/movie/" + FakeSeerrServer.MovieTmdbId).Count());

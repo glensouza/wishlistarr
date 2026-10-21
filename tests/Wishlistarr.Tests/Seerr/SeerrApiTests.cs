@@ -86,6 +86,26 @@ public sealed class SeerrApiTests
     }
 
     [Fact]
+    public async Task An_available_title_without_a_request_says_so_explicitly()
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.SetMediaStatus("movie", FakeSeerrServer.MovieTmdbId, FakeSeerrServer.MediaAvailable);
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        HttpResponseMessage response = await client.PostAsync("/api/v1/seerr/requests", RequestContent("movie", FakeSeerrServer.MovieTmdbId));
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("alreadyAvailable", body.GetProperty("outcome").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("id").ValueKind);
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("status").ValueKind);
+        Assert.Equal("available", body.GetProperty("availability").GetString());
+        Assert.False(body.GetProperty("attached").GetBoolean());
+        Assert.Empty(fake.Sent("POST", "/api/v1/request"));
+    }
+
+    [Fact]
     public async Task An_unknown_season_is_a_bad_request()
     {
         using ApiFactory factory = new();
@@ -134,6 +154,7 @@ public sealed class SeerrApiTests
         Assert.Equal(existing, body.GetProperty("id").GetInt32());
         Assert.Equal("approved", body.GetProperty("status").GetString());
         Assert.Equal("pending", body.GetProperty("availability").GetString());
+        Assert.Equal("attached", body.GetProperty("outcome").GetString());
         Assert.True(body.GetProperty("attached").GetBoolean());
         Assert.Empty(fake.Sent("POST", "/api/v1/request"));
     }
@@ -156,6 +177,7 @@ public sealed class SeerrApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(created.GetProperty("id").GetInt32() > 0);
         Assert.Equal("approved", created.GetProperty("status").GetString());
+        Assert.Equal("created", created.GetProperty("outcome").GetString());
         Assert.False(created.GetProperty("attached").GetBoolean());
         Assert.Equal(created.GetProperty("id").GetInt32(), attached.GetProperty("id").GetInt32());
         Assert.True(attached.GetProperty("attached").GetBoolean());

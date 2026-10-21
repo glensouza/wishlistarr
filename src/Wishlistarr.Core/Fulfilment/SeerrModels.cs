@@ -55,7 +55,19 @@ public enum SeerrAvailability
 
 public sealed record SeerrSubmitRequest(MediaKind Kind, int TmdbId, IReadOnlyList<int>? Seasons);
 
-public sealed record SeerrSubmission(int? Id, SeerrRequestStatus? Status, SeerrAvailability Availability, bool Attached);
+public enum SeerrSubmitOutcome
+{
+    Created,
+    Attached,
+    AlreadyAvailable,
+}
+
+public sealed record SeerrSubmission(
+    SeerrSubmitOutcome Outcome,
+    int? Id,
+    SeerrRequestStatus? Status,
+    SeerrAvailability Availability,
+    bool Attached);
 
 public sealed record SeerrTrackedRequest(int Id, SeerrRequestStatus Status, SeerrAvailability Availability);
 

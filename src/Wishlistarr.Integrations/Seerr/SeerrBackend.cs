@@ -104,7 +104,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
         if (created.Status == HttpStatusCode.Accepted)
         {
             return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, ct)
-                ?? throw new SeerrException("Seerr had no seasons of that show left to request.");
+                ?? throw new SeerrException("Seerr already has every requested season, but no request or library season for them was found.");
         }
 
         if (Int(created.Body?["id"]) is not int id || id <= 0)
@@ -112,7 +112,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             throw new SeerrException("Seerr did not return a request id.");
         }
 
-        return new SeerrSubmission(id, RequestStatus(created.Body?["status"]), Availability(created.Body?["media"]?["status"], flavour), false);
+        return new SeerrSubmission(SeerrSubmitOutcome.Created, id, RequestStatus(created.Body?["status"]), Availability(created.Body?["media"]?["status"], flavour), false);
     }
 
     public async Task<SeerrTrackedRequest> GetRequestAsync(int requestId, CancellationToken ct = default)
@@ -182,7 +182,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
             : [];
         ExistingRequest[] active = [.. requests.Where(item => item.Status != SeerrRequestStatus.Completed)];
         ExistingRequest[] completed = [.. requests.Where(item => item.Status == SeerrRequestStatus.Completed)];
-        SeerrSubmission? alreadyAvailable = availability == SeerrAvailability.Available ? new SeerrSubmission(null, null, availability, false) : null;
+        SeerrSubmission? alreadyAvailable = availability == SeerrAvailability.Available ? AlreadyAvailable(availability) : null;
 
         if (kind == MediaKind.Movie)
         {
@@ -211,14 +211,17 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
 
         ExistingRequest? show = Preferred(active.Where(item => item.Seasons.Overlaps(wanted)), userId)
             ?? Preferred(completed.Where(item => item.Seasons.Overlaps(wanted)), userId);
-        return show is not null ? Attach(show, availability) : new SeerrSubmission(null, null, availability, false);
+        return show is not null ? Attach(show, availability) : AlreadyAvailable(availability);
     }
 
     private static ExistingRequest? Preferred(IEnumerable<ExistingRequest> requests, int userId) =>
         requests.OrderBy(item => item.RequestedBy == userId ? 0 : 1).ThenBy(item => item.Id).FirstOrDefault();
 
     private static SeerrSubmission Attach(ExistingRequest request, SeerrAvailability availability) =>
-        new(request.Id, request.Status, availability, true);
+        new(SeerrSubmitOutcome.Attached, request.Id, request.Status, availability, true);
+
+    private static SeerrSubmission AlreadyAvailable(SeerrAvailability availability) =>
+        new(SeerrSubmitOutcome.AlreadyAvailable, null, null, availability, false);
 
     private static ExistingRequest? ParseRequest(JsonNode? node)
     {
