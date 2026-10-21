@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Requests;
@@ -8,6 +9,7 @@ public static class TmdbDataExtensions
 {
     public static IServiceCollection AddTmdbDataRetention(this IServiceCollection services)
     {
+        services.TryAddSingleton<LibraryRefreshGate>();
         services.AddScoped<TmdbRetention>();
         services.AddScoped<TmdbDataService>();
         services.AddScoped<RequestTitles>();

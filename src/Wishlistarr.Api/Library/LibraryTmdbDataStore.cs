@@ -7,13 +7,39 @@ using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Library;
 
-public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tmdb, TimeProvider time) : ITmdbDataStore
+public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tmdb, LibraryRefreshGate gate, TimeProvider time) : ITmdbDataStore
 {
     private const int ChunkSize = 200;
 
     public Type EntityType => typeof(LibraryExternalId);
 
     public async Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct)
+    {
+        using IDisposable held = await gate.EnterAsync(ct);
+        try
+        {
+            await this.RefreshCoreAsync(staleBefore, ct);
+        }
+        catch
+        {
+            db.ChangeTracker.Clear();
+            throw;
+        }
+    }
+
+    public async Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken ct)
+    {
+        using IDisposable held = await gate.EnterAsync(ct);
+        return await this.PurgeExpiredCoreAsync(expiredBefore, ct);
+    }
+
+    public async Task<int> PurgeAllAsync(CancellationToken ct)
+    {
+        using IDisposable held = await gate.EnterAsync(ct);
+        return await this.PurgeAllCoreAsync(ct);
+    }
+
+    private async Task RefreshCoreAsync(DateTimeOffset staleBefore, CancellationToken ct)
     {
         List<int> stale = await this.FindIdsAsync(fetchedAt => fetchedAt is null || fetchedAt < staleBefore, ct);
         foreach (int[] chunk in stale.Chunk(ChunkSize))
@@ -57,7 +83,7 @@ public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tm
         await this.DetachOrphanedTitlesAsync(ct);
     }
 
-    public async Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken ct)
+    private async Task<int> PurgeExpiredCoreAsync(DateTimeOffset expiredBefore, CancellationToken ct)
     {
         List<int> expired = await this.FindIdsAsync(fetchedAt => fetchedAt is null || fetchedAt < expiredBefore, ct);
         foreach (int[] chunk in expired.Chunk(ChunkSize))
@@ -69,7 +95,7 @@ public sealed class LibraryTmdbDataStore(WishlistarrDbContext db, ITmdbClient tm
         return expired.Count;
     }
 
-    public async Task<int> PurgeAllAsync(CancellationToken ct)
+    private async Task<int> PurgeAllCoreAsync(CancellationToken ct)
     {
         int purged = await db.LibraryExternalIds.Where(row => row.Origin == LibraryIdOrigin.TmdbLookup).ExecuteDeleteAsync(ct);
         await this.DetachOrphanedTitlesAsync(ct);

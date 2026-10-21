@@ -31,7 +31,7 @@ What is stored:
 
 Ids that Plex reports, request ids and states, and library titles (a kind plus a TMDB id, nothing else) are not TMDB metadata and are not subject to the retention. Posters and other images are proxied from TMDB per request and are never written to disk. The in-memory response cache holds entries for at most 7 days and is emptied when stored TMDB data is cleared.
 
-The `tmdb-data-purge` job runs daily. It first refreshes records that are still in use and older than half the retention (a library id for an item still in the library, the title of a request that is still open), then deletes everything older than the retention. If a refresh fails for any reason, including a TMDB timeout, expired records are deleted anyway, and each kind of data is purged independently so one failure never skips another.
+The `tmdb-data-purge` job runs daily and waits for any running library refresh to finish before touching library data (clearing does the same). It first refreshes records that are still in use and older than half the retention (a library id for an item still in the library, the title of a request that is still open), then deletes everything older than the retention. If a refresh fails for any reason, including a TMDB timeout, expired records are deleted anyway, and each kind of data is purged independently so one failure never skips another.
 
 The TMDB key is only ever supplied by the settings store, so removing it through the settings API as described below is the one path that purges immediately; if it disappears any other way, stored data still ages out through the retention.
 

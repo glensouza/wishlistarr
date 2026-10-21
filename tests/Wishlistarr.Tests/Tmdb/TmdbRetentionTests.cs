@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.Tmdb;
@@ -266,6 +267,67 @@ public sealed class TmdbRetentionTests
         List<MediaRequest> requests = await harness.GetRequestsAsync();
         Assert.Equal(("Fresh title", (DateTimeOffset?)now), (requests.Single(request => request.Id == open).Title, requests.Single(request => request.Id == open).TitleFetchedAt));
         Assert.Equal("Stored title", requests.Single(request => request.Id == closed).Title);
+    }
+
+    [Fact]
+    public async Task Library_data_is_not_refreshed_or_purged_while_a_library_refresh_holds_the_gate()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow() - TimeSpan.FromDays(100));
+        harness.Tmdb.Failure = new TmdbException("TMDB answered 500.");
+        IDisposable held = harness.Provider.GetRequiredService<LibraryRefreshGate>().TryEnter() ?? throw new InvalidOperationException();
+
+        Task maintenance = harness.MaintainAsync();
+        await Task.Delay(300);
+        bool waiting = !maintenance.IsCompleted;
+        int whileHeld = (await harness.GetLookupsAsync()).Count;
+        held.Dispose();
+        await maintenance.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(waiting);
+        Assert.Equal(1, whileHeld);
+        Assert.Empty(await harness.GetLookupsAsync());
+    }
+
+    [Fact]
+    public async Task Clearing_waits_for_a_running_library_refresh_instead_of_failing()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        IDisposable held = harness.Provider.GetRequiredService<LibraryRefreshGate>().TryEnter() ?? throw new InvalidOperationException();
+
+        Task<int> clearing = harness.InScopeAsync(services => services.GetRequiredService<TmdbDataService>().PurgeAllAsync(CancellationToken.None));
+        await Task.Delay(300);
+        bool waiting = !clearing.IsCompleted;
+        held.Dispose();
+
+        Assert.True(waiting);
+        Assert.Equal(1, await clearing.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task A_refreshed_id_relinks_onto_a_title_another_item_already_uses()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        DateTimeOffset now = harness.Time.GetUtcNow();
+        int moved = await harness.AddLegacyItemAsync("1", now - TimeSpan.FromDays(60), "278");
+        int resident = await harness.AddLegacyItemAsync("3", now - TimeSpan.FromDays(1), "999");
+        harness.Tmdb.Known[(TmdbMediaType.Movie, ExternalIdSource.Imdb, "tt1")] = 999;
+
+        await harness.MaintainAsync();
+
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            List<LibraryItem> items = await db.LibraryItems.AsNoTracking().OrderBy(item => item.RatingKey).ToListAsync();
+            Assert.NotNull(items[0].TitleId);
+            Assert.Equal(items[0].TitleId, items[1].TitleId);
+            LibraryTitle title = await db.LibraryTitles.AsNoTracking().SingleAsync();
+            Assert.Equal(999, title.TmdbId);
+            Assert.Equal(moved, items[0].Id);
+            Assert.Equal(resident, items[1].Id);
+            return 0;
+        });
     }
 
     [Fact]
