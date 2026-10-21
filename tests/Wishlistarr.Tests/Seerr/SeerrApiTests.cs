@@ -9,7 +9,7 @@ namespace Wishlistarr.Tests.Seerr;
 public sealed class SeerrApiTests
 {
     [Fact]
-    public async Task Test_button_reports_the_version_from_the_saved_connection()
+    public async Task Test_button_uses_the_saved_connection_and_ignores_an_address_or_key_in_the_body()
     {
         using ApiFactory factory = new();
         await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
@@ -239,6 +239,30 @@ public sealed class SeerrApiTests
         Assert.Equal("unknown", body.GetProperty("status").GetString());
     }
 
+    [Fact]
+    public async Task A_url_base_is_kept_for_status_user_request_and_tracking_calls()
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.PathBase = "/seerr";
+        HttpClient client = await ConfigureAsync(factory, fake, new Uri(fake.Address, "seerr").ToString());
+
+        HttpResponseMessage test = await client.PostAsync("/api/v1/settings/seerr/test", null);
+        HttpResponseMessage submit = await client.PostAsync("/api/v1/seerr/requests", RequestContent("show", FakeSeerrServer.ShowTmdbId));
+        int id = (await submit.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        HttpResponseMessage read = await client.GetAsync($"/api/v1/seerr/requests/{id}");
+
+        Assert.Equal(HttpStatusCode.OK, test.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, submit.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.Single(fake.Sent("GET", "/api/v1/status"));
+        Assert.Single(fake.Sent("GET", "/api/v1/user/" + FakeSeerrServer.DefaultUserId));
+        Assert.Single(fake.Sent("GET", "/api/v1/tv/" + FakeSeerrServer.ShowTmdbId));
+        Assert.Single(fake.Sent("POST", "/api/v1/request"));
+        Assert.Single(fake.Sent("GET", "/api/v1/request/" + id));
+        Assert.All(fake.Requests, request => Assert.StartsWith("/seerr/api/v1/", request.Path, StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("ftp://seerr.local/")]
     [InlineData("javascript:alert(1)")]
@@ -422,12 +446,12 @@ public sealed class SeerrApiTests
         Assert.Equal(HttpStatusCode.BadRequest, key.StatusCode);
     }
 
-    private static async Task<HttpClient> ConfigureAsync(ApiFactory factory, FakeSeerrServer fake)
+    private static async Task<HttpClient> ConfigureAsync(ApiFactory factory, FakeSeerrServer fake, string? url = null)
     {
         HttpClient client = await factory.CreateAuthorizedClientAsync();
         HttpResponseMessage save = await client.PutAsJsonAsync("/api/v1/settings/seerr", new
         {
-            url = fake.Address.ToString().TrimEnd('/'),
+            url = url ?? fake.Address.ToString().TrimEnd('/'),
             apiKey = FakeSeerrServer.ApiKey,
             userId = FakeSeerrServer.DefaultUserId,
         });

@@ -111,6 +111,8 @@ public sealed class SeerrBackendTests
 
         Assert.Equal("Seerr rejected the API key.", error.Message);
         Assert.DoesNotContain("wrong-key-value", error.Message, StringComparison.Ordinal);
+        Assert.Single(harness.Server.Sent("GET", "/api/v1/status"));
+        Assert.Single(harness.Server.Sent("GET", "/api/v1/user/" + FakeSeerrServer.DefaultUserId));
     }
 
     [Fact]
