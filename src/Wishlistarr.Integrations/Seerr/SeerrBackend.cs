@@ -11,10 +11,10 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
     public const string MovieAutoApproveWarning = "This user lacks auto-approve for movies, so movie requests made for them will wait for approval.";
     public const string ShowAutoApproveWarning = "This user lacks auto-approve for shows, so show requests made for them will wait for approval.";
     public const string MovieRequestWarning = "This user cannot request movies, so Seerr will refuse movie requests made for them.";
+    public const string ShowRequestWarning = "This user cannot request shows, so Seerr will refuse show requests made for them.";
+
     private const int UnknownStatus = (int)SeerrAvailability.Unknown;
     private const int OverseerrDeletedStatus = 6;
-
-    public const string ShowRequestWarning = "This user cannot request shows, so Seerr will refuse show requests made for them.";
 
     public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
     {
@@ -287,8 +287,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
     {
         JsonNode? settings = await client.SendAsync(connection, HttpMethod.Get, "api/v1/settings/public", null, ct);
 
-        // Only Jellyseerr and Seerr report mediaServerType; they number media statuses with blocklisted at 6 and deleted at 7,
-        // while Overseerr uses 6 for deleted. Version strings cannot tell them apart on develop builds.
+        // Only Jellyseerr and Seerr report mediaServerType. Across that line 6 is blacklisted or blocklisted, and 7 is deleted
+        // from Jellyseerr 2.6 on, while Overseerr uses 6 for deleted. Version strings cannot tell them apart on develop builds.
         bool blocklist = settings?["mediaServerType"] is not null;
         bool specials = settings?["enableSpecialEpisodes"] is not JsonValue flag || !flag.TryGetValue(out bool enabled) || enabled;
         return new ServerFlavour(blocklist, specials);
