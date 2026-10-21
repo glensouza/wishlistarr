@@ -22,6 +22,10 @@ public static class SeerrSettings
 
 public sealed class SeerrConnectionStore(IAppSettings settings)
 {
+    private long revision;
+
+    public long Revision => Interlocked.Read(ref this.revision);
+
     public async Task<SeerrSettingsView> GetViewAsync(CancellationToken ct = default)
     {
         string? url = await settings.GetAsync(SeerrSettings.UrlKey, ct);
@@ -50,6 +54,7 @@ public sealed class SeerrConnectionStore(IAppSettings settings)
         }
 
         await settings.SetAsync(SeerrSettings.UserIdKey, userId.ToString(CultureInfo.InvariantCulture), false, ct);
+        Interlocked.Increment(ref this.revision);
     }
 
     public async Task DeleteAsync(CancellationToken ct = default)
@@ -57,6 +62,7 @@ public sealed class SeerrConnectionStore(IAppSettings settings)
         await settings.DeleteAsync(SeerrSettings.UrlKey, ct);
         await settings.DeleteAsync(SeerrSettings.ApiKeyKey, ct);
         await settings.DeleteAsync(SeerrSettings.UserIdKey, ct);
+        Interlocked.Increment(ref this.revision);
     }
 
     private static int? ParseUserId(string? value) =>

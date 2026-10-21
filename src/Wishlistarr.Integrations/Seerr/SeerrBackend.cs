@@ -6,7 +6,7 @@ using Wishlistarr.Core.MediaServers;
 
 namespace Wishlistarr.Integrations.Seerr;
 
-public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store) : ISeerrBackend
+public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store, TimeProvider time) : ISeerrBackend
 {
     public const string MovieAutoApproveWarning = "This user lacks auto-approve for movies, so movie requests made for them will wait for approval.";
     public const string ShowAutoApproveWarning = "This user lacks auto-approve for shows, so show requests made for them will wait for approval.";
@@ -16,9 +16,14 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
     private const int UnknownStatus = (int)SeerrAvailability.Unknown;
     private const int OverseerrDeletedStatus = 6;
 
+    private volatile CachedFlavour? cachedFlavour;
+
+    public static TimeSpan FlavourLifetime { get; } = TimeSpan.FromMinutes(5);
+
     public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
     {
         SeerrConnection connection = await this.RequireAsync(ct);
+        this.cachedFlavour = null;
         JsonNode? status = await client.SendAsync(connection, HttpMethod.Get, "api/v1/status", null, ct);
         string? version = Text(status?["version"]) ?? Text(status?["commitTag"]);
         if (version is null)
@@ -285,13 +290,30 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
 
     private async Task<ServerFlavour> FlavourAsync(SeerrConnection connection, CancellationToken ct)
     {
-        JsonNode? settings = await client.SendAsync(connection, HttpMethod.Get, "api/v1/settings/public", null, ct);
+        long revision = store.Revision;
+        DateTimeOffset now = time.GetUtcNow();
+        if (this.cachedFlavour is { } cached && cached.Url == connection.Url && cached.Revision == revision && cached.Expires > now)
+        {
+            return cached.Flavour;
+        }
+
+        JsonNode? settings;
+        try
+        {
+            settings = await client.SendAsync(connection, HttpMethod.Get, "api/v1/settings/public", null, ct);
+        }
+        catch (SeerrException)
+        {
+            return ServerFlavour.Fallback;
+        }
 
         // Only Jellyseerr and Seerr report mediaServerType. Across that line 6 is blacklisted or blocklisted, and 7 is deleted
         // from Jellyseerr 2.6 on, while Overseerr uses 6 for deleted. Version strings cannot tell them apart on develop builds.
         bool blocklist = settings?["mediaServerType"] is not null;
         bool specials = settings?["enableSpecialEpisodes"] is not JsonValue flag || !flag.TryGetValue(out bool enabled) || enabled;
-        return new ServerFlavour(blocklist, specials);
+        ServerFlavour flavour = new(blocklist, specials);
+        this.cachedFlavour = new CachedFlavour(connection.Url, revision, now + FlavourLifetime, flavour);
+        return flavour;
     }
 
     private async Task<JsonNode?> TitleAsync(SeerrConnection connection, string mediaType, int tmdbId, CancellationToken ct)
@@ -363,8 +385,12 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store)
 
     private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed)
     {
+        public static ServerFlavour Fallback { get; } = new(true, true);
+
         public int DeletedStatus => this.Blocklist ? (int)SeerrAvailability.Deleted : OverseerrDeletedStatus;
     }
+
+    private sealed record CachedFlavour(Uri Url, long Revision, DateTimeOffset Expires, ServerFlavour Flavour);
 
     private sealed record ExistingRequest(int Id, SeerrRequestStatus Status, bool Is4k, HashSet<int> Seasons, int? RequestedBy);
 }

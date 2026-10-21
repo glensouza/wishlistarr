@@ -11,6 +11,7 @@ public static class SeerrServiceCollectionExtensions
         where TSettings : class, IAppSettings
     {
         services.TryAddSingleton<IAppSettings, TSettings>();
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<SeerrConnectionStore>();
         services.AddSingleton<SeerrClient>();
         services.AddSingleton<ISeerrBackend, SeerrBackend>();

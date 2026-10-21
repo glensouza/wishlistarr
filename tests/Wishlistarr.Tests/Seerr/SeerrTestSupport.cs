@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Wishlistarr.Core.Fulfilment;
 using Wishlistarr.Core.Settings;
 using Wishlistarr.Integrations.Seerr;
+using Wishlistarr.Tests.Jobs;
 using Wishlistarr.Tests.Plex;
 
 namespace Wishlistarr.Tests.Seerr;
@@ -62,11 +63,14 @@ public sealed class SeerrHarness : IAsyncDisposable
         this.Settings = settings;
         ServiceCollection services = new();
         services.AddSingleton<IAppSettings>(settings);
+        services.AddSingleton<TimeProvider>(this.Time);
         services.AddSeerr<InMemoryAppSettings>();
         this.provider = services.BuildServiceProvider();
     }
 
     public FakeSeerrServer Server { get; }
+
+    public ManualTime Time { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
     public InMemoryAppSettings Settings { get; }
 

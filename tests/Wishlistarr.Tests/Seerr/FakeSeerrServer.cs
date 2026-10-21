@@ -88,6 +88,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
     public bool EnableSpecialEpisodes { get; set; }
 
+    public bool BlockPublicSettings { get; set; }
+
     public Action? BeforeNextCreate { get; set; }
 
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
@@ -349,6 +351,11 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
         if (path == "/api/v1/settings/public" && method == "GET")
         {
+            if (this.BlockPublicSettings)
+            {
+                return new Reply(StatusCodes.Status403Forbidden, null);
+            }
+
             JsonObject settings = new() { ["applicationTitle"] = "Fixture", ["initialized"] = true };
             if (!this.Overseerr)
             {

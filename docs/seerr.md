@@ -87,7 +87,7 @@ The response is `{ "outcome", "id", "status", "availability", "attached" }`. `ou
 | 7 | `deleted` |
 | other | `unknown` |
 
-These are Seerr's and Jellyseerr's values. Overseerr has no blocklist and uses 6 for deleted. Before requesting or tracking, Wishlistarr reads `/api/v1/settings/public`: only Seerr and Jellyseerr report `mediaServerType` there, so when it is missing a 6 is read as `deleted` and a 7 as `unknown`. The version number cannot be used for this because develop builds report `develop-<commit>`.
+These are Seerr's and Jellyseerr's values. Overseerr has no blocklist and uses 6 for deleted. Before requesting or tracking, Wishlistarr reads `/api/v1/settings/public`: only Seerr and Jellyseerr report `mediaServerType` there, so when it is missing a 6 is read as `deleted` and a 7 as `unknown`. The version number cannot be used for this because develop builds report `develop-<commit>`. The answer is kept for five minutes per saved address. Saving or deleting the connection, or pressing the test button, reads it again. When the settings cannot be read, for example because a proxy blocks them, Seerr's numbering is assumed, specials are not refused, and the next call tries again.
 
 ## Errors
 
