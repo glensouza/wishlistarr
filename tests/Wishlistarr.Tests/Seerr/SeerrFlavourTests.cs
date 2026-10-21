@@ -87,6 +87,42 @@ public sealed class SeerrFlavourTests
         Assert.Equal(2, harness.Server.Sent("GET", SettingsPath).Count());
     }
 
+    [Theory]
+    [InlineData(true, "1.33.2", false)]
+    [InlineData(false, "2.7.3", false)]
+    [InlineData(false, "3.4.1", false)]
+    public async Task All_seasons_include_an_announced_season_where_the_server_requests_it(bool overseerr, string version, bool drops)
+    {
+        await using SeerrHarness harness = await AnnouncedShowAsync(overseerr, version, drops);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, null));
+
+        Assert.Equal(SeerrSubmitOutcome.Created, result.Outcome);
+        Assert.Equal("all", Assert.Single(harness.Server.Sent("POST", "/api/v1/request")).Body!["seasons"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task All_seasons_skip_an_announced_season_from_seerr_3_5()
+    {
+        await using SeerrHarness harness = await AnnouncedShowAsync(false, "3.5.0", true);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, null));
+
+        Assert.Equal(SeerrSubmitOutcome.Attached, result.Outcome);
+        Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
+    }
+
+    [Fact]
+    public async Task A_develop_build_that_has_nothing_left_to_request_is_attached()
+    {
+        await using SeerrHarness harness = await AnnouncedShowAsync(false, "develop-0a1b2c3", true);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, null));
+
+        Assert.Equal(SeerrSubmitOutcome.Attached, result.Outcome);
+        Assert.Single(harness.Server.Sent("POST", "/api/v1/request"));
+    }
+
     [Fact]
     public async Task Submitting_still_works_when_the_public_settings_cannot_be_read()
     {
@@ -96,5 +132,16 @@ public sealed class SeerrFlavourTests
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1]));
 
         Assert.Equal(SeerrSubmitOutcome.Created, result.Outcome);
+    }
+
+    private static async Task<SeerrHarness> AnnouncedShowAsync(bool overseerr, string version, bool drops)
+    {
+        SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Overseerr = overseerr;
+        harness.Server.Version = version;
+        harness.Server.DropsEmptySeasons = drops;
+        harness.Server.AnnouncedSeason = true;
+        harness.Server.SeedRequest("tv", FakeSeerrServer.ShowTmdbId, seasons: [1, 2, 3]);
+        return harness;
     }
 }

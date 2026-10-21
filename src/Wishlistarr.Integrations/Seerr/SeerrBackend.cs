@@ -18,6 +18,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     private volatile CachedFlavour? cachedFlavour;
 
+    private static readonly Version EmptySeasonsDroppedFrom = new(3, 5, 0);
+
     public static TimeSpan FlavourLifetime { get; } = TimeSpan.FromMinutes(5);
 
     public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
@@ -30,6 +32,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         {
             throw new SeerrException("Seerr did not report a version.");
         }
+
+        await this.FlavourAsync(connection, ct, status);
 
         JsonNode? user;
         try
@@ -79,8 +83,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             CheckSeasons(seasons, title, flavour);
         }
 
-        IReadOnlyList<int>? wanted = request.Kind == MediaKind.Show ? seasons ?? AllSeasons(title) : null;
-        if (Existing(title, request.Kind, wanted, connection.UserId, flavour) is { } existing)
+        IReadOnlyList<int>? wanted = request.Kind == MediaKind.Show ? seasons ?? AllSeasons(title, flavour) : null;
+        if (Existing(title, request.Kind, wanted, connection.UserId, flavour, false) is { } existing)
         {
             return existing;
         }
@@ -102,13 +106,13 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
         catch (SeerrException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
         {
-            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, ct)
+            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, false, ct)
                 ?? throw new SeerrException("Seerr says a request for that title already exists but did not list it.");
         }
 
         if (created.Status == HttpStatusCode.Accepted)
         {
-            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, ct)
+            return await this.ReattachAsync(connection, request.Kind, mediaType, request.TmdbId, wanted, flavour, true, ct)
                 ?? throw new SeerrException("Seerr already has every requested season, but no request or library season for them was found.");
         }
 
@@ -174,7 +178,13 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
     }
 
-    private static SeerrSubmission? Existing(JsonNode? title, MediaKind kind, IReadOnlyList<int>? wanted, int userId, ServerFlavour flavour)
+    private static SeerrSubmission? Existing(
+        JsonNode? title,
+        MediaKind kind,
+        IReadOnlyList<int>? wanted,
+        int userId,
+        ServerFlavour flavour,
+        bool seerrSaysCovered)
     {
         if (title?["mediaInfo"] is not JsonObject media)
         {
@@ -195,7 +205,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             return movie is not null ? Attach(movie, availability) : alreadyAvailable;
         }
 
-        if (wanted is null)
+        if (wanted is null && !seerrSaysCovered)
         {
             return alreadyAvailable;
         }
@@ -209,13 +219,13 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
                 .OfType<int>());
         }
 
-        if (!wanted.All(covered.Contains))
+        if (!seerrSaysCovered && !wanted!.All(covered.Contains))
         {
             return null;
         }
 
-        ExistingRequest? show = Preferred(active.Where(item => item.Seasons.Overlaps(wanted)), userId)
-            ?? Preferred(completed.Where(item => item.Seasons.Overlaps(wanted)), userId);
+        ExistingRequest? show = Preferred(active.Where(item => wanted is null || item.Seasons.Overlaps(wanted)), userId)
+            ?? Preferred(completed.Where(item => wanted is null || item.Seasons.Overlaps(wanted)), userId);
         return show is not null ? Attach(show, availability) : AlreadyAvailable(availability);
     }
 
@@ -259,7 +269,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
     }
 
-    private static int[]? AllSeasons(JsonNode? title)
+    private static int[]? AllSeasons(JsonNode? title, ServerFlavour flavour)
     {
         if (title?["seasons"] is not JsonArray list)
         {
@@ -267,7 +277,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         }
 
         int[] seasons = [.. list
-            .Where(season => Int(season?["seasonNumber"]) > 0 && Int(season?["episodeCount"]) > 0)
+            .Where(season => Int(season?["seasonNumber"]) > 0 && (!flavour.DropsEmptySeasons || Int(season?["episodeCount"]) > 0))
             .Select(season => Int(season?["seasonNumber"])!.Value)
             .Distinct()
             .Order()];
@@ -281,18 +291,19 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         int tmdbId,
         IReadOnlyList<int>? wanted,
         ServerFlavour flavour,
+        bool seerrSaysCovered,
         CancellationToken ct)
     {
         JsonNode? title = await this.TitleAsync(connection, mediaType, tmdbId, ct);
-        IReadOnlyList<int>? seasons = kind == MediaKind.Show ? wanted ?? AllSeasons(title) : null;
-        return Existing(title, kind, seasons, connection.UserId, flavour);
+        IReadOnlyList<int>? seasons = kind == MediaKind.Show ? wanted ?? AllSeasons(title, flavour) : null;
+        return Existing(title, kind, seasons, connection.UserId, flavour, seerrSaysCovered);
     }
 
-    private async Task<ServerFlavour> FlavourAsync(SeerrConnection connection, CancellationToken ct)
+    private async Task<ServerFlavour> FlavourAsync(SeerrConnection connection, CancellationToken ct, JsonNode? status = null)
     {
         long revision = store.Revision;
         DateTimeOffset now = time.GetUtcNow();
-        if (this.cachedFlavour is { } cached && cached.Url == connection.Url && cached.Revision == revision && cached.Expires > now)
+        if (status is null && this.cachedFlavour is { } cached && cached.Url == connection.Url && cached.Revision == revision && cached.Expires > now)
         {
             return cached.Flavour;
         }
@@ -300,6 +311,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         JsonNode? settings;
         try
         {
+            status ??= await client.SendAsync(connection, HttpMethod.Get, "api/v1/status", null, ct);
             settings = await client.SendAsync(connection, HttpMethod.Get, "api/v1/settings/public", null, ct);
         }
         catch (SeerrException)
@@ -311,9 +323,17 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         // from Jellyseerr 2.6 on, while Overseerr uses 6 for deleted. Version strings cannot tell them apart on develop builds.
         bool blocklist = settings?["mediaServerType"] is not null;
         bool specials = settings?["enableSpecialEpisodes"] is not JsonValue flag || !flag.TryGetValue(out bool enabled) || enabled;
-        ServerFlavour flavour = new(blocklist, specials);
+        bool dropsEmptySeasons = blocklist && ReleaseVersion(status) is { } version && version >= EmptySeasonsDroppedFrom;
+        ServerFlavour flavour = new(blocklist, specials, dropsEmptySeasons);
         this.cachedFlavour = new CachedFlavour(connection.Url, revision, now + FlavourLifetime, flavour);
         return flavour;
+    }
+
+    private static Version? ReleaseVersion(JsonNode? status)
+    {
+        string? text = Text(status?["version"])?.TrimStart('v');
+        int suffix = text?.IndexOf('-', StringComparison.Ordinal) ?? -1;
+        return Version.TryParse(suffix >= 0 ? text![..suffix] : text, out Version? version) ? version : null;
     }
 
     private async Task<JsonNode?> TitleAsync(SeerrConnection connection, string mediaType, int tmdbId, CancellationToken ct)
@@ -383,9 +403,9 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed)
+    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed, bool DropsEmptySeasons)
     {
-        public static ServerFlavour Fallback { get; } = new(true, true);
+        public static ServerFlavour Fallback { get; } = new(true, true, false);
 
         public int DeletedStatus => this.Blocklist ? (int)SeerrAvailability.Deleted : OverseerrDeletedStatus;
     }

@@ -46,6 +46,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
     public const int MediaDeleted = 7;
     public const int OverseerrMediaDeleted = 6;
 
+    public const int AnnouncedSeasonNumber = 4;
+
     private static readonly int[] ShowSeasons = [1, 2, 3];
 
     private readonly WebApplication app;
@@ -89,6 +91,10 @@ public sealed class FakeSeerrServer : IAsyncDisposable
     public bool EnableSpecialEpisodes { get; set; }
 
     public bool BlockPublicSettings { get; set; }
+
+    public bool AnnouncedSeason { get; set; }
+
+    public bool DropsEmptySeasons { get; set; }
 
     public Action? BeforeNextCreate { get; set; }
 
@@ -247,6 +253,11 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             foreach (int season in ShowSeasons)
             {
                 tmdbSeasons.Add(new JsonObject { ["seasonNumber"] = season, ["episodeCount"] = 8 });
+            }
+
+            if (this.AnnouncedSeason)
+            {
+                tmdbSeasons.Add(new JsonObject { ["seasonNumber"] = AnnouncedSeasonNumber, ["episodeCount"] = 0 });
             }
 
             title["seasons"] = tmdbSeasons;
@@ -478,7 +489,7 @@ public sealed class FakeSeerrServer : IAsyncDisposable
             int[] requested;
             if (payload["seasons"] is JsonValue all && all.TryGetValue(out string? word) && word == "all")
             {
-                requested = ShowSeasons;
+                requested = this.AnnouncedSeason && !this.DropsEmptySeasons ? [.. ShowSeasons, AnnouncedSeasonNumber] : ShowSeasons;
             }
             else if (payload["seasons"] is JsonArray list)
             {
