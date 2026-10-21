@@ -34,14 +34,28 @@ public sealed record SeerrTestResult(string Version, IReadOnlyList<string> Warni
 
 public enum SeerrRequestStatus
 {
+    Unknown = 0,
     Pending = 1,
     Approved = 2,
     Declined = 3,
+    Failed = 4,
+    Completed = 5,
+}
+
+public enum SeerrAvailability
+{
+    Unknown = 1,
+    Pending = 2,
+    Processing = 3,
+    PartiallyAvailable = 4,
+    Available = 5,
+    Blocklisted = 6,
+    Deleted = 7,
 }
 
 public sealed record SeerrSubmitRequest(MediaKind Kind, int TmdbId, IReadOnlyList<int>? Seasons);
 
-public sealed record SeerrSubmission(int Id, SeerrRequestStatus Status, bool Attached);
+public sealed record SeerrSubmission(int? Id, SeerrRequestStatus? Status, SeerrAvailability Availability, bool Attached);
 
 public sealed record SeerrTrackedRequest(int Id, SeerrRequestStatus Status);
 

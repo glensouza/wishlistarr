@@ -107,7 +107,7 @@ public sealed class SeerrApiTests
     {
         using ApiFactory factory = new();
         await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
-        int existing = fake.SeedRequest(mediaType, tmdbId, status: 2);
+        int existing = fake.SeedRequest(mediaType, tmdbId, status: 2, seasons: kind == "show" ? [1, 2] : null);
         HttpClient client = await ConfigureAsync(factory, fake);
 
         HttpResponseMessage response = await client.PostAsync("/api/v1/seerr/requests", RequestContent(kind, tmdbId));
@@ -116,6 +116,7 @@ public sealed class SeerrApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(existing, body.GetProperty("id").GetInt32());
         Assert.Equal("approved", body.GetProperty("status").GetString());
+        Assert.Equal("pending", body.GetProperty("availability").GetString());
         Assert.True(body.GetProperty("attached").GetBoolean());
         Assert.Empty(fake.Sent("POST", "/api/v1/request"));
     }
@@ -180,19 +181,18 @@ public sealed class SeerrApiTests
     }
 
     [Fact]
-    public async Task An_unknown_status_number_is_returned()
+    public async Task An_unrecognised_status_number_is_reported_as_unknown()
     {
         using ApiFactory factory = new();
         await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
-        int id = fake.SeedRequest("movie", FakeSeerrServer.MovieTmdbId, status: 7);
+        int id = fake.SeedRequest("movie", FakeSeerrServer.MovieTmdbId, status: 9);
         HttpClient client = await ConfigureAsync(factory, fake);
 
         HttpResponseMessage response = await client.GetAsync($"/api/v1/seerr/requests/{id}");
         JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(JsonValueKind.Number, body.GetProperty("status").ValueKind);
-        Assert.Equal(7, body.GetProperty("status").GetInt32());
+        Assert.Equal("unknown", body.GetProperty("status").GetString());
     }
 
     [Theory]
