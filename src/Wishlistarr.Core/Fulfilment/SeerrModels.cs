@@ -30,7 +30,20 @@ public sealed record SeerrConnection(Uri Url, string ApiKey, int UserId)
 
 public sealed record SeerrSettingsView(string? Url, bool HasApiKey, int? UserId);
 
-public sealed record SeerrTestResult(string Version, IReadOnlyList<string> Warnings);
+public enum SeerrServerKind
+{
+    Seerr,
+    Overseerr,
+}
+
+public sealed record SeerrServerFlavour(
+    SeerrServerKind Kind,
+    bool SettingsRead,
+    bool SpecialsRequestable,
+    bool AllIncludesSpecials,
+    bool AllSkipsEmptySeasons);
+
+public sealed record SeerrTestResult(string Version, IReadOnlyList<string> Warnings, SeerrServerFlavour Flavour);
 
 public enum SeerrRequestStatus
 {

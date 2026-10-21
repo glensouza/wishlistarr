@@ -12,6 +12,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
     public const string ShowAutoApproveWarning = "This user lacks auto-approve for shows, so show requests made for them will wait for approval.";
     public const string MovieRequestWarning = "This user cannot request movies, so Seerr will refuse movie requests made for them.";
     public const string ShowRequestWarning = "This user cannot request shows, so Seerr will refuse show requests made for them.";
+    public const string SettingsWarning = "Seerr's public settings could not be read, so Seerr's status numbers are assumed and specials are not refused.";
 
     private const int UnknownStatus = (int)SeerrAvailability.Unknown;
     private const int OverseerrDeletedStatus = 6;
@@ -37,7 +38,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             throw new SeerrException("Seerr did not report a version.");
         }
 
-        await this.FlavourAsync(connection, ct, status);
+        ServerFlavour flavour = await this.FlavourAsync(connection, ct, status);
 
         JsonNode? user;
         try
@@ -49,7 +50,8 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
             throw new SeerrException("Seerr has no user with that id.");
         }
 
-        return new SeerrTestResult(version, Warnings(Permissions(user?["permissions"])));
+        IReadOnlyList<string> warnings = Warnings(Permissions(user?["permissions"]));
+        return new SeerrTestResult(version, flavour.SettingsRead ? warnings : [.. warnings, SettingsWarning], flavour.Describe());
     }
 
     public static IReadOnlyList<string> Warnings(long permissions)
@@ -372,7 +374,7 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
         Version? version = blocklist ? ReleaseVersion(status) : null;
         bool dropsEmptySeasons = version is not null && version >= EmptySeasonsDroppedFrom;
         bool allIncludesSpecials = specialsSetting == true && version is not null && version >= SpecialsInAllFrom && version < SpecialsInAllUntil;
-        ServerFlavour flavour = new(blocklist, specialsSetting != false, dropsEmptySeasons, allIncludesSpecials);
+        ServerFlavour flavour = new(blocklist, specialsSetting != false, dropsEmptySeasons, allIncludesSpecials, true);
         this.cachedFlavour = new CachedFlavour(connection.Url, revision, now + FlavourLifetime, flavour);
         return flavour;
     }
@@ -459,9 +461,16 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
-    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed, bool DropsEmptySeasons, bool AllIncludesSpecials)
+    private sealed record ServerFlavour(bool Blocklist, bool SpecialsAllowed, bool DropsEmptySeasons, bool AllIncludesSpecials, bool SettingsRead)
     {
-        public static ServerFlavour Fallback { get; } = new(true, true, false, false);
+        public static ServerFlavour Fallback { get; } = new(true, true, false, false, false);
+
+        public SeerrServerFlavour Describe() => new(
+            this.Blocklist ? SeerrServerKind.Seerr : SeerrServerKind.Overseerr,
+            this.SettingsRead,
+            this.SpecialsAllowed,
+            this.AllIncludesSpecials,
+            this.DropsEmptySeasons);
 
         public int DeletedStatus => this.Blocklist ? (int)SeerrAvailability.Deleted : OverseerrDeletedStatus;
     }

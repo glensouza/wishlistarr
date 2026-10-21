@@ -169,6 +169,45 @@ public sealed class SeerrFlavourTests
         Assert.Single(harness.Server.Sent("POST", "/api/v1/request"));
     }
 
+    [Theory]
+    [InlineData(false, "3.5.0", true, SeerrServerKind.Seerr, true, false, true)]
+    [InlineData(false, "2.5.2", true, SeerrServerKind.Seerr, true, true, false)]
+    [InlineData(false, "3.4.1", false, SeerrServerKind.Seerr, false, false, false)]
+    [InlineData(true, "1.33.2", false, SeerrServerKind.Overseerr, true, false, false)]
+    public async Task The_test_button_reports_the_detected_flavour(
+        bool overseerr,
+        string version,
+        bool specials,
+        SeerrServerKind kind,
+        bool requestable,
+        bool allSpecials,
+        bool skipsEmpty)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.Overseerr = overseerr;
+        harness.Server.Version = version;
+        harness.Server.EnableSpecialEpisodes = specials;
+
+        SeerrTestResult result = await harness.Backend.TestAsync();
+
+        Assert.Equal(version, result.Version);
+        Assert.Equal(new SeerrServerFlavour(kind, true, requestable, allSpecials, skipsEmpty), result.Flavour);
+        Assert.DoesNotContain(SeerrBackend.SettingsWarning, result.Warnings);
+    }
+
+    [Fact]
+    public async Task The_test_button_warns_when_the_public_settings_are_blocked()
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.BlockPublicSettings = true;
+
+        SeerrTestResult result = await harness.Backend.TestAsync();
+
+        Assert.False(result.Flavour.SettingsRead);
+        Assert.Equal(SeerrServerKind.Seerr, result.Flavour.Kind);
+        Assert.Equal([SeerrBackend.SettingsWarning], result.Warnings);
+    }
+
     [Fact]
     public async Task Submitting_still_works_when_the_public_settings_cannot_be_read()
     {

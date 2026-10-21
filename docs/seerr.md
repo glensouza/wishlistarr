@@ -26,7 +26,15 @@ Reads (the status, the public settings, the user lookup, title details and reque
 
 `POST /api/v1/settings/seerr/test` uses the saved connection and ignores any address or key in the body. It reads `/api/v1/status`, which Seerr serves without a key, and reports `version`, or `commitTag` when version is absent. It then looks up the configured user with the key, which is where a wrong key is caught.
 
-It answers `200` with `{ "version", "warnings" }`. `warnings` is a list, checked separately for movies and shows:
+It answers `200` with `{ "version", "warnings", "flavour" }`. `flavour` reports what was detected from the version and the public settings (see Tracking below), and the test button always reads them afresh:
+
+- `kind`: `seerr` for Seerr or Jellyseerr, `overseerr` for Overseerr.
+- `settingsRead`: false when `/api/v1/settings/public` could not be read. A warning is added and Seerr is assumed.
+- `specialsRequestable`: whether season 0 may be asked for.
+- `allIncludesSpecials`: whether `"all"` includes season 0 on this server.
+- `allSkipsEmptySeasons`: whether `"all"` leaves out seasons with no episodes yet.
+
+`warnings` is a list, checked separately for movies and shows:
 
 - The user cannot request that kind when they have none of Admin, Request, or Request Movies (Request Series for shows). Seerr will refuse those requests.
 - Otherwise requests of that kind wait for approval when the user has none of Admin, Manage Requests, Auto-Approve, or Auto-Approve Movies (Auto-Approve Series for shows).

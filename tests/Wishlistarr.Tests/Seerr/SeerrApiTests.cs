@@ -26,6 +26,10 @@ public sealed class SeerrApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(FakeSeerrServer.ReportedVersion, result.GetProperty("version").GetString());
         Assert.Empty(result.GetProperty("warnings").EnumerateArray());
+        JsonElement flavour = result.GetProperty("flavour");
+        Assert.Equal("seerr", flavour.GetProperty("kind").GetString());
+        Assert.True(flavour.GetProperty("settingsRead").GetBoolean());
+        Assert.False(flavour.GetProperty("specialsRequestable").GetBoolean());
         Assert.DoesNotContain(FakeSeerrServer.ApiKey, body, StringComparison.Ordinal);
         Assert.DoesNotContain("not-the-saved-key", body, StringComparison.Ordinal);
         Assert.All(fake.Requests, request => Assert.Equal(FakeSeerrServer.ApiKey, request.ApiKey));
