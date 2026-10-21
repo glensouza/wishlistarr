@@ -188,7 +188,6 @@ public sealed partial class LibraryRefresh(
         this.LogRefreshed(seen.Count);
     }
 
-
     private async Task SyncLabelMembershipAsync(string serverId, CancellationToken ct)
     {
         LibraryLabelScan labels;
@@ -403,7 +402,6 @@ public sealed partial class LibraryRefresh(
             this.titleIds[(kind, tmdbId)] = title.Id;
         }
     }
-
 
     private async Task<string?> ResolveTmdbIdAsync(MediaItem media, CancellationToken ct)
     {

@@ -31,10 +31,14 @@ What is stored:
 
 Ids that Plex reports, request ids and states, and library titles (a kind plus a TMDB id, nothing else) are not TMDB metadata and are not subject to the retention. Posters and other images are proxied from TMDB per request and are never written to disk. The in-memory response cache holds entries for at most 7 days and is emptied when stored TMDB data is cleared.
 
-The `tmdb-data-purge` job runs daily. It first refreshes records that are still in use and older than half the retention (a library id for an item still in the library, the title of a request that is still open), then deletes everything older than the retention. If TMDB cannot be reached, nothing is refreshed and expired records are deleted anyway.
+The `tmdb-data-purge` job runs daily. It first refreshes records that are still in use and older than half the retention (a library id for an item still in the library, the title of a request that is still open), then deletes everything older than the retention. If a refresh fails for any reason, including a TMDB timeout, expired records are deleted anyway, and each kind of data is purged independently so one failure never skips another.
+
+The TMDB key is only ever supplied by the settings store, so removing it through the settings API as described below is the one path that purges immediately; if it disappears any other way, stored data still ages out through the retention.
 
 Retention is the `tmdb.retention_days` setting: a whole number of days, 90 by default and at most 180. `PUT /api/v1/settings/tmdb.retention_days` rejects anything else.
 
 A parent can remove all stored TMDB data at any time with `POST /api/v1/settings/tmdb/clear-data`, which returns `{ "purged": n }`. Removing the API key, by sending an empty value to `PUT /api/v1/settings/tmdb.api_key`, deletes the key and purges the same data.
+
+Request titles must be read through `RequestTitles`, which checks the age and fetches the title again when it has been purged; reading `MediaRequest.Title` directly can return nothing. Requests that existed before the retention was introduced have their title age taken from the request creation time, so titles older than the retention are cleared by the first purge and fetched again when they are shown.
 
 Any new table or column that stores TMDB data must be marked with `[TmdbData]`, have a nullable `FetchedAt` column and be covered by an `ITmdbDataStore` so the purge job handles it. A test fails when a marked entity lacks either, or when an unmarked entity has columns that look like TMDB metadata.

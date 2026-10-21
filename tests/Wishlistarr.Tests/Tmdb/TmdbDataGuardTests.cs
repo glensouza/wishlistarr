@@ -20,11 +20,13 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
     [
         "Overview", "Tagline", "Poster", "PosterPath", "Backdrop", "BackdropPath", "Genres", "Genre", "Keywords", "Cast", "Crew",
         "Credits", "Trailer", "Videos", "Certification", "Rating", "VoteAverage", "Popularity", "Runtime", "Title", "ReleaseDate",
+        "Name", "Description", "ImagePath", "Image", "Keyword", "Studio", "Language", "Homepage",
     ];
 
     private static readonly HashSet<(string Entity, string Property)> PlexSourced =
     [
         (nameof(LibraryItem), nameof(LibraryItem.Title)),
+        (nameof(KidProfile), nameof(KidProfile.Name)),
     ];
 
     [Fact]
