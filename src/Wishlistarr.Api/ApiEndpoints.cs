@@ -7,6 +7,7 @@ using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Arr;
 using Wishlistarr.Integrations.Seerr;
@@ -32,6 +33,7 @@ public static class ApiEndpoints
         v1.MapArr();
         v1.MapSeerr();
         v1.MapJobs();
+        v1.MapWebhookSettings();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")

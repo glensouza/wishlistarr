@@ -219,6 +219,7 @@ public static class SecuritySetup
         && !HttpMethods.IsHead(context.Request.Method)
         && !HttpMethods.IsOptions(context.Request.Method)
         && !HttpMethods.IsTrace(context.Request.Method)
+        && !context.Request.Path.StartsWithSegments("/api/v1/webhooks")
         && context.User.Identity is { IsAuthenticated: true, AuthenticationType: not AuthSchemes.ApiKey };
 
     private static async Task RequireSetupAsync(HttpContext context, RequestDelegate next)
