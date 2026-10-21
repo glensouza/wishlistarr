@@ -8,17 +8,32 @@ public sealed partial class TmdbPurgeRunner(IServiceScopeFactory scopes, ILogger
 {
     private readonly ConcurrentDictionary<Task, byte> running = new();
     private readonly CancellationTokenSource stopping = new();
+    private readonly SemaphoreSlim flagLock = new(1, 1);
+    private long flagGeneration;
+    private volatile bool disposed;
 
     public TimeSpan WaitLimit { get; set; } = TimeSpan.FromSeconds(5);
 
     public async Task<TmdbPurgeOutcome> PurgeAllAsync()
     {
-        await using (AsyncServiceScope scope = scopes.CreateAsyncScope())
+        long generation;
+        await this.flagLock.WaitAsync();
+        try
         {
+            generation = Interlocked.Increment(ref this.flagGeneration);
+            await using AsyncServiceScope scope = scopes.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<TmdbDataService>().MarkPurgePendingAsync(CancellationToken.None);
         }
+        finally
+        {
+            this.flagLock.Release();
+        }
 
-        Task<int?> purge = this.Start();
+        if (this.Start(generation) is not Task<int?> purge)
+        {
+            return new TmdbPurgeOutcome(false, null);
+        }
+
         if (await Task.WhenAny(purge, Task.Delay(this.WaitLimit)) != purge)
         {
             return new TmdbPurgeOutcome(false, null);
@@ -32,7 +47,7 @@ public sealed partial class TmdbPurgeRunner(IServiceScopeFactory scopes, ILogger
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         if (await scope.ServiceProvider.GetRequiredService<TmdbDataService>().IsPurgePendingAsync(ct))
         {
-            _ = this.Start();
+            _ = this.Start(Interlocked.Read(ref this.flagGeneration));
         }
     }
 
@@ -41,15 +56,29 @@ public sealed partial class TmdbPurgeRunner(IServiceScopeFactory scopes, ILogger
         Task all = Task.WhenAll(this.running.Keys);
         if (await Task.WhenAny(all, Task.Delay(limit)) != all)
         {
-            await this.stopping.CancelAsync();
+            if (!this.disposed)
+            {
+                await this.stopping.CancelAsync();
+            }
+
             await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(1)));
         }
     }
 
-    public void Dispose() => this.stopping.Dispose();
-
-    private Task<int?> Start()
+    public void Dispose()
     {
+        this.disposed = true;
+        this.stopping.Dispose();
+    }
+
+    private Task<int?>? Start(long generation)
+    {
+        if (this.disposed || this.stopping.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        CancellationToken token = this.stopping.Token;
         TaskCompletionSource<int?> done = new(TaskCreationOptions.RunContinuationsAsynchronously);
         this.running[done.Task] = 0;
         _ = Task.Run(async () =>
@@ -58,15 +87,11 @@ public sealed partial class TmdbPurgeRunner(IServiceScopeFactory scopes, ILogger
             {
                 await using AsyncServiceScope scope = scopes.CreateAsyncScope();
                 TmdbDataService data = scope.ServiceProvider.GetRequiredService<TmdbDataService>();
-                int purged = await data.PurgeAllAsync(this.stopping.Token);
-                if (this.running.Count <= 1)
-                {
-                    await data.ClearPurgePendingAsync(CancellationToken.None);
-                }
-
+                int purged = await data.PurgeAllAsync(token);
+                await this.ClearFlagIfCurrentAsync(data, generation);
                 done.SetResult(purged);
             }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException && this.stopping.IsCancellationRequested)
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException && token.IsCancellationRequested)
             {
                 done.SetResult(null);
             }
@@ -81,6 +106,22 @@ public sealed partial class TmdbPurgeRunner(IServiceScopeFactory scopes, ILogger
             }
         });
         return done.Task;
+    }
+
+    private async Task ClearFlagIfCurrentAsync(TmdbDataService data, long generation)
+    {
+        await this.flagLock.WaitAsync();
+        try
+        {
+            if (Interlocked.Read(ref this.flagGeneration) == generation)
+            {
+                await data.ClearPurgePendingAsync(CancellationToken.None);
+            }
+        }
+        finally
+        {
+            this.flagLock.Release();
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Purging all stored TMDB data failed; it stays pending and is retried.")]

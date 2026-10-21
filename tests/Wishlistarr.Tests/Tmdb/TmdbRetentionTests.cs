@@ -495,6 +495,88 @@ public sealed class TmdbRetentionTests
         Assert.Null(Assert.Single(await harness.GetRequestsAsync()).Title);
     }
 
+    [Fact]
+    public async Task A_purge_that_began_before_a_later_flag_write_does_not_clear_it_even_if_the_later_purge_fails()
+    {
+        ToggleStore toggle = new();
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync(services => services.AddScoped<ITmdbDataStore>(_ => toggle));
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        harness.Runner.WaitLimit = TimeSpan.FromMilliseconds(50);
+        IDisposable held = await harness.Provider.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+
+        TmdbPurgeOutcome first = await harness.Runner.PurgeAllAsync();
+        toggle.Fail = true;
+        TmdbPurgeOutcome second = await harness.Runner.PurgeAllAsync();
+        held.Dispose();
+        await WaitUntilIdleAsync(harness);
+
+        Assert.False(first.Completed);
+        Assert.False(second.Completed);
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.True(await harness.IsPurgePendingAsync());
+    }
+
+    [Fact]
+    public async Task Overlapping_purges_that_all_succeed_clear_the_flag()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        harness.Runner.WaitLimit = TimeSpan.FromMilliseconds(50);
+        IDisposable held = await harness.Provider.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+
+        await harness.Runner.PurgeAllAsync();
+        await harness.Runner.PurgeAllAsync();
+        held.Dispose();
+        await WaitUntilIdleAsync(harness);
+
+        Assert.Empty(await harness.GetLookupsAsync());
+        Assert.False(await harness.IsPurgePendingAsync());
+    }
+
+    [Fact]
+    public async Task A_runner_that_is_stopping_or_disposed_leaves_the_purge_pending_without_throwing()
+    {
+        await using RetentionHarness harness = await RetentionHarness.CreateAsync();
+        await harness.AddLegacyItemAsync("1", harness.Time.GetUtcNow());
+        harness.Runner.WaitLimit = TimeSpan.FromMilliseconds(50);
+        IDisposable held = await harness.Provider.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+        await harness.Runner.PurgeAllAsync();
+        await harness.Runner.DrainAsync(TimeSpan.FromMilliseconds(50));
+        held.Dispose();
+
+        TmdbPurgeOutcome whileStopping = await harness.Runner.PurgeAllAsync();
+        harness.Runner.Dispose();
+        TmdbPurgeOutcome afterDispose = await harness.Runner.PurgeAllAsync();
+        await harness.Runner.DrainAsync(TimeSpan.FromMilliseconds(50));
+
+        Assert.Equal(new TmdbPurgeOutcome(false, null), whileStopping);
+        Assert.Equal(new TmdbPurgeOutcome(false, null), afterDispose);
+        Assert.True(await harness.IsPurgePendingAsync());
+        Assert.Single(await harness.GetLookupsAsync());
+    }
+
+    private static async Task WaitUntilIdleAsync(RetentionHarness harness)
+    {
+        await harness.Runner.DrainAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(100);
+    }
+
+    private sealed class ToggleStore : ITmdbDataStore
+    {
+        public bool Fail { get; set; }
+
+        public Type EntityType => typeof(ToggleStore);
+
+        public bool WaitsForLibraryRefresh => false;
+
+        public Task RefreshAsync(DateTimeOffset staleBefore, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<int> PurgeExpiredAsync(DateTimeOffset expiredBefore, CancellationToken ct) => Task.FromResult(0);
+
+        public Task<int> PurgeAllAsync(CancellationToken ct) =>
+            this.Fail ? throw new InvalidOperationException("Purge failed.") : Task.FromResult(0);
+    }
+
     private sealed class FaultyStore(bool failRefresh, bool failPurge) : ITmdbDataStore
     {
         public Type EntityType => typeof(FaultyStore);
