@@ -16,9 +16,9 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
     private const int UnknownStatus = (int)SeerrAvailability.Unknown;
     private const int OverseerrDeletedStatus = 6;
 
-    private volatile CachedFlavour? cachedFlavour;
-
     private static readonly Version EmptySeasonsDroppedFrom = new(3, 5, 0);
+
+    private volatile CachedFlavour? cachedFlavour;
 
     public static TimeSpan FlavourLifetime { get; } = TimeSpan.FromMinutes(5);
 
