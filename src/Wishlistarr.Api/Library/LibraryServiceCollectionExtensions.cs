@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core.Library;
@@ -8,7 +9,7 @@ public static class LibraryServiceCollectionExtensions
 {
     public static IServiceCollection AddLibraryIndex(this IServiceCollection services)
     {
-        services.AddSingleton<LibraryRefreshGate>();
+        services.TryAddSingleton<LibraryRefreshGate>();
         services.AddScoped<LibraryRefresh>();
         services.AddScoped<LibraryIndex>();
         services.AddScoped<ILibraryIndex>(provider => provider.GetRequiredService<LibraryIndex>());
