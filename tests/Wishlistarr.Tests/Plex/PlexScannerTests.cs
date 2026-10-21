@@ -39,15 +39,33 @@ public sealed class PlexScannerTests
         await harness.LinkAndSelectAsync();
         ILibraryScanner scanner = harness.Provider.GetRequiredService<ILibraryScanner>();
 
-        List<LibraryEntry> unchanged = await ReadAsync(await scanner.ScanAsync(DateTimeOffset.FromUnixTimeSeconds(FixtureUpdatedAt + 1)));
-        List<LibraryEntry> changed = await ReadAsync(await scanner.ScanAsync(DateTimeOffset.FromUnixTimeSeconds(FixtureUpdatedAt)));
+        List<LibraryEntry> unchanged = await ReadAsync(await scanner.ScanAsync(DateTimeOffset.FromUnixTimeSeconds(FixtureUpdatedAt)));
+        List<LibraryEntry> changed = await ReadAsync(await scanner.ScanAsync(DateTimeOffset.FromUnixTimeSeconds(FixtureUpdatedAt - 1)));
 
         Assert.Empty(unchanged);
         Assert.Equal(9, changed.Count);
         Assert.Contains(
             harness.Server.Requests,
             request => request.Path.EndsWith("/all", StringComparison.Ordinal)
-                && request.Query.GetValueOrDefault("updatedAt>>") == (FixtureUpdatedAt + 1).ToString(CultureInfo.InvariantCulture));
+                && request.Query.GetValueOrDefault("updatedAt>>") == (FixtureUpdatedAt - 1).ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task A_scan_reports_when_plex_returned_fewer_items_than_it_announced()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync(options => options.PageSize = 2);
+        await harness.LinkAndSelectAsync();
+        ILibraryScanner scanner = harness.Provider.GetRequiredService<ILibraryScanner>();
+
+        LibraryScan complete = await scanner.ScanAsync(null);
+        await ReadAsync(complete);
+        harness.Server.HiddenKeys["102"] = true;
+        LibraryScan partial = await scanner.ScanAsync(null);
+        List<LibraryEntry> entries = await ReadAsync(partial);
+
+        Assert.True(complete.Report.Complete);
+        Assert.False(partial.Report.Complete);
+        Assert.DoesNotContain(entries, entry => entry.Item.Id == "102");
     }
 
     [Fact]

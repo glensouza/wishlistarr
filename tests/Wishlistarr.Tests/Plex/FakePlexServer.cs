@@ -66,6 +66,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     public string ResourcesJson { get; set; }
 
+    public ConcurrentDictionary<string, bool> HiddenKeys { get; } = new(StringComparer.Ordinal);
+
     public bool PinApproved { get; set; }
 
     public bool PinGone { get; set; }
@@ -155,7 +157,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         JsonObject container = root["MediaContainer"]!.AsObject();
         JsonArray items = container["Metadata"]!.AsArray();
         JsonArray page = [.. items
-            .Where(item => updatedSince is null || (item!["updatedAt"]?.GetValue<long>() ?? 0) >= updatedSince)
+            .Where(item => !this.HiddenKeys.ContainsKey(item!["ratingKey"]!.GetValue<string>()))
+            .Where(item => updatedSince is null || (item!["updatedAt"]?.GetValue<long>() ?? 0) > updatedSince)
             .Skip(start)
             .Take(size)
             .Select(item => item!.DeepClone())];

@@ -273,7 +273,8 @@ internal sealed partial class PlexMediaServer(
     public async Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
     {
         PlexServerContext server = await this.RequireServerAsync(ct);
-        return new LibraryScan(server.ServerId, this.ReadEntriesAsync(server, updatedSince, ct));
+        LibraryScanReport report = new();
+        return new LibraryScan(server.ServerId, this.ReadEntriesAsync(server, updatedSince, report, ct)) { Report = report };
     }
 
     public Task<string?> GetServerIdAsync(CancellationToken ct = default) => settings.GetAsync(PlexSettingKeys.ServerId, ct);
@@ -359,6 +360,7 @@ internal sealed partial class PlexMediaServer(
     private async IAsyncEnumerable<LibraryEntry> ReadEntriesAsync(
         PlexServerContext server,
         DateTimeOffset? updatedSince,
+        LibraryScanReport report,
         [EnumeratorCancellation] CancellationToken ct)
     {
         int pageSize = Math.Max(1, options.Value.PageSize);
@@ -367,19 +369,31 @@ internal sealed partial class PlexMediaServer(
         foreach (PlexSection section in (sections.Directory ?? []).Where(section => section.Type is "movie" or "show" && IsValidKey(section.Key)))
         {
             (MediaKind kind, int itemType) = section.Type == "movie" ? (MediaKind.Movie, 1) : (MediaKind.Show, 2);
+            HashSet<string?> received = [];
+            int? announced = null;
             for (int start = 0; ; start += pageSize)
             {
                 PlexContainer page = await servers.GetSectionItemsAsync(server, section.Key!, itemType, start, pageSize, ct, since);
                 IReadOnlyList<PlexMetadata> items = page.Metadata ?? [];
-                foreach (PlexMetadata item in items.Where(item => IsValidKey(item.RatingKey)))
+                announced = page.TotalSize ?? announced;
+                foreach (PlexMetadata item in items)
                 {
-                    yield return ToEntry(item, kind, section.Key!);
+                    received.Add(item.RatingKey);
+                    if (IsValidKey(item.RatingKey))
+                    {
+                        yield return ToEntry(item, kind, section.Key!);
+                    }
                 }
 
-                if (items.Count < pageSize || (page.TotalSize is int total && start + items.Count >= total))
+                if (items.Count < pageSize || (announced is int total && start + items.Count >= total))
                 {
                     break;
                 }
+            }
+
+            if (announced is int expected && received.Count < expected)
+            {
+                report.Complete = false;
             }
         }
     }
