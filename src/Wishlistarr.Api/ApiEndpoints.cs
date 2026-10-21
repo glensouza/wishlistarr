@@ -99,6 +99,11 @@ public static class ApiEndpoints
             {
                 await store.DeleteAsync(key, ct);
                 TmdbPurgeOutcome purge = await purger.PurgeAllAsync();
+                if (purge.Failed)
+                {
+                    return TmdbEndpoints.PurgeFailed();
+                }
+
                 return purge.Completed ? Results.NoContent() : Results.Accepted();
             }
 
@@ -108,7 +113,9 @@ public static class ApiEndpoints
             .WithName("PutSetting")
             .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180.")
             .Produces(StatusCodes.Status204NoContent)
-            .ProducesProblem(StatusCodes.Status400BadRequest);
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 }
 
