@@ -150,22 +150,22 @@ public sealed class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
     public async Task Secret_is_encrypted_at_rest_and_not_returned()
     {
         HttpClient client = await factory.CreateAuthorizedClientAsync();
-        const string secret = "seerr-key-12345";
+        const string secret = "example-key-12345";
 
         HttpResponseMessage put = await client.PutAsJsonAsync(
-            "/api/v1/settings/seerr.api_key",
+            "/api/v1/settings/example.api_key",
             new { value = secret, isSecret = true });
-        await client.PutAsJsonAsync("/api/v1/settings/seerr.url", new { value = "http://seerr:5055", isSecret = false });
+        await client.PutAsJsonAsync("/api/v1/settings/example.url", new { value = "http://example.test", isSecret = false });
         string listed = await client.GetStringAsync("/api/v1/settings");
 
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
         Assert.DoesNotContain(secret, listed);
         Assert.DoesNotContain(await factory.GetApiKeyAsync(), listed);
-        Assert.Contains("http://seerr:5055", listed);
+        Assert.Contains("http://example.test", listed);
 
         using IServiceScope scope = factory.Services.CreateScope();
         WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
-        Setting stored = await db.Settings.AsNoTracking().SingleAsync(setting => setting.Key == "seerr.api_key");
+        Setting stored = await db.Settings.AsNoTracking().SingleAsync(setting => setting.Key == "example.api_key");
         Assert.True(stored.IsSecret);
         Assert.DoesNotContain(secret, stored.Value);
     }
