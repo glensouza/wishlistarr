@@ -106,6 +106,25 @@ public sealed class SeerrApiTests
     }
 
     [Fact]
+    public async Task Seasons_only_on_their_way_are_reported_as_covered_not_available()
+    {
+        using ApiFactory factory = new();
+        await using FakeSeerrServer fake = await FakeSeerrServer.StartAsync();
+        fake.SetSeasonStatus(FakeSeerrServer.ShowTmdbId, 1, FakeSeerrServer.MediaProcessing);
+        HttpClient client = await ConfigureAsync(factory, fake);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/v1/seerr/requests",
+            new { kind = "show", tmdbId = FakeSeerrServer.ShowTmdbId, seasons = new[] { 1 } });
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("alreadyCovered", body.GetProperty("outcome").GetString());
+        Assert.Equal("processing", body.GetProperty("availability").GetString());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("id").ValueKind);
+    }
+
+    [Fact]
     public async Task An_unknown_season_is_a_bad_request()
     {
         using ApiFactory factory = new();

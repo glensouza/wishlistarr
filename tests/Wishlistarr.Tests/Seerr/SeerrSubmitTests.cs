@@ -150,6 +150,7 @@ public sealed class SeerrSubmitTests
         Assert.True(all.Attached);
         Assert.Equal(SeerrAvailability.PartiallyAvailable, all.Availability);
         Assert.Equal(SeerrSubmitOutcome.AlreadyAvailable, available.Outcome);
+        Assert.Equal(SeerrAvailability.Available, available.Availability);
         Assert.Null(available.Id);
         Assert.False(available.Attached);
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
@@ -259,6 +260,27 @@ public sealed class SeerrSubmitTests
 
         SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1]));
 
+        Assert.Equal(SeerrSubmitOutcome.AlreadyCovered, result.Outcome);
+        Assert.Equal(SeerrAvailability.Blocklisted, result.Availability);
+        Assert.Null(result.Id);
+        Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
+    }
+
+    [Theory]
+    [InlineData(FakeSeerrServer.MediaPending, FakeSeerrServer.MediaPending, SeerrAvailability.Pending)]
+    [InlineData(FakeSeerrServer.MediaPending, FakeSeerrServer.MediaProcessing, SeerrAvailability.Processing)]
+    [InlineData(FakeSeerrServer.MediaAvailable, FakeSeerrServer.MediaProcessing, SeerrAvailability.PartiallyAvailable)]
+    public async Task Library_seasons_still_on_their_way_are_covered_but_not_available(int first, int second, SeerrAvailability expected)
+    {
+        await using SeerrHarness harness = await SeerrHarness.CreateAsync();
+        harness.Server.SetSeasonStatus(FakeSeerrServer.ShowTmdbId, 1, first);
+        harness.Server.SetSeasonStatus(FakeSeerrServer.ShowTmdbId, 2, second);
+        harness.Server.SetMediaStatus("tv", FakeSeerrServer.ShowTmdbId, FakeSeerrServer.MediaPartiallyAvailable);
+
+        SeerrSubmission result = await harness.Backend.SubmitAsync(new SeerrSubmitRequest(MediaKind.Show, FakeSeerrServer.ShowTmdbId, [1, 2]));
+
+        Assert.Equal(SeerrSubmitOutcome.AlreadyCovered, result.Outcome);
+        Assert.Equal(expected, result.Availability);
         Assert.Null(result.Id);
         Assert.Empty(harness.Server.Sent("POST", "/api/v1/request"));
     }

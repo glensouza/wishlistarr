@@ -60,6 +60,7 @@ public enum SeerrSubmitOutcome
     Created,
     Attached,
     AlreadyAvailable,
+    AlreadyCovered,
 }
 
 public sealed record SeerrSubmission(

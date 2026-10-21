@@ -47,15 +47,16 @@ Before creating anything, the title is read from Seerr and an existing request i
 - For a movie, a pending, approved or failed request is attached. A completed request is attached only while the movie is still available; when the movie was deleted, a new request is made.
 - For a show, the requested seasons must all be covered, either by pending, approved or failed requests or by seasons Seerr already lists with any status other than unknown or deleted, which is the rule Seerr itself applies. When they are, a request that holds one of those seasons is attached. When some are missing, a new request is made and Seerr keeps only the missing seasons on it.
 - When several requests match, the configured user's own request is preferred, then the oldest.
-- A movie that is already available, or a show whose requested seasons are all already in Seerr's library, is not requested again when no request matches. The outcome is then `alreadyAvailable`.
+- When no request matches, a movie that is already available, or a show whose requested seasons Seerr already lists, is not requested again. The outcome is `alreadyAvailable` only when the movie, or every requested season, is available. Otherwise it is `alreadyCovered`: Seerr lists the seasons as pending, processing, partially available or blocklisted, so it would not take a new request for them, but they are not in the library yet.
 
-When another request is made between the read and the create, Seerr answers `409` (a movie that already has a request) or `202` (a show with no seasons left to request). The title is then read again and the matching request is attached, or the outcome is `alreadyAvailable` when the library already covers the seasons.
+When another request is made between the read and the create, Seerr answers `409` (a movie that already has a request) or `202` (a show with no seasons left to request). The title is then read again and the matching request is attached, or the outcome is `alreadyAvailable` or `alreadyCovered` as above.
 
 The response is `{ "outcome", "id", "status", "availability", "attached" }`. `outcome` is one of:
 
 - `created`: a new request was made. `id` and `status` are set.
 - `attached`: an existing request was used. `id` and `status` are set and `attached` is true.
-- `alreadyAvailable`: nothing was requested and there is no request to track. `id` and `status` are null and `availability` tells how far the title has got.
+- `alreadyAvailable`: nothing was requested because the movie, or every requested season, is available. `id` and `status` are null and `availability` is `available`.
+- `alreadyCovered`: nothing was requested and there is no request to track, but the title is not available yet. `id` and `status` are null. For a show, `availability` describes the requested seasons rather than the whole show: `partiallyAvailable` when some are available, otherwise `processing`, `pending`, `blocklisted` or `unknown` for the furthest any of them has got. A dispatcher should treat this as still on its way, not as in the library.
 
 `attached` is kept for callers that only need to know whether an existing request was used.
 

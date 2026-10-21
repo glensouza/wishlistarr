@@ -226,7 +226,43 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
         ExistingRequest? show = Preferred(active.Where(item => wanted is null || item.Seasons.Overlaps(wanted)), userId)
             ?? Preferred(completed.Where(item => wanted is null || item.Seasons.Overlaps(wanted)), userId);
-        return show is not null ? Attach(show, availability) : AlreadyAvailable(availability);
+        return show is not null ? Attach(show, availability) : Covered(media, wanted, flavour, availability);
+    }
+
+    private static SeerrSubmission Covered(JsonObject media, IReadOnlyList<int>? wanted, ServerFlavour flavour, SeerrAvailability title)
+    {
+        if (wanted is null)
+        {
+            return title == SeerrAvailability.Available
+                ? AlreadyAvailable(title)
+                : new SeerrSubmission(SeerrSubmitOutcome.AlreadyCovered, null, null, title, false);
+        }
+
+        Dictionary<int, SeerrAvailability> library = [];
+        if (media["seasons"] is JsonArray seasons)
+        {
+            foreach (JsonNode? season in seasons)
+            {
+                if (Int(season?["seasonNumber"]) is int number)
+                {
+                    library[number] = Availability(season?["status"], flavour);
+                }
+            }
+        }
+
+        SeerrAvailability[] statuses = [.. wanted.Select(season => library.GetValueOrDefault(season, SeerrAvailability.Unknown))];
+        if (statuses.Length > 0 && statuses.All(status => status == SeerrAvailability.Available))
+        {
+            return AlreadyAvailable(SeerrAvailability.Available);
+        }
+
+        SeerrAvailability furthest =
+            statuses.Any(status => status is SeerrAvailability.Available or SeerrAvailability.PartiallyAvailable) ? SeerrAvailability.PartiallyAvailable
+            : statuses.Contains(SeerrAvailability.Processing) ? SeerrAvailability.Processing
+            : statuses.Contains(SeerrAvailability.Pending) ? SeerrAvailability.Pending
+            : statuses.Contains(SeerrAvailability.Blocklisted) ? SeerrAvailability.Blocklisted
+            : SeerrAvailability.Unknown;
+        return new SeerrSubmission(SeerrSubmitOutcome.AlreadyCovered, null, null, furthest, false);
     }
 
     private static ExistingRequest? Preferred(IEnumerable<ExistingRequest> requests, int userId) =>
