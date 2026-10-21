@@ -108,23 +108,25 @@ public sealed class LibraryApiTests(LibraryApiFactory factory) : IClassFixture<L
         for (int attempt = 0; attempt < 100 && run is null; attempt++)
         {
             await Task.Delay(50);
-            run = await runner.GetLastRunAsync(LibraryIncrementalRefreshJob.JobName);
+            run = (await runner.ListRunsAsync(LibraryIncrementalRefreshJob.JobName, 20)).FirstOrDefault(item => item.Trigger == JobRunTrigger.Webhook);
         }
 
         Assert.NotNull(run);
-        Assert.Equal(JobRunTrigger.Webhook, run.Trigger);
     }
 
     [Fact]
     public async Task Refresh_jobs_succeed_quietly_when_plex_is_not_configured()
     {
         using IServiceScope scope = factory.Services.CreateScope();
-        LibraryRefresh refresh = ActivatorUtilities.CreateInstance<LibraryRefresh>(
-            scope.ServiceProvider,
-            new ThrowingScanner());
-        LibraryFullRefreshJob job = new(refresh, scope.ServiceProvider.GetRequiredService<ILogger<LibraryFullRefreshJob>>());
+        ThrowingScanner scanner = new();
+        LibraryRefresh refresh = ActivatorUtilities.CreateInstance<LibraryRefresh>(scope.ServiceProvider, scanner);
+        ILogger<LibraryFullRefreshJob> logger = scope.ServiceProvider.GetRequiredService<ILogger<LibraryFullRefreshJob>>();
 
-        await job.RunAsync(CancellationToken.None);
+        await new LibraryFullRefreshJob(refresh, logger).RunAsync(CancellationToken.None);
+        await new LibraryIncrementalRefreshJob(refresh, scope.ServiceProvider.GetRequiredService<ILogger<LibraryIncrementalRefreshJob>>()).RunAsync(CancellationToken.None);
+
+        Assert.Equal(2, scanner.Scans);
+        Assert.False(await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryRefreshStates.AnyAsync());
     }
 
     private static async Task RunJobAsync(HttpClient client, string name)
@@ -174,8 +176,15 @@ public sealed class LibraryApiTests(LibraryApiFactory factory) : IClassFixture<L
 
     private sealed class ThrowingScanner : ILibraryScanner
     {
-        public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default) =>
+        public int Scans { get; private set; }
+
+        public Task<string?> GetServerIdAsync(CancellationToken ct = default) => Task.FromResult<string?>(null);
+
+        public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
+        {
+            this.Scans++;
             throw new MediaServerNotConfiguredException("No Plex server is selected.");
+        }
 
         public Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default) =>
             throw new MediaServerNotConfiguredException("No Plex server is selected.");

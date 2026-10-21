@@ -254,25 +254,72 @@ public sealed class LibraryIndexTests
         Assert.Equal("server-b", Assert.Single(await harness.GetItemsAsync()).ServerId);
     }
 
+    [Theory]
+    [InlineData(ExternalIdSource.Tmdb, "603", "IX_LibraryTitles_Kind_TmdbId")]
+    [InlineData(ExternalIdSource.Tvdb, "74852", "IX_LibraryExternalIds_Source_Value")]
+    [InlineData(ExternalIdSource.Imdb, "tt0133093", "IX_LibraryExternalIds_Source_Value")]
+    public async Task Lookups_run_the_generated_query_through_an_index(ExternalIdSource source, string value, string index)
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603"), Imdb("tt0133093"), Tvdb("74852")]));
+        await harness.FullAsync();
+
+        Assert.Single(await harness.FindAsync(MediaKind.Movie, source, value) ?? []);
+        string plan = await QueryPlanAsync(harness, harness.Sql.Statements[^1]);
+
+        Assert.Contains(index, plan, StringComparison.Ordinal);
+        Assert.DoesNotContain("SCAN", plan, StringComparison.Ordinal);
+    }
+
     [Fact]
-    public async Task Lookup_by_tmdb_id_uses_an_index()
+    public async Task Rows_of_another_server_are_not_returned_and_a_changed_selection_makes_the_index_unready()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        await harness.FullAsync();
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            LibraryItem stale = await db.LibraryItems.Include(item => item.ExternalIds).SingleAsync();
+            db.LibraryItems.Add(new LibraryItem
+            {
+                ServerId = "server-old",
+                RatingKey = "999",
+                Guid = "plex://movie/old",
+                LibraryId = "1",
+                Title = "Old server copy",
+                Kind = MediaKind.Movie,
+                TitleId = stale.TitleId,
+            });
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        IReadOnlyList<MediaItem> found = await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "603") ?? [];
+        harness.Scanner.SelectedServerId = "server-b";
+
+        Assert.Equal("101", Assert.Single(found).Id);
+        Assert.Null(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "603"));
+    }
+
+    [Fact]
+    public async Task A_single_item_from_a_server_other_than_the_indexed_one_is_ignored()
     {
         await using LibraryHarness harness = await LibraryHarness.CreateAsync();
         harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
         await harness.FullAsync();
 
-        string plan = await QueryPlanAsync(
-            harness,
-            "SELECT i.RatingKey FROM LibraryItems i JOIN LibraryTitles t ON t.Id = i.TitleId WHERE t.Kind = 'Movie' AND t.TmdbId = 603");
-        string idPlan = await QueryPlanAsync(
-            harness,
-            "SELECT ItemId FROM LibraryExternalIds WHERE Source = 'Tvdb' AND Value = '74852'");
+        harness.Scanner.ServerId = "server-b";
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Elsewhere", [Tmdb("129")]));
+        await harness.InScopeAsync(async services =>
+        {
+            await services.GetRequiredService<Wishlistarr.Api.Library.LibraryRefresh>().ItemAsync("102", CancellationToken.None);
+            return 0;
+        });
 
-        Assert.Contains("SEARCH t USING", plan, StringComparison.Ordinal);
-        Assert.Contains("IX_LibraryTitles_Kind_TmdbId", plan, StringComparison.Ordinal);
-        Assert.Contains("SEARCH i USING", plan, StringComparison.Ordinal);
-        Assert.Contains("IX_LibraryExternalIds_Source_Value", idPlan, StringComparison.Ordinal);
+        Assert.Equal("101", Assert.Single(await harness.GetItemsAsync()).RatingKey);
     }
+
 
     [Fact]
     public async Task Tmdb_derived_ids_carry_a_fetched_at_timestamp()

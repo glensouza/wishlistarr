@@ -276,6 +276,8 @@ internal sealed partial class PlexMediaServer(
         return new LibraryScan(server.ServerId, this.ReadEntriesAsync(server, updatedSince, ct));
     }
 
+    public Task<string?> GetServerIdAsync(CancellationToken ct = default) => settings.GetAsync(PlexSettingKeys.ServerId, ct);
+
     public async Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
     {
         if (!IsValidKey(itemId))

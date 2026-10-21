@@ -6,16 +6,18 @@ using Wishlistarr.Data;
 
 namespace Wishlistarr.Api.Library;
 
-public sealed class LibraryIndex(WishlistarrDbContext db) : ILibraryIndex
+public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanner) : ILibraryIndex
 {
     public async Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
     {
-        if (!await db.LibraryRefreshStates.AsNoTracking().AnyAsync(state => state.LastFullRefreshAt != null, ct))
+        LibraryRefreshState? state = await db.LibraryRefreshStates.AsNoTracking().SingleOrDefaultAsync(ct);
+        if (state is not { LastFullRefreshAt: not null, ServerId: string serverId }
+            || await scanner.GetServerIdAsync(ct) != serverId)
         {
             return null;
         }
 
-        IQueryable<LibraryItem> matches;
+        List<LibraryItem> items;
         if (id.Source == ExternalIdSource.Tmdb)
         {
             if (!int.TryParse(id.Value, NumberStyles.None, CultureInfo.InvariantCulture, out int tmdbId))
@@ -23,20 +25,29 @@ public sealed class LibraryIndex(WishlistarrDbContext db) : ILibraryIndex
                 return [];
             }
 
-            matches = db.LibraryItems.Where(item => item.Kind == kind && item.CanonicalTitle!.TmdbId == tmdbId);
+            items = await db.LibraryTitles
+                .Where(title => title.Kind == kind && title.TmdbId == tmdbId)
+                .SelectMany(title => title.Items)
+                .Where(item => item.ServerId == serverId)
+                .AsNoTracking()
+                .Include(item => item.ExternalIds)
+                .OrderBy(item => item.Id)
+                .ToListAsync(ct);
         }
         else
         {
             LibraryIdSource source = id.Source == ExternalIdSource.Tvdb ? LibraryIdSource.Tvdb : LibraryIdSource.Imdb;
-            matches = db.LibraryItems.Where(item => item.Kind == kind
-                && item.ExternalIds.Any(external => external.Source == source && external.Value == id.Value));
+            List<LibraryExternalId> matches = await db.LibraryExternalIds
+                .Where(external => external.Source == source && external.Value == id.Value
+                    && external.Item!.Kind == kind && external.Item.ServerId == serverId)
+                .AsNoTrackingWithIdentityResolution()
+                .Include(external => external.Item)
+                .ThenInclude(item => item!.ExternalIds)
+                .OrderBy(external => external.ItemId)
+                .ToListAsync(ct);
+            items = [.. matches.Select(external => external.Item!)];
         }
 
-        List<LibraryItem> items = await matches
-            .AsNoTracking()
-            .Include(item => item.ExternalIds)
-            .OrderBy(item => item.Id)
-            .ToListAsync(ct);
         return [.. items.Select(ToMediaItem)];
     }
 

@@ -1,5 +1,8 @@
+using System.Data.Common;
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Library;
@@ -13,6 +16,8 @@ namespace Wishlistarr.Tests.Library;
 public sealed class FakeScanner : ILibraryScanner
 {
     public string ServerId { get; set; } = "server-a";
+
+    public string? SelectedServerId { get; set; }
 
     public List<LibraryEntry> Entries { get; } = [];
 
@@ -37,6 +42,8 @@ public sealed class FakeScanner : ILibraryScanner
         IEnumerable<LibraryEntry> matching = this.Entries.Where(entry => updatedSince is null || entry.UpdatedAt >= updatedSince);
         return Task.FromResult(new LibraryScan(this.ServerId, matching.ToList().ToAsyncEnumerable()));
     }
+
+    public Task<string?> GetServerIdAsync(CancellationToken ct = default) => Task.FromResult<string?>(this.SelectedServerId ?? this.ServerId);
 
     public Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
     {
@@ -85,6 +92,50 @@ public sealed class FakeTmdbFinder : ITmdbClient
     public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
+public sealed class SqlRecorder : DbCommandInterceptor
+{
+    private readonly List<string> statements = [];
+
+    public IReadOnlyList<string> Statements
+    {
+        get
+        {
+            lock (this.statements)
+            {
+                return [.. this.statements];
+            }
+        }
+    }
+
+    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<DbDataReader> result,
+        CancellationToken cancellationToken = default)
+    {
+        string text = command.CommandText;
+        foreach (DbParameter parameter in command.Parameters.Cast<DbParameter>().OrderByDescending(item => item.ParameterName.Length))
+        {
+            string literal = parameter.Value switch
+            {
+                null or DBNull => "NULL",
+                string value => $"'{value.Replace("'", "''", StringComparison.Ordinal)}'",
+                bool flag => flag ? "1" : "0",
+                IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
+                var other => $"'{other}'",
+            };
+            text = text.Replace(parameter.ParameterName, literal, StringComparison.Ordinal);
+        }
+
+        lock (this.statements)
+        {
+            this.statements.Add(text);
+        }
+
+        return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+    }
+}
+
 public sealed class LibraryHarness : IAsyncDisposable
 {
     private readonly string directory;
@@ -101,6 +152,8 @@ public sealed class LibraryHarness : IAsyncDisposable
 
     public FakeTmdbFinder Tmdb => this.Provider.GetRequiredService<FakeTmdbFinder>();
 
+    public SqlRecorder Sql => this.Provider.GetRequiredService<SqlRecorder>();
+
     public ManualTime Time => (ManualTime)this.Provider.GetRequiredService<TimeProvider>();
 
     public string DatabasePath => Path.Combine(this.directory, "library.db");
@@ -112,7 +165,9 @@ public sealed class LibraryHarness : IAsyncDisposable
         ServiceCollection services = new();
         services.AddLogging();
         services.AddSingleton<TimeProvider>(new ManualTime(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
-        services.AddDbContext<WishlistarrDbContext>(options => options.UseWishlistarrSqlite(database));
+        services.AddSingleton<SqlRecorder>();
+        services.AddDbContext<WishlistarrDbContext>((provider, options) =>
+            options.UseWishlistarrSqlite(database).AddInterceptors(provider.GetRequiredService<SqlRecorder>()));
         services.AddSingleton<FakeScanner>();
         services.AddSingleton<ILibraryScanner>(provider => provider.GetRequiredService<FakeScanner>());
         services.AddSingleton<FakeTmdbFinder>();

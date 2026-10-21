@@ -70,11 +70,22 @@ public sealed partial class LibraryRefresh(
     public async Task ItemAsync(string ratingKey, CancellationToken ct)
     {
         using IDisposable held = await gate.EnterAsync(ct);
+        string? serverId = await db.LibraryRefreshStates.Select(state => state.ServerId).SingleOrDefaultAsync(ct);
+        if (serverId is null)
+        {
+            return;
+        }
+
         LibrarySnapshot? snapshot = await scanner.GetEntryAsync(ratingKey, ct);
         if (snapshot is null)
         {
-            await db.LibraryItems.Where(item => item.RatingKey == ratingKey).ExecuteDeleteAsync(ct);
+            await db.LibraryItems.Where(item => item.ServerId == serverId && item.RatingKey == ratingKey).ExecuteDeleteAsync(ct);
             await this.RemoveOrphanTitlesAsync(ct);
+            return;
+        }
+
+        if (snapshot.ServerId != serverId)
+        {
             return;
         }
 
@@ -298,7 +309,7 @@ public sealed partial class LibraryRefresh(
                 this.tmdbUnavailable = true;
                 return null;
             }
-            catch (Exception ex) when (ex is TmdbException or HttpRequestException)
+            catch (Exception ex) when (ex is TmdbException or HttpRequestException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
             {
                 this.LogResolveFailed(ex, media.Kind, id.Source);
             }
