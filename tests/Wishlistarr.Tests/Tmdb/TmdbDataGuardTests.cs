@@ -23,7 +23,7 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
         "Name", "Description", "ImagePath", "Image", "Keyword", "Studio", "Language", "Homepage",
     ];
 
-    private static readonly HashSet<(string Entity, string Property)> PlexSourced =
+    private static readonly HashSet<(string Entity, string Property)> NotFromTmdb =
     [
         (nameof(LibraryItem), nameof(LibraryItem.Title)),
         (nameof(KidProfile), nameof(KidProfile.Name)),
@@ -69,7 +69,7 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
         {
             unmarked.AddRange(entity.GetProperties()
                 .Where(property => TmdbLookingNames.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
-                .Where(property => !PlexSourced.Contains((entity.ClrType.Name, property.Name)))
+                .Where(property => !NotFromTmdb.Contains((entity.ClrType.Name, property.Name)))
                 .Select(property => $"{entity.ClrType.Name}.{property.Name}"));
         }
 

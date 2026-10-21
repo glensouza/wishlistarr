@@ -54,7 +54,6 @@ public sealed partial class TmdbDataService(
         }
     }
 
-
     public async Task<int> PurgeAllAsync(CancellationToken ct)
     {
         cache.Clear();
