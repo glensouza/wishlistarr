@@ -153,6 +153,31 @@ public sealed class LibraryApiTests(LibraryApiFactory factory) : IClassFixture<L
     }
 
     [Fact]
+    public async Task A_failing_single_item_read_falls_back_to_an_incremental_refresh()
+    {
+        factory.Scanner.Entries.Clear();
+        factory.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [new(ExternalIdSource.Tmdb, "603")], updatedAt: Updated));
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+        await RunJobAsync(client, LibraryFullRefreshJob.JobName);
+        factory.Scanner.Entries.Add(FakeScanner.Entry("104", MediaKind.Movie, "Fallback", [new(ExternalIdSource.Tmdb, "131")], updatedAt: Updated));
+        factory.Scanner.EntryFailure = new HttpRequestException("Plex is unreachable.");
+
+        try
+        {
+            HttpResponseMessage response = await this.PostPlexEventAsync(
+                client,
+                $$$"""{"event":"library.new","Metadata":{"ratingKey":"104","note":"{{{Guid.NewGuid():N}}}"}}""");
+
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+            Assert.Equal("Fallback", (await this.WaitForItemAsync("104")).Title);
+        }
+        finally
+        {
+            factory.Scanner.EntryFailure = null;
+        }
+    }
+
+    [Fact]
     public async Task Refresh_jobs_succeed_quietly_when_plex_is_not_configured()
     {
         using IServiceScope scope = factory.Services.CreateScope();

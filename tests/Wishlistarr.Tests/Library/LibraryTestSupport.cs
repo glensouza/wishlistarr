@@ -23,6 +23,12 @@ public sealed class FakeScanner : ILibraryScanner
 
     public int LabelScans { get; private set; }
 
+    public int EmptyScans { get; set; }
+
+    public Exception? LabelFailure { get; set; }
+
+    public Exception? EntryFailure { get; set; }
+
     public List<LibraryEntry> Entries { get; } = [];
 
     public List<DateTimeOffset?> Scans { get; } = [];
@@ -43,7 +49,13 @@ public sealed class FakeScanner : ILibraryScanner
     public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
     {
         this.Scans.Add(updatedSince);
-        IEnumerable<LibraryEntry> matching = this.Entries
+        bool empty = updatedSince is null && this.EmptyScans > 0;
+        if (empty)
+        {
+            this.EmptyScans--;
+        }
+
+        IEnumerable<LibraryEntry> matching = this.Entries.Where(_ => !empty)
             .Where(entry => updatedSince is null || entry.UpdatedAt > updatedSince)
             .Select(entry => entry with { Labels = null });
         return Task.FromResult(new LibraryScan(this.ServerId, matching.ToList().ToAsyncEnumerable())
@@ -55,6 +67,11 @@ public sealed class FakeScanner : ILibraryScanner
     public Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default)
     {
         this.LabelScans++;
+        if (this.LabelFailure is not null)
+        {
+            throw this.LabelFailure;
+        }
+
         Dictionary<string, IReadOnlyList<string>> byItem = this.Entries
             .Where(entry => entry.Labels is { Count: > 0 })
             .ToDictionary(entry => entry.Item.Id, entry => entry.Labels!);
@@ -65,6 +82,11 @@ public sealed class FakeScanner : ILibraryScanner
 
     public Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
     {
+        if (this.EntryFailure is not null)
+        {
+            throw this.EntryFailure;
+        }
+
         LibraryEntry? entry = this.Entries.FirstOrDefault(item => item.Item.Id == itemId);
         return Task.FromResult(entry is null ? null : new LibrarySnapshot(this.ServerId, entry));
     }

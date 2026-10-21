@@ -22,20 +22,40 @@ public sealed class LibraryWebhookHandler(LibraryRefresh refresh, JobRunner jobs
         string? ratingKey = ReadRatingKey(webhookEvent.Payload);
         try
         {
-            if (ratingKey is not null && await refresh.TryItemAsync(ratingKey, ct))
+            if (ratingKey is not null && await this.TryRefreshItemAsync(ratingKey, ct))
             {
                 return;
             }
 
             JobStartResult started = await jobs.StartAsync(LibraryIncrementalRefreshJob.JobName, JobRunTrigger.Webhook, ct);
-            if (started.Status is JobStartStatus.NotFound or JobStartStatus.Stopping)
+            switch (started.Status)
             {
-                logger.LogWarning("The library refresh could not be started: {Status}.", started.Status);
+                case JobStartStatus.AlreadyRunning:
+                    logger.LogInformation("An incremental library refresh is already running; a {Event} event relies on it or the next one.", webhookEvent.EventType);
+                    break;
+                case JobStartStatus.NotFound or JobStartStatus.Stopping:
+                    logger.LogWarning("The library refresh could not be started: {Status}.", started.Status);
+                    break;
             }
         }
         catch (MediaServerNotConfiguredException exception)
         {
             logger.LogDebug("Library webhook skipped: {Reason}", exception.Message);
+        }
+    }
+
+    private async Task<bool> TryRefreshItemAsync(string ratingKey, CancellationToken ct)
+    {
+        try
+        {
+            return await refresh.TryItemAsync(ratingKey, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException
+            || (ex is MediaServerException and not MediaServerNotConfiguredException)
+            || (ex is OperationCanceledException && !ct.IsCancellationRequested))
+        {
+            logger.LogWarning(ex, "Refreshing a single library item failed; falling back to an incremental refresh.");
+            return false;
         }
     }
 
