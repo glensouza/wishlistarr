@@ -15,7 +15,10 @@ public static class SeerrPermissions
     public static bool HasAutoApprove(long permissions) => (permissions & AutoApproveMask) != 0;
 }
 
-public sealed record SeerrConnection(Uri Url, string ApiKey, int UserId);
+public sealed record SeerrConnection(Uri Url, string ApiKey, int UserId)
+{
+    public override string ToString() => $"SeerrConnection {{ Url = {this.Url}, UserId = {this.UserId} }}";
+}
 
 public sealed record SeerrSettingsView(string? Url, bool HasApiKey, int? UserId);
 
