@@ -194,7 +194,6 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         }.ToJsonString();
     }
 
-
     private string Render(string template) => template
         .Replace("{{MACHINE}}", MachineIdentifier, StringComparison.Ordinal)
         .Replace("{{SERVER_TOKEN}}", ServerToken, StringComparison.Ordinal)

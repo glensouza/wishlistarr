@@ -59,6 +59,8 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
             state?.ServerId,
             state?.LastFullRefreshAt,
             state?.LastIncrementalRefreshAt,
+            state?.LastFullAttemptAt,
+            state?.LastFullAttemptComplete,
             await db.LibraryItems.CountAsync(ct),
             await db.LibraryItems.CountAsync(item => item.TitleId == null, ct),
             await db.LibraryItemLabels.Select(label => label.Label).Distinct().CountAsync(ct));
@@ -97,6 +99,8 @@ public sealed record LibraryStatus(
     string? ServerId,
     DateTimeOffset? LastFullRefreshAt,
     DateTimeOffset? LastIncrementalRefreshAt,
+    DateTimeOffset? LastFullAttemptAt,
+    bool? LastFullAttemptComplete,
     int ItemCount,
     int UnresolvedCount,
     int LabelCount);

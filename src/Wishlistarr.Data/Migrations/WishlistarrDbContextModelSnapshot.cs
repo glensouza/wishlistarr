@@ -315,6 +315,12 @@ namespace Wishlistarr.Data.Migrations
                     b.Property<int>("Id")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTimeOffset?>("LastFullAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("LastFullAttemptComplete")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset?>("LastFullRefreshAt")
                         .HasColumnType("TEXT");
 

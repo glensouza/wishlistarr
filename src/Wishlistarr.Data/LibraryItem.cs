@@ -101,5 +101,9 @@ public sealed class LibraryRefreshState
 
     public DateTimeOffset? LastIncrementalRefreshAt { get; set; }
 
+    public DateTimeOffset? LastFullAttemptAt { get; set; }
+
+    public bool? LastFullAttemptComplete { get; set; }
+
     public DateTimeOffset? UpdatedCursor { get; set; }
 }

@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Wishlistarr.Api.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
@@ -349,7 +350,6 @@ public sealed class LibraryIndexTests
         Assert.Equal("101", Assert.Single(await harness.GetItemsAsync()).RatingKey);
     }
 
-
     [Fact]
     public async Task Tmdb_derived_ids_carry_a_fetched_at_timestamp()
     {
@@ -457,7 +457,22 @@ public sealed class LibraryIndexTests
     }
 
     [Fact]
-    public async Task A_full_scan_that_returns_nothing_does_not_empty_a_populated_index()
+    public async Task A_full_scan_that_is_empty_once_does_not_empty_a_populated_index()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "One", [Tmdb("1")]));
+        await harness.FullAsync();
+
+        harness.Scanner.EmptyScans = 1;
+        await harness.FullAsync();
+
+        Assert.Single(await harness.GetItemsAsync());
+        Assert.NotNull(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "1"));
+        Assert.Equal<DateTimeOffset?>([null, null, null], harness.Scanner.Scans);
+    }
+
+    [Fact]
+    public async Task A_library_that_is_confirmed_empty_is_pruned_and_marked_refreshed()
     {
         await using LibraryHarness harness = await LibraryHarness.CreateAsync();
         harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "One", [Tmdb("1")]));
@@ -466,8 +481,61 @@ public sealed class LibraryIndexTests
         harness.Scanner.Entries.Clear();
         await harness.FullAsync();
 
-        Assert.Single(await harness.GetItemsAsync());
-        Assert.NotNull(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "1"));
+        Assert.Empty(await harness.GetItemsAsync());
+        Assert.Empty(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "1") ?? throw new InvalidOperationException());
+        LibraryStatus status = await harness.InScopeAsync(services => services.GetRequiredService<LibraryIndex>().GetStatusAsync());
+        Assert.True(status.Ready);
+        Assert.True(status.LastFullAttemptComplete);
+    }
+
+    [Fact]
+    public async Task An_empty_scan_only_counts_against_items_of_the_scanned_server()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "One", [Tmdb("1")]));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries.Clear();
+        harness.Scanner.ServerId = "server-b";
+        await harness.FullAsync();
+
+        Assert.Empty(await harness.GetItemsAsync());
+        Assert.Equal(2, harness.Scanner.Scans.Count);
+    }
+
+    [Fact]
+    public async Task The_status_reports_an_incomplete_full_attempt_without_marking_the_index_ready()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "One", [Tmdb("1")]));
+        harness.Scanner.Complete = false;
+
+        await harness.FullAsync();
+
+        LibraryStatus status = await harness.InScopeAsync(services => services.GetRequiredService<LibraryIndex>().GetStatusAsync());
+        Assert.False(status.Ready);
+        Assert.False(status.LastFullAttemptComplete);
+        Assert.NotNull(status.LastFullAttemptAt);
+        Assert.Null(status.LastFullRefreshAt);
+    }
+
+    [Fact]
+    public async Task A_failing_label_read_keeps_stored_labels_and_still_saves_the_refresh()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")], ["Kids-Ada"], Early));
+        await harness.FullAsync();
+
+        harness.Scanner.Entries[0] = FakeScanner.Entry("101", MediaKind.Movie, "The Matrix renamed", [Tmdb("603")], [], Early.AddHours(1));
+        harness.Scanner.LabelFailure = new HttpRequestException("Plex is unreachable.");
+        await harness.IncrementalAsync();
+        await harness.FullAsync();
+
+        LibraryItem item = Assert.Single(await harness.GetItemsAsync());
+        Assert.Equal("The Matrix renamed", item.Title);
+        Assert.Equal(["Kids-Ada"], item.Labels.Select(label => label.Label));
+        LibraryStatus status = await harness.InScopeAsync(services => services.GetRequiredService<LibraryIndex>().GetStatusAsync());
+        Assert.True(status.LastFullAttemptComplete);
     }
 
     [Fact]

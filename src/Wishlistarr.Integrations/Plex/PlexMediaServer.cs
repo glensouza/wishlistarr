@@ -297,9 +297,14 @@ internal sealed partial class PlexMediaServer(
                     PlexContainer page = await servers.GetSectionItemsAsync(server, section.Key!, itemType, start, pageSize, ct, label: label.Key);
                     IReadOnlyList<PlexMetadata> items = page.Metadata ?? [];
                     announced = page.TotalSize ?? announced;
-                    foreach (PlexMetadata item in items.Where(item => IsValidKey(item.RatingKey)))
+                    foreach (PlexMetadata item in items)
                     {
                         received.Add(item.RatingKey);
+                        if (!IsValidKey(item.RatingKey))
+                        {
+                            continue;
+                        }
+
                         if (!byItem.TryGetValue(item.RatingKey!, out List<string>? tags))
                         {
                             byItem[item.RatingKey!] = tags = [];

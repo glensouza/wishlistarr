@@ -51,7 +51,7 @@ public sealed class PlexScannerTests
         Assert.Equal(["kids-ada"], scan.LabelsByItem["201"]);
         Assert.Equal(3, scan.LabelsByItem.Count);
         Assert.DoesNotContain(harness.Server.Requests, request => request.Path.StartsWith("/library/metadata/", StringComparison.Ordinal));
-        Assert.Equal(4, harness.Server.Requests.Count(request => request.Path == "/library/sections/1/label" || request.Path == "/library/sections/2/label" || request.Path == "/library/sections/3/label" || request.Path == "/library/sections/4/label"));
+        Assert.Equal(4, harness.Server.Requests.Count(request => request.Path.EndsWith("/label", StringComparison.Ordinal)));
     }
 
     [Fact]

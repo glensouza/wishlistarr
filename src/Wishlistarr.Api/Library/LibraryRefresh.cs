@@ -142,9 +142,24 @@ public sealed partial class LibraryRefresh(
     {
         HashSet<string> seen = [];
         DateTimeOffset? newest = await this.IndexAsync(scan, seen, ct);
+        bool hadItems = await db.LibraryItems.AnyAsync(item => item.ServerId == scan.ServerId, ct);
 
-        if (!scan.Report.Complete || (seen.Count == 0 && await db.LibraryItems.AnyAsync(ct)))
+        bool confirmedEmpty = false;
+        if (seen.Count == 0 && hadItems && scan.Report.Complete)
         {
+            scan = await scanner.ScanAsync(null, ct);
+            seen.Clear();
+            newest = await this.IndexAsync(scan, seen, ct);
+            confirmedEmpty = seen.Count == 0 && scan.Report.Complete;
+        }
+
+        bool complete = scan.Report.Complete && (seen.Count > 0 || !hadItems || confirmedEmpty);
+        if (!complete)
+        {
+            LibraryRefreshState attempted = await db.LibraryRefreshStates.SingleOrDefaultAsync(ct) ?? db.LibraryRefreshStates.Add(new()).Entity;
+            attempted.LastFullAttemptAt = time.GetUtcNow();
+            attempted.LastFullAttemptComplete = false;
+            await db.SaveChangesAsync(ct);
             this.LogIncomplete(seen.Count);
             return;
         }
@@ -162,17 +177,31 @@ public sealed partial class LibraryRefresh(
         await this.RemoveOrphanTitlesAsync(ct);
         await this.SyncLabelMembershipAsync(scan.ServerId, ct);
 
+        DateTimeOffset now = time.GetUtcNow();
         LibraryRefreshState state = await db.LibraryRefreshStates.SingleOrDefaultAsync(ct) ?? db.LibraryRefreshStates.Add(new()).Entity;
         state.ServerId = scan.ServerId;
-        state.LastFullRefreshAt = time.GetUtcNow();
+        state.LastFullRefreshAt = now;
+        state.LastFullAttemptAt = now;
+        state.LastFullAttemptComplete = true;
         state.UpdatedCursor = newest;
         await db.SaveChangesAsync(ct);
         this.LogRefreshed(seen.Count);
     }
 
+
     private async Task SyncLabelMembershipAsync(string serverId, CancellationToken ct)
     {
-        LibraryLabelScan labels = await scanner.ScanLabelsAsync(ct);
+        LibraryLabelScan labels;
+        try
+        {
+            labels = await scanner.ScanLabelsAsync(ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            this.LogLabelsFailed(ex);
+            return;
+        }
+
         if (labels.ServerId != serverId || !labels.Complete)
         {
             return;
@@ -246,6 +275,7 @@ public sealed partial class LibraryRefresh(
             .Where(item => item.ServerId == serverId && keys.Contains(item.RatingKey))
             .ToDictionaryAsync(item => item.RatingKey, StringComparer.Ordinal, ct);
         DateTimeOffset now = time.GetUtcNow();
+        List<(LibraryItem Item, int? TmdbId)> pending = [];
 
         foreach (LibraryEntry entry in entries.DistinctBy(entry => entry.Item.Id))
         {
@@ -268,14 +298,14 @@ public sealed partial class LibraryRefresh(
                 SyncLabels(item, entry.Labels);
             }
 
-            await this.SyncIdsAsync(item, media, now, ct);
+            pending.Add((item, await this.SyncIdsAsync(item, media, now, ct)));
         }
 
-        await db.SaveChangesAsync(ct);
+        await this.AssignTitlesAsync(pending, ct);
         db.ChangeTracker.Clear();
     }
 
-    private async Task SyncIdsAsync(LibraryItem item, MediaItem media, DateTimeOffset now, CancellationToken ct)
+    private async Task<int?> SyncIdsAsync(LibraryItem item, MediaItem media, DateTimeOffset now, CancellationToken ct)
     {
         List<(LibraryIdSource Source, string Value)> wanted =
         [
@@ -327,38 +357,53 @@ public sealed partial class LibraryRefresh(
         }
 
         string? tmdbValue = item.ExternalIds.FirstOrDefault(id => id.Source == LibraryIdSource.Tmdb)?.Value;
-        if (tmdbValue is not null && int.TryParse(tmdbValue, NumberStyles.None, CultureInfo.InvariantCulture, out int tmdbId))
-        {
-            item.TitleId = await this.FindTitleIdAsync(item.Kind, tmdbId, ct);
-        }
-        else
-        {
-            item.TitleId = null;
-        }
+        return tmdbValue is not null && int.TryParse(tmdbValue, NumberStyles.None, CultureInfo.InvariantCulture, out int tmdbId) ? tmdbId : null;
     }
 
-    private async Task<int> FindTitleIdAsync(MediaKind kind, int tmdbId, CancellationToken ct)
+    private async Task AssignTitlesAsync(IReadOnlyList<(LibraryItem Item, int? TmdbId)> pending, CancellationToken ct)
     {
-        if (this.titleIds.TryGetValue((kind, tmdbId), out int known))
+        foreach (IGrouping<MediaKind, (LibraryItem Item, int? TmdbId)> group in pending.Where(entry => entry.TmdbId is not null && !this.titleIds.ContainsKey((entry.Item.Kind, entry.TmdbId!.Value)))
+            .GroupBy(entry => entry.Item.Kind))
         {
-            return known;
+            int[] wanted = [.. group.Select(entry => entry.TmdbId!.Value).Distinct()];
+            foreach (var row in await db.LibraryTitles
+                .Where(title => title.Kind == group.Key && wanted.Contains(title.TmdbId))
+                .Select(title => new { title.Id, title.TmdbId })
+                .ToListAsync(ct))
+            {
+                this.titleIds[(group.Key, row.TmdbId)] = row.Id;
+            }
         }
 
-        int? existing = await db.LibraryTitles
-            .Where(row => row.Kind == kind && row.TmdbId == tmdbId)
-            .Select(row => (int?)row.Id)
-            .SingleOrDefaultAsync(ct);
-        if (existing is null)
+        Dictionary<(MediaKind Kind, int TmdbId), LibraryTitle> created = [];
+        foreach ((LibraryItem item, int? tmdbId) in pending)
         {
-            LibraryTitle created = new() { Kind = kind, TmdbId = tmdbId };
-            db.LibraryTitles.Add(created);
-            await db.SaveChangesAsync(ct);
-            existing = created.Id;
+            if (tmdbId is not int id)
+            {
+                item.TitleId = null;
+            }
+            else if (this.titleIds.TryGetValue((item.Kind, id), out int known))
+            {
+                item.TitleId = known;
+            }
+            else
+            {
+                if (!created.TryGetValue((item.Kind, id), out LibraryTitle? title))
+                {
+                    created[(item.Kind, id)] = title = db.LibraryTitles.Add(new LibraryTitle { Kind = item.Kind, TmdbId = id }).Entity;
+                }
+
+                item.CanonicalTitle = title;
+            }
         }
 
-        this.titleIds[(kind, tmdbId)] = existing.Value;
-        return existing.Value;
+        await db.SaveChangesAsync(ct);
+        foreach (((MediaKind kind, int tmdbId), LibraryTitle title) in created)
+        {
+            this.titleIds[(kind, tmdbId)] = title.Id;
+        }
     }
+
 
     private async Task<string?> ResolveTmdbIdAsync(MediaItem media, CancellationToken ct)
     {
@@ -393,8 +438,11 @@ public sealed partial class LibraryRefresh(
         return null;
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Library refresh read {Count} items but Plex reported more or the index would be emptied; nothing was removed.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Library refresh read {Count} items but Plex reported more or the index would be emptied; nothing was removed and the index is not marked refreshed.")]
     private partial void LogIncomplete(int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Reading library labels failed; the stored labels were kept.")]
+    private partial void LogLabelsFailed(Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Library refresh indexed {Count} items.")]
     private partial void LogRefreshed(int count);

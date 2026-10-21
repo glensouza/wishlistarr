@@ -35,6 +35,8 @@ Plex section listings do not include labels; they only appear on an item's detai
 
 Until the first full refresh completes the index reports that it cannot answer and requests fall back to asking Plex directly.
 
+Each refresh also crawls labels: one request per movie and show library for its label list, then one or more per label for the items carrying it, so the cost grows with the number of distinct labels rather than the number of items.
+
 ## Status
 
 `GET /api/v1/system/status` includes a `library` object:
@@ -45,10 +47,12 @@ Until the first full refresh completes the index reports that it cannot answer a
   "serverId": "4b1e0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a291",
   "lastFullRefreshAt": "2026-10-21T03:00:00+00:00",
   "lastIncrementalRefreshAt": "2026-10-21T09:15:00+00:00",
+  "lastFullAttemptAt": "2026-10-21T03:00:00+00:00",
+  "lastFullAttemptComplete": true,
   "itemCount": 1204,
   "unresolvedCount": 3,
   "labelCount": 5
 }
 ```
 
-`ready` is false until a full refresh has completed. `unresolvedCount` is the number of items with no TMDB title, and `labelCount` is the number of distinct labels in use. The two refresh jobs and their last runs are listed under `jobs`.
+`ready` is false until a full refresh has completed. `lastFullAttemptAt` and `lastFullAttemptComplete` describe the latest full refresh attempt; `false` means Plex returned less than it announced (or an unexpectedly empty library), so nothing was removed and the index was not marked refreshed. `unresolvedCount` is the number of items with no TMDB title, and `labelCount` is the number of distinct labels in use. The two refresh jobs and their last runs are listed under `jobs`.
