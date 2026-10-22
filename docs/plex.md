@@ -32,7 +32,7 @@ Connections are tried in this order:
 
 Plain HTTP is skipped entirely when the server requires secure connections. Within each group IPv4 is tried before IPv6. Each candidate is first asked for `/identity` without a token and is only used when it answers with the selected server's machine identifier, so the token is never sent to a device that is not that server. Each probe waits up to 5 seconds.
 
-When the saved connection stops answering, the next request runs the selection again and saves whichever connection answers.
+When the saved connection stops answering, the next request runs the selection again and saves whichever connection answers. The server address and access token are written together, so a request never uses a new address with the previous token, or the previous address with a new token.
 
 Server addresses only come from plex.tv for the chosen server. They must be plain `http` or `https` base addresses with no credentials, path, query or fragment, redirects are not followed, and the generic `PUT /api/v1/settings/{key}` endpoint refuses every `plex.` key. There is no way to enter a server address by hand.
 

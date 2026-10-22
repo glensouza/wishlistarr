@@ -535,9 +535,12 @@ internal sealed partial class PlexMediaServer(
     private async Task<PlexServerContext> RequireServerAsync(CancellationToken ct)
     {
         (string clientIdentifier, _) = await this.RequireAccountAsync(ct);
-        string? serverId = await settings.GetAsync(PlexSettingKeys.ServerId, ct);
-        string? url = await settings.GetAsync(PlexSettingKeys.ServerUrl, ct);
-        string? token = await settings.GetAsync(PlexSettingKeys.ServerToken, ct);
+        IReadOnlyDictionary<string, string?> stored = await settings.GetAsync(
+            [PlexSettingKeys.ServerId, PlexSettingKeys.ServerUrl, PlexSettingKeys.ServerToken],
+            ct);
+        string? serverId = stored[PlexSettingKeys.ServerId];
+        string? url = stored[PlexSettingKeys.ServerUrl];
+        string? token = stored[PlexSettingKeys.ServerToken];
         if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(token)
             || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || !PlexConnections.IsAllowed(uri))
         {
@@ -560,8 +563,17 @@ internal sealed partial class PlexMediaServer(
 
     private async Task<SelectedMediaServer?> GetSelectedServerAsync(CancellationToken ct)
     {
-        string? id = await settings.GetAsync(PlexSettingKeys.ServerId, ct);
-        string? url = await settings.GetAsync(PlexSettingKeys.ServerUrl, ct);
+        IReadOnlyDictionary<string, string?> stored = await settings.GetAsync(
+            [
+                PlexSettingKeys.ServerId,
+                PlexSettingKeys.ServerName,
+                PlexSettingKeys.ServerUrl,
+                PlexSettingKeys.ServerLocal,
+                PlexSettingKeys.ServerRelay,
+            ],
+            ct);
+        string? id = stored[PlexSettingKeys.ServerId];
+        string? url = stored[PlexSettingKeys.ServerUrl];
         if (string.IsNullOrEmpty(id) || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || !PlexConnections.IsAllowed(uri))
         {
             return null;
@@ -569,22 +581,26 @@ internal sealed partial class PlexMediaServer(
 
         return new SelectedMediaServer(
             id,
-            await settings.GetAsync(PlexSettingKeys.ServerName, ct) ?? id,
+            stored[PlexSettingKeys.ServerName] ?? id,
             new MediaServerConnection(
                 uri,
-                await settings.GetAsync(PlexSettingKeys.ServerLocal, ct) == "true",
-                await settings.GetAsync(PlexSettingKeys.ServerRelay, ct) == "true",
+                stored[PlexSettingKeys.ServerLocal] == "true",
+                stored[PlexSettingKeys.ServerRelay] == "true",
                 uri.Scheme == Uri.UriSchemeHttps));
     }
 
     private async Task SaveServerAsync(SelectedMediaServer server, string token, CancellationToken ct)
     {
-        await settings.SetAsync(PlexSettingKeys.ServerToken, token, true, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerName, server.Name, false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerUrl, server.Connection.Uri.ToString(), false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerLocal, server.Connection.Local ? "true" : "false", false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerRelay, server.Connection.Relay ? "true" : "false", false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerId, server.Id, false, ct);
+        await settings.SetAsync(
+            [
+                new AppSettingChange(PlexSettingKeys.ServerToken, token, true),
+                new AppSettingChange(PlexSettingKeys.ServerName, server.Name, false),
+                new AppSettingChange(PlexSettingKeys.ServerUrl, server.Connection.Uri.ToString(), false),
+                new AppSettingChange(PlexSettingKeys.ServerLocal, server.Connection.Local ? "true" : "false", false),
+                new AppSettingChange(PlexSettingKeys.ServerRelay, server.Connection.Relay ? "true" : "false", false),
+                new AppSettingChange(PlexSettingKeys.ServerId, server.Id, false),
+            ],
+            ct);
     }
 
     private async Task ClearAsync(IEnumerable<string> keys, CancellationToken ct)
