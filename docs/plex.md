@@ -14,6 +14,8 @@ Linking uses the plex.tv PIN flow, so nobody has to find or type a token.
 
 `GET /api/v1/plex/status` reports whether an account is linked, the account name, the client identifier and the selected server. `DELETE /api/v1/plex/link` forgets the account and the selected server.
 
+Two checks of the same approved link can run at the same time. Both report linked, and the sign-in is stored once.
+
 Wishlistarr identifies itself to Plex with a client identifier that is generated once and stored in the `plex.client_identifier` setting. It is kept when the account is unlinked, so Plex keeps seeing the same device.
 
 ## Choosing a server
@@ -30,7 +32,7 @@ Connections are tried in this order:
 
 Plain HTTP is skipped entirely when the server requires secure connections. Within each group IPv4 is tried before IPv6. Each candidate is first asked for `/identity` without a token and is only used when it answers with the selected server's machine identifier, so the token is never sent to a device that is not that server. Each probe waits up to 5 seconds.
 
-When the saved connection stops answering, the next request runs the selection again and saves whichever connection answers.
+When the saved connection stops answering, the next request runs the selection again and saves whichever connection answers. The server address and access token are written together, so a request never uses a new address with the previous token, or the previous address with a new token. If selection fails because nothing can be reached, further attempts wait 2 seconds, then 4, 8, and so on, up to 1 minute. A request that arrives during that wait fails without probing again. A connection that answers clears the wait, and so does choosing a server, linking or unlinking. Requests that failed together share one selection.
 
 The addresses plex.tv lists for a server are controlled by whoever owns that server. When the linked account only has access to a shared server, the owner decides which connections appear, so a shared server can be unreachable even though the account can see it.
 

@@ -10,10 +10,22 @@ public sealed class StoredAppSettings(IServiceScopeFactory scopes) : IAppSetting
         return await scope.ServiceProvider.GetRequiredService<SettingsStore>().GetAsync(key, ct);
     }
 
+    public async Task<IReadOnlyDictionary<string, string?>> GetAsync(IReadOnlyList<string> keys, CancellationToken ct = default)
+    {
+        await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<SettingsStore>().GetAsync(keys, ct);
+    }
+
     public async Task SetAsync(string key, string value, bool isSecret, CancellationToken ct = default)
     {
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         await scope.ServiceProvider.GetRequiredService<SettingsStore>().SetAsync(key, value, isSecret, ct);
+    }
+
+    public async Task SetAsync(IReadOnlyList<AppSettingChange> changes, CancellationToken ct = default)
+    {
+        await using AsyncServiceScope scope = scopes.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<SettingsStore>().SetAsync(changes, ct);
     }
 
     public async Task DeleteAsync(string key, CancellationToken ct = default)

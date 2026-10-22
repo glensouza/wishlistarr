@@ -18,10 +18,18 @@ internal sealed partial class PlexMediaServer(
     TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IDisposable
 {
     private static readonly TimeSpan DefaultPinLifetime = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan SelectionBackoffBase = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan SelectionBackoffMax = TimeSpan.FromMinutes(1);
+
+    private const string NoConnectionMessage = "None of the Plex server's connections answered.";
 
     private readonly SemaphoreSlim identifierLock = new(1, 1);
+    private readonly SemaphoreSlim selectionLock = new(1, 1);
     private readonly MemoryCache pendingLinks = new(new MemoryCacheOptions { SizeLimit = 100 });
     private readonly MemoryCache lookups = new(new MemoryCacheOptions { SizeLimit = 16 });
+    private readonly object backoffGate = new();
+    private int selectionFailures;
+    private DateTimeOffset selectionBackoffUntil;
 
     public async Task<MediaServerAccountStatus> GetStatusAsync(CancellationToken ct = default)
     {
@@ -79,10 +87,15 @@ internal sealed partial class PlexMediaServer(
             await this.ClearAsync(PlexSettingKeys.Server, ct);
         }
 
-        await settings.SetAsync(PlexSettingKeys.Token, pin.AuthToken, true, ct);
-        await settings.SetAsync(PlexSettingKeys.AccountId, accountId, false, ct);
-        await settings.SetAsync(PlexSettingKeys.AccountName, accountName, false, ct);
+        await settings.SetAsync(
+            [
+                new AppSettingChange(PlexSettingKeys.Token, pin.AuthToken, true),
+                new AppSettingChange(PlexSettingKeys.AccountId, accountId, false),
+                new AppSettingChange(PlexSettingKeys.AccountName, accountName, false),
+            ],
+            ct);
         this.pendingLinks.Remove(linkId);
+        this.ResetSelectionBackoff();
         return new MediaServerLinkCheck(MediaServerLinkState.Linked, accountName);
     }
 
@@ -90,6 +103,7 @@ internal sealed partial class PlexMediaServer(
     {
         await this.ClearAsync([.. PlexSettingKeys.Account, .. PlexSettingKeys.Server], ct);
         this.lookups.Clear();
+        this.ResetSelectionBackoff();
     }
 
     public async Task<IReadOnlyList<DiscoveredMediaServer>> GetServersAsync(CancellationToken ct = default)
@@ -111,6 +125,17 @@ internal sealed partial class PlexMediaServer(
 
     public async Task<SelectedMediaServer?> SelectServerAsync(string serverId, CancellationToken ct = default)
     {
+        SelectedMediaServer? selected = await this.SelectAsync(serverId, ct);
+        if (selected is not null)
+        {
+            this.ResetSelectionBackoff();
+        }
+
+        return selected;
+    }
+
+    private async Task<SelectedMediaServer?> SelectAsync(string serverId, CancellationToken ct)
+    {
         (string clientIdentifier, string token) = await this.RequireAccountAsync(ct);
         IReadOnlyList<PlexResource> resources = await plexTv.GetResourcesAsync(clientIdentifier, token, ct);
         PlexResource? server = resources.FirstOrDefault(resource => resource.IsServer && resource.ClientIdentifier == serverId);
@@ -131,7 +156,7 @@ internal sealed partial class PlexMediaServer(
             }
         }
 
-        throw new MediaServerException("None of the Plex server's connections answered.");
+        throw new MediaServerException(NoConnectionMessage);
     }
 
     public async Task<MediaServerTestResult> TestConnectionAsync(CancellationToken ct = default)
@@ -373,6 +398,7 @@ internal sealed partial class PlexMediaServer(
     public void Dispose()
     {
         this.identifierLock.Dispose();
+        this.selectionLock.Dispose();
         this.pendingLinks.Dispose();
         this.lookups.Dispose();
     }
@@ -517,23 +543,121 @@ internal sealed partial class PlexMediaServer(
         {
             return await action(server, ct);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (IsUnreachable(ex, ct))
         {
-            if (await this.SelectServerAsync(server.ServerId, ct) is null)
+            PlexServerContext retry;
+            bool reselected = false;
+            await this.selectionLock.WaitAsync(ct);
+            try
             {
-                throw new MediaServerException("The selected Plex server is no longer available to this account.");
+                PlexServerContext current = await this.RequireServerAsync(ct);
+                if (current.BaseUri != server.BaseUri || current.Token != server.Token)
+                {
+                    retry = current;
+                }
+                else
+                {
+                    if (this.InSelectionBackoff())
+                    {
+                        throw;
+                    }
+
+                    retry = await this.ReselectAsync(server, ct);
+                    reselected = true;
+                }
+            }
+            finally
+            {
+                this.selectionLock.Release();
             }
 
-            return await action(await this.RequireServerAsync(ct), ct);
+            try
+            {
+                T result = await action(retry, ct);
+                if (reselected)
+                {
+                    this.ResetSelectionBackoff();
+                }
+
+                return result;
+            }
+            catch (Exception retryEx) when (reselected && IsUnreachable(retryEx, ct))
+            {
+                this.RecordSelectionFailure();
+                throw;
+            }
         }
     }
+
+    private async Task<PlexServerContext> ReselectAsync(PlexServerContext server, CancellationToken ct)
+    {
+        SelectedMediaServer? selected;
+        try
+        {
+            selected = await this.SelectAsync(server.ServerId, ct);
+        }
+        catch (Exception ex) when (IsUnreachable(ex, ct) || IsNoConnection(ex))
+        {
+            this.RecordSelectionFailure();
+            throw;
+        }
+
+        if (selected is null)
+        {
+            throw new MediaServerException("The selected Plex server is no longer available to this account.");
+        }
+
+        return await this.RequireServerAsync(ct);
+    }
+
+    private bool InSelectionBackoff()
+    {
+        lock (this.backoffGate)
+        {
+            return time.GetUtcNow() < this.selectionBackoffUntil;
+        }
+    }
+
+    private void ResetSelectionBackoff()
+    {
+        lock (this.backoffGate)
+        {
+            this.selectionFailures = 0;
+            this.selectionBackoffUntil = default;
+        }
+    }
+
+    private void RecordSelectionFailure()
+    {
+        lock (this.backoffGate)
+        {
+            this.selectionFailures = Math.Min(this.selectionFailures + 1, 16);
+            this.selectionBackoffUntil = time.GetUtcNow() + SelectionBackoff(this.selectionFailures);
+        }
+    }
+
+    private static TimeSpan SelectionBackoff(int failures)
+    {
+        double factor = Math.Pow(2, Math.Min(failures - 1, 16));
+        double ticks = Math.Min(SelectionBackoffBase.Ticks * factor, SelectionBackoffMax.Ticks);
+        return TimeSpan.FromTicks((long)ticks);
+    }
+
+    private static bool IsUnreachable(Exception exception, CancellationToken ct) =>
+        !ct.IsCancellationRequested && exception is HttpRequestException or TaskCanceledException;
+
+    private static bool IsNoConnection(Exception exception) =>
+        exception is MediaServerException { StatusCode: null, Message: NoConnectionMessage };
 
     private async Task<PlexServerContext> RequireServerAsync(CancellationToken ct)
     {
         (string clientIdentifier, _) = await this.RequireAccountAsync(ct);
-        string? serverId = await settings.GetAsync(PlexSettingKeys.ServerId, ct);
-        string? url = await settings.GetAsync(PlexSettingKeys.ServerUrl, ct);
-        string? token = await settings.GetAsync(PlexSettingKeys.ServerToken, ct);
+        IReadOnlyDictionary<string, string?> stored = await settings.GetAsync(
+            [PlexSettingKeys.ServerId, PlexSettingKeys.ServerUrl, PlexSettingKeys.ServerToken],
+            ct);
+        string? serverId = stored[PlexSettingKeys.ServerId];
+        string? url = stored[PlexSettingKeys.ServerUrl];
+        string? token = stored[PlexSettingKeys.ServerToken];
         if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(token)
             || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || !PlexConnections.IsAllowed(uri))
         {
@@ -556,8 +680,17 @@ internal sealed partial class PlexMediaServer(
 
     private async Task<SelectedMediaServer?> GetSelectedServerAsync(CancellationToken ct)
     {
-        string? id = await settings.GetAsync(PlexSettingKeys.ServerId, ct);
-        string? url = await settings.GetAsync(PlexSettingKeys.ServerUrl, ct);
+        IReadOnlyDictionary<string, string?> stored = await settings.GetAsync(
+            [
+                PlexSettingKeys.ServerId,
+                PlexSettingKeys.ServerName,
+                PlexSettingKeys.ServerUrl,
+                PlexSettingKeys.ServerLocal,
+                PlexSettingKeys.ServerRelay,
+            ],
+            ct);
+        string? id = stored[PlexSettingKeys.ServerId];
+        string? url = stored[PlexSettingKeys.ServerUrl];
         if (string.IsNullOrEmpty(id) || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || !PlexConnections.IsAllowed(uri))
         {
             return null;
@@ -565,22 +698,26 @@ internal sealed partial class PlexMediaServer(
 
         return new SelectedMediaServer(
             id,
-            await settings.GetAsync(PlexSettingKeys.ServerName, ct) ?? id,
+            stored[PlexSettingKeys.ServerName] ?? id,
             new MediaServerConnection(
                 uri,
-                await settings.GetAsync(PlexSettingKeys.ServerLocal, ct) == "true",
-                await settings.GetAsync(PlexSettingKeys.ServerRelay, ct) == "true",
+                stored[PlexSettingKeys.ServerLocal] == "true",
+                stored[PlexSettingKeys.ServerRelay] == "true",
                 uri.Scheme == Uri.UriSchemeHttps));
     }
 
     private async Task SaveServerAsync(SelectedMediaServer server, string token, CancellationToken ct)
     {
-        await settings.SetAsync(PlexSettingKeys.ServerToken, token, true, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerName, server.Name, false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerUrl, server.Connection.Uri.ToString(), false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerLocal, server.Connection.Local ? "true" : "false", false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerRelay, server.Connection.Relay ? "true" : "false", false, ct);
-        await settings.SetAsync(PlexSettingKeys.ServerId, server.Id, false, ct);
+        await settings.SetAsync(
+            [
+                new AppSettingChange(PlexSettingKeys.ServerToken, token, true),
+                new AppSettingChange(PlexSettingKeys.ServerName, server.Name, false),
+                new AppSettingChange(PlexSettingKeys.ServerUrl, server.Connection.Uri.ToString(), false),
+                new AppSettingChange(PlexSettingKeys.ServerLocal, server.Connection.Local ? "true" : "false", false),
+                new AppSettingChange(PlexSettingKeys.ServerRelay, server.Connection.Relay ? "true" : "false", false),
+                new AppSettingChange(PlexSettingKeys.ServerId, server.Id, false),
+            ],
+            ct);
     }
 
     private async Task ClearAsync(IEnumerable<string> keys, CancellationToken ct)
