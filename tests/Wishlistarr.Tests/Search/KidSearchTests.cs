@@ -257,6 +257,21 @@ public sealed class KidSearchTests
     }
 
     [Fact]
+    public async Task A_lookup_that_times_out_drops_only_that_title()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        using IServiceScope scope = factory.Services.CreateScope();
+        GateClient tmdb = new(count: 5) { TimeoutId = 2 };
+        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+
+        KidSearchResponse? response = await search.SearchAsync(profileId, "flaky", 1);
+
+        Assert.NotNull(response);
+        Assert.Equal([1, 3, 4, 5], response.Results.Select(item => item.TmdbId).Order());
+    }
+
+    [Fact]
     public async Task Keyword_lookups_that_outlive_the_budget_are_dropped()
     {
         using KidRequestApiFactory factory = CreateFactory();
@@ -558,6 +573,8 @@ public sealed class KidSearchTests
 
         public bool HangKeywords { get; init; }
 
+        public int TimeoutId { get; init; }
+
         public int PeakConcurrency => this.peak;
 
         public int Running => Volatile.Read(ref this.running);
@@ -588,6 +605,11 @@ public sealed class KidSearchTests
                 if (this.Hang)
                 {
                     await Task.Delay(Timeout.Infinite, ct);
+                }
+
+                if (id == this.TimeoutId)
+                {
+                    throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
                 }
 
                 await Task.Delay(50, ct);

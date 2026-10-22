@@ -153,7 +153,7 @@ public sealed partial class KidSearch(
                             certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
                             keywordIds);
                     }
-                    catch (Exception ex) when (ex is TmdbException or HttpRequestException)
+                    catch (Exception ex) when (ex is TmdbException or HttpRequestException || (ex is TaskCanceledException && !token.IsCancellationRequested))
                     {
                         this.LogLookupFailed(ex, candidate.Key.Kind, candidate.Key.TmdbId);
                     }
@@ -181,7 +181,7 @@ public sealed partial class KidSearch(
     [LoggerMessage(Level = LogLevel.Debug, Message = "Certification or keyword lookup failed for {Kind} {TmdbId}")]
     private partial void LogLookupFailed(Exception exception, MediaKind kind, int tmdbId);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Certification lookups did not finish within {Seconds} s; unresolved titles were left out")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Certification and keyword lookups did not finish within {Seconds} s; unresolved titles were left out")]
     private partial void LogBudgetExceeded(double seconds);
 
     private async Task<Availability?> AvailabilityAsync(TitleKey title, CancellationToken ct)
