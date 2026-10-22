@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Wishlistarr.Core.MediaServers;
@@ -208,6 +207,67 @@ public sealed class PlexServerSelectionTests
         int afterRecovery = harness.Server.Count("/api/v2/resources");
         Assert.True((await harness.Media.TestConnectionAsync()).Valid);
         Assert.Equal(afterRecovery + 1, harness.Server.Count("/api/v2/resources"));
+    }
+
+    [Fact]
+    public async Task A_successful_selection_restarts_the_wait_from_the_first_step()
+    {
+        ManualTime time = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
+        await using PlexHarness harness = await PlexHarness.CreateAsync(time: time);
+        await harness.LinkAndSelectAsync();
+        string original = harness.Server.ResourcesJson;
+        await PointAtClosedConnectionsAsync(harness);
+
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetLibrariesAsync());
+        time.Advance(TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetLibrariesAsync());
+
+        harness.Server.ResourcesJson = original;
+        time.Advance(TimeSpan.FromSeconds(4));
+        Assert.True((await harness.Media.TestConnectionAsync()).Valid);
+
+        await PointAtClosedConnectionsAsync(harness);
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetLibrariesAsync());
+        int afterFailure = harness.Server.Count("/api/v2/resources");
+
+        time.Advance(TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetLibrariesAsync());
+        Assert.Equal(afterFailure + 1, harness.Server.Count("/api/v2/resources"));
+    }
+
+    [Fact]
+    public async Task Choosing_a_server_clears_the_wait()
+    {
+        ManualTime time = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
+        await using PlexHarness harness = await PlexHarness.CreateAsync(time: time);
+        await harness.LinkAndSelectAsync();
+        string original = harness.Server.ResourcesJson;
+        await PointAtClosedConnectionsAsync(harness);
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetLibrariesAsync());
+        await Assert.ThrowsAsync<HttpRequestException>(() => harness.Media.GetLibrariesAsync());
+
+        harness.Server.ResourcesJson = original;
+        Assert.NotNull(await harness.Account.SelectServerAsync(FakePlexServer.MachineIdentifier));
+        await PointAtClosedConnectionsAsync(harness);
+        int before = harness.Server.Count("/api/v2/resources");
+
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetLibrariesAsync());
+
+        Assert.Equal(before + 1, harness.Server.Count("/api/v2/resources"));
+    }
+
+    [Fact]
+    public async Task Concurrent_requests_that_fail_together_select_a_server_once()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync();
+        await harness.LinkAndSelectAsync();
+        await harness.Settings.SetAsync("plex.server_url", harness.Server.RemoteHttpAddress.ToString(), false);
+        int baseline = harness.Server.Count("/api/v2/resources");
+
+        IReadOnlyList<MediaLibrary>[] results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => harness.Media.GetLibrariesAsync()));
+
+        Assert.All(results, libraries => Assert.NotEmpty(libraries));
+        Assert.Equal(baseline + 1, harness.Server.Count("/api/v2/resources"));
     }
 
     [Fact]

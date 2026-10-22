@@ -27,6 +27,7 @@ internal sealed partial class PlexMediaServer(
     private readonly SemaphoreSlim selectionLock = new(1, 1);
     private readonly MemoryCache pendingLinks = new(new MemoryCacheOptions { SizeLimit = 100 });
     private readonly MemoryCache lookups = new(new MemoryCacheOptions { SizeLimit = 16 });
+    private readonly object backoffGate = new();
     private int selectionFailures;
     private DateTimeOffset selectionBackoffUntil;
 
@@ -94,6 +95,7 @@ internal sealed partial class PlexMediaServer(
             ],
             ct);
         this.pendingLinks.Remove(linkId);
+        this.ResetSelectionBackoff();
         return new MediaServerLinkCheck(MediaServerLinkState.Linked, accountName);
     }
 
@@ -101,6 +103,7 @@ internal sealed partial class PlexMediaServer(
     {
         await this.ClearAsync([.. PlexSettingKeys.Account, .. PlexSettingKeys.Server], ct);
         this.lookups.Clear();
+        this.ResetSelectionBackoff();
     }
 
     public async Task<IReadOnlyList<DiscoveredMediaServer>> GetServersAsync(CancellationToken ct = default)
@@ -121,6 +124,17 @@ internal sealed partial class PlexMediaServer(
     }
 
     public async Task<SelectedMediaServer?> SelectServerAsync(string serverId, CancellationToken ct = default)
+    {
+        SelectedMediaServer? selected = await this.SelectAsync(serverId, ct);
+        if (selected is not null)
+        {
+            this.ResetSelectionBackoff();
+        }
+
+        return selected;
+    }
+
+    private async Task<SelectedMediaServer?> SelectAsync(string serverId, CancellationToken ct)
     {
         (string clientIdentifier, string token) = await this.RequireAccountAsync(ct);
         IReadOnlyList<PlexResource> resources = await plexTv.GetResourcesAsync(clientIdentifier, token, ct);
@@ -531,29 +545,56 @@ internal sealed partial class PlexMediaServer(
         }
         catch (Exception ex) when (IsUnreachable(ex, ct))
         {
+            PlexServerContext retry;
+            bool reselected = false;
             await this.selectionLock.WaitAsync(ct);
             try
             {
-                if (time.GetUtcNow() < this.selectionBackoffUntil)
+                PlexServerContext current = await this.RequireServerAsync(ct);
+                if (current.BaseUri != server.BaseUri || current.Token != server.Token)
                 {
-                    throw;
+                    retry = current;
                 }
+                else
+                {
+                    if (this.InSelectionBackoff())
+                    {
+                        throw;
+                    }
 
-                return await this.ReselectAsync(server, action, ct);
+                    retry = await this.ReselectAsync(server, ct);
+                    reselected = true;
+                }
             }
             finally
             {
                 this.selectionLock.Release();
             }
+
+            try
+            {
+                T result = await action(retry, ct);
+                if (reselected)
+                {
+                    this.ResetSelectionBackoff();
+                }
+
+                return result;
+            }
+            catch (Exception retryEx) when (reselected && IsUnreachable(retryEx, ct))
+            {
+                this.RecordSelectionFailure();
+                throw;
+            }
         }
     }
 
-    private async Task<T> ReselectAsync<T>(PlexServerContext server, Func<PlexServerContext, CancellationToken, Task<T>> action, CancellationToken ct)
+    private async Task<PlexServerContext> ReselectAsync(PlexServerContext server, CancellationToken ct)
     {
         SelectedMediaServer? selected;
         try
         {
-            selected = await this.SelectServerAsync(server.ServerId, ct);
+            selected = await this.SelectAsync(server.ServerId, ct);
         }
         catch (Exception ex) when (IsUnreachable(ex, ct) || IsNoConnection(ex))
         {
@@ -566,24 +607,33 @@ internal sealed partial class PlexMediaServer(
             throw new MediaServerException("The selected Plex server is no longer available to this account.");
         }
 
-        try
+        return await this.RequireServerAsync(ct);
+    }
+
+    private bool InSelectionBackoff()
+    {
+        lock (this.backoffGate)
         {
-            T result = await action(await this.RequireServerAsync(ct), ct);
+            return time.GetUtcNow() < this.selectionBackoffUntil;
+        }
+    }
+
+    private void ResetSelectionBackoff()
+    {
+        lock (this.backoffGate)
+        {
             this.selectionFailures = 0;
             this.selectionBackoffUntil = default;
-            return result;
-        }
-        catch (Exception ex) when (IsUnreachable(ex, ct))
-        {
-            this.RecordSelectionFailure();
-            throw;
         }
     }
 
     private void RecordSelectionFailure()
     {
-        this.selectionFailures = Math.Min(this.selectionFailures + 1, 16);
-        this.selectionBackoffUntil = time.GetUtcNow() + SelectionBackoff(this.selectionFailures);
+        lock (this.backoffGate)
+        {
+            this.selectionFailures = Math.Min(this.selectionFailures + 1, 16);
+            this.selectionBackoffUntil = time.GetUtcNow() + SelectionBackoff(this.selectionFailures);
+        }
     }
 
     private static TimeSpan SelectionBackoff(int failures)
