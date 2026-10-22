@@ -114,6 +114,7 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
 
     public async Task<PairingCode?> IssueCodeAsync(int deviceId, CancellationToken ct = default)
     {
+        await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
         if (!await db.KidDevices.AnyAsync(device => device.Id == deviceId, ct))
         {
             return null;
@@ -141,6 +142,7 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
         };
         db.KidPairingCodes.Add(stored);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return new PairingCode(code[..(CodeLength / 2)] + "-" + code[(CodeLength / 2)..], stored.ExpiresAt);
     }
 
@@ -283,7 +285,7 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
             return null;
         }
 
-        KidDevice? device = await db.KidDevices.FirstOrDefaultAsync(row => row.Id == id && row.TokenHash != null, ct);
+        KidDevice? device = await db.KidDevices.AsNoTracking().FirstOrDefaultAsync(row => row.Id == id && row.TokenHash != null, ct);
         byte[] expected = device?.TokenHash is string hash ? Convert.FromHexString(hash) : NoMatch;
         if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(secret), expected) || device is null)
         {
@@ -293,8 +295,10 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
         DateTimeOffset now = time.GetUtcNow();
         if (device.LastSeenAt is not DateTimeOffset lastSeen || now - lastSeen >= ParentSessions.TouchInterval)
         {
+            await db.KidDevices
+                .Where(row => row.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.LastSeenAt, now), ct);
             device.LastSeenAt = now;
-            await db.SaveChangesAsync(ct);
         }
 
         return device;

@@ -336,7 +336,7 @@ public sealed class KidSignInTests
     }
 
     [Fact]
-    public async Task Sign_in_is_rate_limited_per_address()
+    public async Task Sign_in_and_pairing_are_rate_limited_per_address()
     {
         using KidApiFactory factory = new() { Settings = new Dictionary<string, string?> { ["Auth:LoginAttemptsPerMinute"] = "2" } };
         HttpClient parent = await factory.CreateSignedInClientAsync();
@@ -350,6 +350,9 @@ public sealed class KidSignInTests
         }
 
         Assert.Equal(HttpStatusCode.TooManyRequests, last);
+        HttpResponseMessage pair = await factory.CreateClient().PostAsJsonAsync("/api/v1/kid/pair", new { code = "ABCD-2345" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, pair.StatusCode);
+        Assert.True(pair.Headers.Contains("Retry-After"));
     }
 
     [Fact]

@@ -1,6 +1,9 @@
+using System.Buffers.Text;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -43,6 +46,12 @@ public sealed class KidDeviceTests
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Ada")).GetProperty("id").GetInt32();
         (_, string code) = await CreateDeviceAsync(parent, "Living room", id);
+        string storedCodeHash;
+        using (IServiceScope before = factory.Services.CreateScope())
+        {
+            storedCodeHash = (await before.ServiceProvider.GetRequiredService<WishlistarrDbContext>().KidPairingCodes.SingleAsync()).CodeHash;
+        }
+
         HttpClient browser = factory.CreateClient();
 
         HttpResponseMessage paired = await browser.PostAsJsonAsync(PairPath, new { code = code.ToLowerInvariant() });
@@ -67,9 +76,14 @@ public sealed class KidDeviceTests
         using IServiceScope scope = factory.Services.CreateScope();
         WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
         KidDevice device = await db.KidDevices.SingleAsync();
-        Assert.NotNull(device.TokenHash);
-        Assert.DoesNotContain(secret, device.TokenHash, StringComparison.Ordinal);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Base64Url.DecodeFromChars(secret))), device.TokenHash);
+        Assert.DoesNotContain(secret, device.TokenHash!, StringComparison.Ordinal);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(code.Replace("-", string.Empty, StringComparison.Ordinal)))), storedCodeHash);
+        Assert.DoesNotContain(code.Replace("-", string.Empty, StringComparison.Ordinal), storedCodeHash, StringComparison.Ordinal);
         Assert.False(await db.KidPairingCodes.AnyAsync());
+        byte[] database = await ReadDatabaseAsync(factory);
+        Assert.Equal(-1, database.AsSpan().IndexOf(Encoding.ASCII.GetBytes(secret)));
+        Assert.Equal(-1, database.AsSpan().IndexOf(Base64Url.DecodeFromChars(secret)));
     }
 
     [Fact]
@@ -123,6 +137,28 @@ public sealed class KidDeviceTests
         Assert.Equal(HttpStatusCode.OK, reissued.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await factory.CreateClient().PostAsJsonAsync(PairPath, new { code = old })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await factory.CreateClient().PostAsJsonAsync(PairPath, new { code })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Concurrent_new_codes_for_one_device_leave_exactly_one_working_code()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        int id = (await factory.CreateProfileAsync(parent, "Ada")).GetProperty("id").GetInt32();
+        (int deviceId, _) = await CreateDeviceAsync(parent, "Tablet", id);
+
+        HttpResponseMessage[] responses = await Task.WhenAll(
+            Enumerable.Range(0, 8).Select(_ => parent.PostAsync($"{DevicesPath}/{deviceId}/pairing-code", null)));
+
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+        int paired = 0;
+        foreach (HttpResponseMessage response in responses)
+        {
+            string code = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString()!;
+            paired += (await factory.CreateClient().PostAsJsonAsync(PairPath, new { code })).StatusCode == HttpStatusCode.OK ? 1 : 0;
+        }
+
+        Assert.Equal(1, paired);
     }
 
     [Fact]
@@ -406,6 +442,23 @@ public sealed class KidDeviceTests
         string code = body.GetProperty("code").GetString()!;
         Assert.Matches("^[0-9A-Z]{4}-[0-9A-Z]{4}$", code);
         return (body.GetProperty("device").GetProperty("id").GetInt32(), code);
+    }
+
+    private static async Task<byte[]> ReadDatabaseAsync(KidApiFactory factory)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Database.ExecuteSqlRawAsync("PRAGMA wal_checkpoint(TRUNCATE)");
+        List<byte> bytes = [];
+        foreach (string file in Directory.GetFiles(factory.DataPath, "*.db*", SearchOption.AllDirectories))
+        {
+            await using FileStream stream = new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using MemoryStream copy = new();
+            await stream.CopyToAsync(copy);
+            bytes.AddRange(copy.ToArray());
+        }
+
+        Assert.NotEmpty(bytes);
+        return [.. bytes];
     }
 
     private static async Task<List<JsonElement>> ListDevicesAsync(HttpClient parent) =>

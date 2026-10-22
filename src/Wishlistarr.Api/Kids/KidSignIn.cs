@@ -109,7 +109,10 @@ public sealed class KidSignIn(
 
         if (locked || attempt.FailedCount == config.NotifyThreshold)
         {
-            string deviceName = await db.KidDevices.Where(device => device.Id == deviceId).Select(device => device.Name).FirstAsync(ct);
+            string deviceName = await db.KidDevices
+                .Where(device => device.Id == deviceId)
+                .Select(device => device.Name)
+                .FirstOrDefaultAsync(ct) ?? "a device that has since been removed";
             await notifier.NotifyAsync(
                 locked
                     ? new ParentNotification(
