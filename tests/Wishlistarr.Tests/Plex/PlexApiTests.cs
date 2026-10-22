@@ -14,6 +14,10 @@ public sealed class PlexApiFactory : ApiFactory
 
     public FakePlexServer Fake { get; }
 
+    public TimeSpan RestrictionCacheLifetime { get; set; }
+
+    public TimeSpan RestrictionTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -21,6 +25,8 @@ public sealed class PlexApiFactory : ApiFactory
         {
             options.PlexTvBaseAddress = this.Fake.Address;
             options.ProbeTimeout = TimeSpan.FromSeconds(3);
+            options.RestrictionCacheLifetime = this.RestrictionCacheLifetime;
+            options.RestrictionTimeout = this.RestrictionTimeout;
         }));
     }
 

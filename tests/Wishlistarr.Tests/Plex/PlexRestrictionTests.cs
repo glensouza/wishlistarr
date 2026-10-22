@@ -139,6 +139,35 @@ public sealed class PlexRestrictionTests
     }
 
     [Fact]
+    public async Task Plex_is_asked_once_for_requests_within_the_cache_window()
+    {
+        using PlexApiFactory factory = new() { RestrictionCacheLifetime = TimeSpan.FromMinutes(1) };
+        factory.Fake.UsersXml = Users();
+        HttpClient client = await LinkedClientAsync(factory);
+        await CreateProfileAsync(client, "Ada", Enforced);
+
+        await client.GetAsync("/api/v1/kid-profiles");
+        await client.GetAsync("/api/v1/system/status");
+
+        Assert.Equal(1, factory.Fake.Requests.Count(request => request.Path == "/api/users"));
+    }
+
+    [Fact]
+    public async Task A_slow_plex_answer_leaves_the_state_unknown()
+    {
+        using PlexApiFactory factory = new() { RestrictionTimeout = TimeSpan.FromMilliseconds(100) };
+        factory.Fake.UsersXml = Users();
+        HttpClient client = await LinkedClientAsync(factory);
+        await CreateProfileAsync(client, "Ada", Enforced);
+        factory.Fake.Delay = request => request.Path == "/api/users" ? Task.Delay(TimeSpan.FromSeconds(5)) : Task.CompletedTask;
+
+        HttpResponseMessage response = await client.GetAsync("/api/v1/kid-profiles");
+
+        Assert.True(response.IsSuccessStatusCode);
+        AssertRestrictions((await response.Content.ReadFromJsonAsync<List<JsonElement>>())!.Single(), "unknown", null, "unknown", null);
+    }
+
+    [Fact]
     public async Task Reader_sends_the_account_sign_in_and_returns_filters_by_user_id()
     {
         await using PlexHarness harness = await PlexHarness.CreateAsync();

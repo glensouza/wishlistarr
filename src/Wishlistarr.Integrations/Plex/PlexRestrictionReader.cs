@@ -1,6 +1,9 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Settings;
@@ -10,6 +13,8 @@ namespace Wishlistarr.Integrations.Plex;
 internal sealed class PlexRestrictionReader(IHttpClientFactory factory, IAppSettings settings, IOptions<PlexOptions> options)
     : IMediaServerRestrictions
 {
+    private readonly MemoryCache cache = new(new MemoryCacheOptions { SizeLimit = 4 });
+
     public async Task<IReadOnlyDictionary<string, UserContentFilters>?> GetUserFiltersAsync(CancellationToken ct = default)
     {
         try
@@ -21,6 +26,14 @@ internal sealed class PlexRestrictionReader(IHttpClientFactory factory, IAppSett
                 return null;
             }
 
+            string cacheKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{token}:{clientIdentifier}")));
+            if (this.cache.TryGetValue(cacheKey, out IReadOnlyDictionary<string, UserContentFilters>? cached))
+            {
+                return cached;
+            }
+
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(options.Value.RestrictionTimeout);
             using HttpRequestMessage request = PlexHttp.Create(
                 HttpMethod.Get,
                 new Uri("api/users", UriKind.Relative),
@@ -28,21 +41,31 @@ internal sealed class PlexRestrictionReader(IHttpClientFactory factory, IAppSett
                 clientIdentifier,
                 token);
             request.Headers.Accept.Clear();
-            using HttpResponseMessage response = await factory.CreateClient(PlexTvClient.HttpClientName).SendAsync(request, ct);
+            using HttpResponseMessage response = await factory.CreateClient(PlexTvClient.HttpClientName).SendAsync(request, timeout.Token);
             if (response.StatusCode != HttpStatusCode.OK)
             {
                 return null;
             }
 
-            await using Stream stream = await response.Content.ReadAsStreamAsync(ct);
+            await using Stream stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using XmlReader reader = XmlReader.Create(stream, new XmlReaderSettings
             {
                 Async = true,
                 DtdProcessing = DtdProcessing.Prohibit,
                 XmlResolver = null,
             });
-            XDocument document = await XDocument.LoadAsync(reader, LoadOptions.None, ct);
-            return Parse(document);
+            XDocument document = await XDocument.LoadAsync(reader, LoadOptions.None, timeout.Token);
+            Dictionary<string, UserContentFilters>? users = Parse(document);
+            if (users is not null && options.Value.RestrictionCacheLifetime > TimeSpan.Zero)
+            {
+                this.cache.Set(cacheKey, (IReadOnlyDictionary<string, UserContentFilters>)users, new MemoryCacheEntryOptions
+                {
+                    Size = 1,
+                    AbsoluteExpirationRelativeToNow = options.Value.RestrictionCacheLifetime,
+                });
+            }
+
+            return users;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
