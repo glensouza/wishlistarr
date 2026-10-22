@@ -18,10 +18,17 @@ internal sealed partial class PlexMediaServer(
     TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IDisposable
 {
     private static readonly TimeSpan DefaultPinLifetime = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan SelectionBackoffBase = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan SelectionBackoffMax = TimeSpan.FromMinutes(1);
+
+    private const string NoConnectionMessage = "None of the Plex server's connections answered.";
 
     private readonly SemaphoreSlim identifierLock = new(1, 1);
+    private readonly SemaphoreSlim selectionLock = new(1, 1);
     private readonly MemoryCache pendingLinks = new(new MemoryCacheOptions { SizeLimit = 100 });
     private readonly MemoryCache lookups = new(new MemoryCacheOptions { SizeLimit = 16 });
+    private int selectionFailures;
+    private DateTimeOffset selectionBackoffUntil;
 
     public async Task<MediaServerAccountStatus> GetStatusAsync(CancellationToken ct = default)
     {
@@ -135,7 +142,7 @@ internal sealed partial class PlexMediaServer(
             }
         }
 
-        throw new MediaServerException("None of the Plex server's connections answered.");
+        throw new MediaServerException(NoConnectionMessage);
     }
 
     public async Task<MediaServerTestResult> TestConnectionAsync(CancellationToken ct = default)
@@ -377,6 +384,7 @@ internal sealed partial class PlexMediaServer(
     public void Dispose()
     {
         this.identifierLock.Dispose();
+        this.selectionLock.Dispose();
         this.pendingLinks.Dispose();
         this.lookups.Dispose();
     }
@@ -521,16 +529,75 @@ internal sealed partial class PlexMediaServer(
         {
             return await action(server, ct);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (IsUnreachable(ex, ct))
         {
-            if (await this.SelectServerAsync(server.ServerId, ct) is null)
+            await this.selectionLock.WaitAsync(ct);
+            try
             {
-                throw new MediaServerException("The selected Plex server is no longer available to this account.");
-            }
+                if (time.GetUtcNow() < this.selectionBackoffUntil)
+                {
+                    throw;
+                }
 
-            return await action(await this.RequireServerAsync(ct), ct);
+                return await this.ReselectAsync(server, action, ct);
+            }
+            finally
+            {
+                this.selectionLock.Release();
+            }
         }
     }
+
+    private async Task<T> ReselectAsync<T>(PlexServerContext server, Func<PlexServerContext, CancellationToken, Task<T>> action, CancellationToken ct)
+    {
+        SelectedMediaServer? selected;
+        try
+        {
+            selected = await this.SelectServerAsync(server.ServerId, ct);
+        }
+        catch (Exception ex) when (IsUnreachable(ex, ct) || IsNoConnection(ex))
+        {
+            this.RecordSelectionFailure();
+            throw;
+        }
+
+        if (selected is null)
+        {
+            throw new MediaServerException("The selected Plex server is no longer available to this account.");
+        }
+
+        try
+        {
+            T result = await action(await this.RequireServerAsync(ct), ct);
+            this.selectionFailures = 0;
+            this.selectionBackoffUntil = default;
+            return result;
+        }
+        catch (Exception ex) when (IsUnreachable(ex, ct))
+        {
+            this.RecordSelectionFailure();
+            throw;
+        }
+    }
+
+    private void RecordSelectionFailure()
+    {
+        this.selectionFailures = Math.Min(this.selectionFailures + 1, 16);
+        this.selectionBackoffUntil = time.GetUtcNow() + SelectionBackoff(this.selectionFailures);
+    }
+
+    private static TimeSpan SelectionBackoff(int failures)
+    {
+        double factor = Math.Pow(2, Math.Min(failures - 1, 16));
+        double ticks = Math.Min(SelectionBackoffBase.Ticks * factor, SelectionBackoffMax.Ticks);
+        return TimeSpan.FromTicks((long)ticks);
+    }
+
+    private static bool IsUnreachable(Exception exception, CancellationToken ct) =>
+        !ct.IsCancellationRequested && exception is HttpRequestException or TaskCanceledException;
+
+    private static bool IsNoConnection(Exception exception) =>
+        exception is MediaServerException { StatusCode: null, Message: NoConnectionMessage };
 
     private async Task<PlexServerContext> RequireServerAsync(CancellationToken ct)
     {

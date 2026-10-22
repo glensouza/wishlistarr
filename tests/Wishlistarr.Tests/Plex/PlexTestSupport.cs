@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Settings;
 using Wishlistarr.Integrations.Plex;
+using Wishlistarr.Tests.Jobs;
 
 namespace Wishlistarr.Tests.Plex;
 
@@ -74,11 +75,13 @@ public sealed class PlexHarness : IAsyncDisposable
 {
     private readonly List<ServiceProvider> providers = [];
     private readonly Action<PlexOptions>? configure;
+    private readonly ManualTime? time;
 
-    private PlexHarness(FakePlexServer server, Action<PlexOptions>? configure)
+    private PlexHarness(FakePlexServer server, Action<PlexOptions>? configure, ManualTime? time)
     {
         this.Server = server;
         this.configure = configure;
+        this.time = time;
         this.Provider = this.CreateProvider();
     }
 
@@ -92,12 +95,19 @@ public sealed class PlexHarness : IAsyncDisposable
 
     public IMediaServerAccount Account => this.Provider.GetRequiredService<IMediaServerAccount>();
 
-    public static async Task<PlexHarness> CreateAsync(Action<PlexOptions>? configure = null) =>
-        new(await FakePlexServer.StartAsync(), configure);
+    public ManualTime Time => this.time ?? throw new InvalidOperationException("This harness has no clock.");
+
+    public static async Task<PlexHarness> CreateAsync(Action<PlexOptions>? configure = null, ManualTime? time = null) =>
+        new(await FakePlexServer.StartAsync(), configure, time);
 
     public ServiceProvider CreateProvider()
     {
         ServiceCollection services = new();
+        if (this.time is not null)
+        {
+            services.AddSingleton<TimeProvider>(this.time);
+        }
+
         services.AddPlex<InMemoryAppSettings>();
         services.AddSingleton<IAppSettings>(this.Settings);
         services.Configure<PlexOptions>(options =>
