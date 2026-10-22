@@ -115,6 +115,17 @@ export const en = {
   'admin.deleteQuestion':
     'Delete {name}? Their request history is kept, but they can no longer sign in.',
   'admin.removeLabels': 'Also remove the Plex labels this profile owns',
+  'admin.restriction.heading': 'Plex label enforcement',
+  'admin.restriction.movies': 'movies',
+  'admin.restriction.television': 'TV shows',
+  'admin.restriction.enforcedAllow':
+    'Plex enforces the label for {type} (allow only)',
+  'admin.restriction.enforcedExclude':
+    'Plex enforces the label for {type} (exclude)',
+  'admin.restriction.notEnforced':
+    'Plex does not enforce the label for {type}. Add it to the mapped user in Plex under Restrictions.',
+  'admin.restriction.unknown':
+    'Could not tell whether Plex enforces the label for {type}',
   'admin.confirmDelete': 'Confirm delete',
   'admin.keep': 'Keep profile',
 

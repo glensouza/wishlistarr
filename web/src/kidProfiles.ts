@@ -11,6 +11,19 @@ export type KidProfile = {
   plexUserId: string | null
   weeklyAllowance: number | null
   isLocked: boolean
+  plexRestrictions?: PlexRestrictions | null
+}
+
+export type RestrictionState = 'enforced' | 'notEnforced' | 'unknown'
+
+export type LabelRestriction = {
+  state: RestrictionState
+  mode: 'allowOnly' | 'exclude' | null
+}
+
+export type PlexRestrictions = {
+  movies: LabelRestriction
+  television: LabelRestriction
 }
 
 export type KidProfileInput = {
