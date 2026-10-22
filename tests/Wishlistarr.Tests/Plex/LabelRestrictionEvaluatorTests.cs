@@ -9,9 +9,7 @@ public sealed class LabelRestrictionEvaluatorTests
     [InlineData("contentRating=TV-Y%2CTV-Y7|label=Ada", LabelFilterMode.AllowOnly)]
     [InlineData("label=Ben%2CAda", LabelFilterMode.AllowOnly)]
     [InlineData("label=ada", LabelFilterMode.AllowOnly)]
-    [InlineData("label!=Ada", LabelFilterMode.Exclude)]
-    [InlineData("contentRating!=R|label!=Ben%2CAda", LabelFilterMode.Exclude)]
-    public void Filters_naming_the_label_enforce_it(string filter, LabelFilterMode mode)
+    public void Allow_filters_naming_the_label_enforce_it(string filter, LabelFilterMode mode)
     {
         LabelRestriction result = LabelRestrictionEvaluator.Evaluate(filter, "Ada");
 
@@ -26,7 +24,9 @@ public sealed class LabelRestrictionEvaluatorTests
     [InlineData("contentRating=TV-Y")]
     [InlineData("contentRating=Ada")]
     [InlineData("label=Adam")]
-    public void Filters_without_the_label_do_not_enforce_it(string filter)
+    [InlineData("label!=Ada")]
+    [InlineData("contentRating!=R|label!=Ben%2CAda")]
+    public void Filters_that_do_not_allow_the_label_do_not_enforce_it(string filter)
     {
         LabelRestriction result = LabelRestrictionEvaluator.Evaluate(filter, "Ada");
 

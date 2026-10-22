@@ -37,5 +37,5 @@ public static class HealthWarnings
 
     private static string Message(KidProfile profile, string what) =>
         $"The Plex user mapped to {profile.Name} does not filter {what} by the label '{profile.PlexLabel}'. "
-        + "In Plex, open Settings, Users and Sharing, edit the user, choose Restrictions and add the label under Allow only or Exclude for each type.";
+        + "In Plex, open Settings, Users and Sharing, edit the user, choose Restrictions and add the label under Allow only for each type.";
 }

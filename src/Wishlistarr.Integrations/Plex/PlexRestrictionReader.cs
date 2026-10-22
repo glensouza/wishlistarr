@@ -12,15 +12,15 @@ internal sealed class PlexRestrictionReader(IHttpClientFactory factory, IAppSett
 {
     public async Task<IReadOnlyDictionary<string, UserContentFilters>?> GetUserFiltersAsync(CancellationToken ct = default)
     {
-        string? token = await settings.GetAsync(PlexSettingKeys.Token, ct);
-        string? clientIdentifier = await settings.GetAsync(PlexSettingKeys.ClientIdentifier, ct);
-        if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(clientIdentifier))
-        {
-            return null;
-        }
-
         try
         {
+            string? token = await settings.GetAsync(PlexSettingKeys.Token, ct);
+            string? clientIdentifier = await settings.GetAsync(PlexSettingKeys.ClientIdentifier, ct);
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(clientIdentifier))
+            {
+                return null;
+            }
+
             using HttpRequestMessage request = PlexHttp.Create(
                 HttpMethod.Get,
                 new Uri("api/users", UriKind.Relative),
@@ -44,7 +44,7 @@ internal sealed class PlexRestrictionReader(IHttpClientFactory factory, IAppSett
             XDocument document = await XDocument.LoadAsync(reader, LoadOptions.None, ct);
             return Parse(document);
         }
-        catch (Exception ex) when (ex is HttpRequestException or XmlException or TaskCanceledException && !ct.IsCancellationRequested)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return null;
         }

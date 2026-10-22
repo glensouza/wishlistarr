@@ -10,7 +10,6 @@ public enum LabelEnforcement
 public enum LabelFilterMode
 {
     AllowOnly,
-    Exclude,
 }
 
 public sealed record LabelRestriction(LabelEnforcement State, LabelFilterMode? Mode = null)
@@ -57,7 +56,6 @@ public static class LabelRestrictionEvaluator
 
         bool understood = true;
         bool allowed = false;
-        bool excluded = false;
         foreach (string part in filter.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             int equals = part.IndexOf('=', StringComparison.Ordinal);
@@ -76,17 +74,11 @@ public static class LabelRestrictionEvaluator
 
             bool matches = Values(part[(equals + 1)..]).Any(value => string.Equals(value, label, StringComparison.OrdinalIgnoreCase));
             allowed |= matches && !negated;
-            excluded |= matches && negated;
         }
 
         if (allowed)
         {
             return new LabelRestriction(LabelEnforcement.Enforced, LabelFilterMode.AllowOnly);
-        }
-
-        if (excluded)
-        {
-            return new LabelRestriction(LabelEnforcement.Enforced, LabelFilterMode.Exclude);
         }
 
         return understood ? new LabelRestriction(LabelEnforcement.NotEnforced) : LabelRestriction.Unknown;

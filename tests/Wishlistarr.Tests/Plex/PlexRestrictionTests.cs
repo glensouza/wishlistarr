@@ -1,6 +1,9 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Core.MediaServers;
+using Wishlistarr.Core.Settings;
+using Wishlistarr.Integrations.Plex;
 
 namespace Wishlistarr.Tests.Plex;
 
@@ -26,7 +29,7 @@ public sealed class PlexRestrictionTests
         Dictionary<string, JsonElement> profiles = await ListAsync(client);
 
         AssertRestrictions(profiles["Ada"], "enforced", "allowOnly", "enforced", "allowOnly");
-        AssertRestrictions(profiles["Ben"], "enforced", "exclude", "enforced", "exclude");
+        AssertRestrictions(profiles["Ben"], "notEnforced", null, "notEnforced", null);
         AssertRestrictions(profiles["Cy"], "notEnforced", null, "notEnforced", null);
         AssertRestrictions(profiles["Di"], "enforced", "allowOnly", "notEnforced", null);
         Assert.Equal(JsonValueKind.Null, profiles["Eli"].GetProperty("plexRestrictions").ValueKind);
@@ -84,18 +87,22 @@ public sealed class PlexRestrictionTests
         factory.Fake.UsersXml = Users();
         HttpClient client = await LinkedClientAsync(factory);
         await CreateProfileAsync(client, "Ada", Enforced);
+        await CreateProfileAsync(client, "Ben", Excluding);
         await CreateProfileAsync(client, "Cy", Open);
         await CreateProfileAsync(client, "Di", OnlyMovies);
 
         JsonElement status = await client.GetFromJsonAsync<JsonElement>("/api/v1/system/status");
 
         List<JsonElement> warnings = [.. status.GetProperty("warnings").EnumerateArray()];
-        Assert.Equal(2, warnings.Count);
+        Assert.Equal(3, warnings.Count);
         Assert.All(warnings, warning => Assert.Equal("plex.label.not_enforced", warning.GetProperty("code").GetString()));
+        Assert.Contains("movies and TV shows", MessageFor(warnings, "Ben"), StringComparison.Ordinal);
         string cy = MessageFor(warnings, "Cy");
         string di = MessageFor(warnings, "Di");
         Assert.Contains("movies and TV shows", cy, StringComparison.Ordinal);
         Assert.Contains("TV shows", di, StringComparison.Ordinal);
+        Assert.DoesNotContain("Exclude", cy, StringComparison.Ordinal);
+        Assert.Contains("Allow only", cy, StringComparison.Ordinal);
         Assert.DoesNotContain("movies", di, StringComparison.Ordinal);
     }
 
@@ -106,7 +113,6 @@ public sealed class PlexRestrictionTests
         factory.Fake.UsersXml = Users();
         HttpClient client = await LinkedClientAsync(factory);
         await CreateProfileAsync(client, "Ada", Enforced);
-        await CreateProfileAsync(client, "Ben", Excluding);
 
         JsonElement enforced = await client.GetFromJsonAsync<JsonElement>("/api/v1/system/status");
         factory.Fake.UsersXml = "not xml";
@@ -114,6 +120,22 @@ public sealed class PlexRestrictionTests
 
         Assert.Equal(0, enforced.GetProperty("warnings").GetArrayLength());
         Assert.Equal(0, unknown.GetProperty("warnings").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Plex_is_asked_once_per_profile_list_however_many_profiles_are_mapped()
+    {
+        using PlexApiFactory factory = new();
+        factory.Fake.UsersXml = Users();
+        HttpClient client = await LinkedClientAsync(factory);
+        await CreateProfileAsync(client, "Ada", Enforced);
+        await CreateProfileAsync(client, "Ben", Excluding);
+        await CreateProfileAsync(client, "Cy", Open);
+        int before = factory.Fake.Requests.Count(request => request.Path == "/api/users");
+
+        await client.GetAsync("/api/v1/kid-profiles");
+
+        Assert.Equal(before + 1, factory.Fake.Requests.Count(request => request.Path == "/api/users"));
     }
 
     [Fact]
@@ -130,6 +152,18 @@ public sealed class PlexRestrictionTests
         Assert.Equal("contentRating=TV-Y%2CTV-Y7|label=Ada", filters[Enforced].Movies);
         Assert.Equal(string.Empty, filters[Open].All);
         Assert.Contains(harness.Server.Requests, request => request.Path == "/api/users" && request.Token == FakePlexServer.AccountToken);
+    }
+
+    [Fact]
+    public async Task Reader_returns_nothing_when_settings_cannot_be_read()
+    {
+        ServiceCollection services = new();
+        services.AddPlex<FailingSettings>();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        IReadOnlyDictionary<string, UserContentFilters>? filters = await provider.GetRequiredService<IMediaServerRestrictions>().GetUserFiltersAsync();
+
+        Assert.Null(filters);
     }
 
     private static string MessageFor(List<JsonElement> warnings, string name) =>
@@ -179,4 +213,18 @@ public sealed class PlexRestrictionTests
 
     private static string? Mode(JsonElement restriction) =>
         restriction.TryGetProperty("mode", out JsonElement mode) && mode.ValueKind == JsonValueKind.String ? mode.GetString() : null;
+}
+
+internal sealed class FailingSettings : IAppSettings
+{
+    public Task<string?> GetAsync(string key, CancellationToken ct = default) => throw new InvalidOperationException("Settings are unavailable.");
+
+    public Task<IReadOnlyDictionary<string, string?>> GetAsync(IReadOnlyList<string> keys, CancellationToken ct = default) =>
+        throw new InvalidOperationException("Settings are unavailable.");
+
+    public Task SetAsync(string key, string value, bool isSecret, CancellationToken ct = default) => throw new InvalidOperationException("Settings are unavailable.");
+
+    public Task SetAsync(IReadOnlyList<AppSettingChange> changes, CancellationToken ct = default) => throw new InvalidOperationException("Settings are unavailable.");
+
+    public Task DeleteAsync(string key, CancellationToken ct = default) => throw new InvalidOperationException("Settings are unavailable.");
 }
