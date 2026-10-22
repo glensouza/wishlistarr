@@ -301,7 +301,176 @@ public sealed class ContentPolicyEngineTests
     [Fact]
     public void Engine_requires_a_rule() => Assert.Throws<ArgumentException>(() => new ContentPolicyEngine([]));
 
+    [Fact]
+    public void Each_rule_type_is_configurable_on_the_policy()
+    {
+        ContentTitle title = MovieTitle(genres: [28], keywords: [1721], language: "ja");
+        ContentPolicy open = ContentPolicy.ForProfile(null, null, null, null, null);
+        ContentPolicy genres = ContentPolicy.ForProfile(null, null, [28], null, null);
+        ContentPolicy keywords = ContentPolicy.ForProfile(null, null, null, [1721], null);
+        ContentPolicy languages = ContentPolicy.ForProfile(null, null, null, null, ["EN"]);
+
+        Assert.Equal(ContentReasonCode.NoRatingLimit, Evaluate(title, open).Reason.Code);
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedGenre, GenreId: 28), Evaluate(title, genres).Reason);
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedKeyword, KeywordId: 1721), Evaluate(title, keywords).Reason);
+        Assert.Equal(new ContentReason(ContentReasonCode.LanguageNotAllowed, OriginalLanguage: "ja"), Evaluate(title, languages).Reason);
+    }
+
+    [Fact]
+    public void Explicit_allow_loses_to_explicit_block_when_other_rules_would_also_block()
+    {
+        ContentPolicy policy = new()
+        {
+            Allowed = ImmutableHashSet.Create(Movie),
+            Blocked = ImmutableHashSet.Create(Movie),
+            BlockedGenreIds = ImmutableHashSet.Create(28),
+            BlockedKeywordIds = ImmutableHashSet.Create(1721),
+            AllowedOriginalLanguages = ImmutableHashSet.Create("en"),
+        };
+
+        ContentDecision decision = Evaluate(MovieTitle(genres: [28], keywords: [1721], language: "ja"), policy);
+
+        Assert.Equal(new ContentDecision(ContentOutcome.Blocked, new ContentReason(ContentReasonCode.ExplicitlyBlocked)), decision);
+    }
+
+    [Fact]
+    public void Explicit_allow_beats_genre_keyword_and_language_blocks()
+    {
+        ContentPolicy policy = new()
+        {
+            Allowed = ImmutableHashSet.Create(Movie),
+            BlockedGenreIds = ImmutableHashSet.Create(28),
+            BlockedKeywordIds = ImmutableHashSet.Create(1721),
+            AllowedOriginalLanguages = ImmutableHashSet.Create("en"),
+        };
+
+        ContentDecision decision = Evaluate(MovieTitle(rating: "R", genres: [28], keywords: [1721], language: "ja"), policy);
+
+        Assert.Equal(ContentReasonCode.ExplicitlyAllowed, decision.Reason.Code);
+        Assert.Equal(ContentOutcome.Allowed, decision.Outcome);
+    }
+
+    [Fact]
+    public void A_blocked_genre_names_the_genre_and_wins_over_an_allowed_rating()
+    {
+        ContentPolicy policy = new()
+        {
+            MaxMovieRating = RatingLevel.ParentalGuidance,
+            BlockedGenreIds = ImmutableHashSet.Create(53, 28),
+        };
+
+        ContentDecision decision = Evaluate(MovieTitle(rating: "PG", genres: [12, 28, 53]), policy);
+
+        Assert.Equal(ContentOutcome.Blocked, decision.Outcome);
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedGenre, GenreId: 28), decision.Reason);
+    }
+
+    [Fact]
+    public void A_rating_block_is_kept_when_the_genre_is_blocked_too()
+    {
+        ContentPolicy policy = new()
+        {
+            MaxMovieRating = RatingLevel.ParentalGuidance,
+            BlockedGenreIds = ImmutableHashSet.Create(28),
+        };
+
+        ContentDecision decision = Evaluate(MovieTitle(rating: "PG-13", genres: [28]), policy);
+
+        Assert.Equal(ContentReasonCode.AboveRatingLimit, decision.Reason.Code);
+        Assert.Equal(ContentOutcome.Blocked, decision.Outcome);
+    }
+
+    [Fact]
+    public void A_blocked_genre_wins_over_an_unrated_title()
+    {
+        ContentPolicy policy = new() { BlockedGenreIds = ImmutableHashSet.Create(27) };
+
+        ContentDecision decision = Evaluate(MovieTitle(rating: null, genres: [27]), policy);
+
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedGenre, GenreId: 27), decision.Reason);
+    }
+
+    [Fact]
+    public void A_blocked_keyword_wins_over_a_disallowed_language()
+    {
+        ContentTitle title = MovieTitle(keywords: [9, 4], language: "ja");
+        ContentPolicy both = new()
+        {
+            BlockedKeywordIds = ImmutableHashSet.Create(4),
+            AllowedOriginalLanguages = ImmutableHashSet.Create("en"),
+        };
+        ContentPolicy languageOnly = new() { AllowedOriginalLanguages = ImmutableHashSet.Create("en") };
+        ContentPolicy keywordOnly = new() { BlockedKeywordIds = ImmutableHashSet.Create(4), AllowedOriginalLanguages = ImmutableHashSet.Create("ja") };
+
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedKeyword, KeywordId: 4), Evaluate(title, both).Reason);
+        Assert.Equal(new ContentReason(ContentReasonCode.LanguageNotAllowed, OriginalLanguage: "ja"), Evaluate(title, languageOnly).Reason);
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedKeyword, KeywordId: 4), Evaluate(title, keywordOnly).Reason);
+    }
+
+    [Fact]
+    public void A_language_on_the_allow_list_does_not_block()
+    {
+        ContentPolicy policy = new()
+        {
+            MaxMovieRating = RatingLevel.ParentalGuidance,
+            AllowedOriginalLanguages = ImmutableHashSet.Create("EN"),
+        };
+
+        ContentDecision decision = Evaluate(MovieTitle(rating: "PG", language: "en"), policy);
+
+        Assert.Equal(ContentOutcome.Allowed, decision.Outcome);
+        Assert.Equal(ContentReasonCode.WithinRatingLimit, decision.Reason.Code);
+        Assert.Equal(
+            new ContentReason(ContentReasonCode.LanguageAllowed, OriginalLanguage: "en"),
+            new OriginalLanguageRule().Evaluate(MovieTitle(language: "en"), policy).Reason);
+    }
+
+    [Fact]
+    public void An_empty_language_list_does_not_restrict()
+    {
+        ContentDecision decision = new OriginalLanguageRule().Evaluate(MovieTitle(language: "ja"), new ContentPolicy());
+
+        Assert.Equal(new ContentReason(ContentReasonCode.NoLanguageLimit), decision.Reason);
+        Assert.Equal(ContentOutcome.Allowed, decision.Outcome);
+    }
+
+    [Fact]
+    public void Missing_genres_and_keywords_do_not_match_a_block()
+    {
+        ContentPolicy policy = new()
+        {
+            BlockedGenreIds = ImmutableHashSet.Create(28),
+            BlockedKeywordIds = ImmutableHashSet.Create(9),
+        };
+
+        ContentDecision decision = Evaluate(MovieTitle(), policy);
+
+        Assert.Equal(ContentReasonCode.NoRatingLimit, decision.Reason.Code);
+        Assert.Equal(ContentOutcome.Allowed, decision.Outcome);
+        Assert.Equal(ContentReasonCode.NoBlockedGenre, new GenreBlockRule().Evaluate(MovieTitle(), policy).Reason.Code);
+        Assert.Equal(ContentReasonCode.NoBlockedKeyword, new KeywordBlockRule().Evaluate(MovieTitle(keywords: []), policy).Reason.Code);
+    }
+
+    [Fact]
+    public void A_missing_language_is_blocked_only_when_the_allow_list_is_set()
+    {
+        ContentTitle missing = MovieTitle(language: "  ");
+        ContentTitle unrecognized = MovieTitle(language: "en-US");
+        ContentPolicy open = new();
+        ContentPolicy restricted = new() { AllowedOriginalLanguages = ImmutableHashSet.Create("en") };
+
+        Assert.Equal(ContentReasonCode.NoRatingLimit, Evaluate(missing, open).Reason.Code);
+        Assert.Equal(new ContentReason(ContentReasonCode.LanguageNotAllowed), Evaluate(missing, restricted).Reason);
+        Assert.Equal(new ContentReason(ContentReasonCode.LanguageNotAllowed), Evaluate(unrecognized, restricted).Reason);
+    }
+
     private static ContentDecision Evaluate(ContentTitle title, ContentPolicy policy) => ContentPolicyEngine.Default.Evaluate(title, policy);
+
+    private static ContentTitle MovieTitle(string? rating = "G", int[]? genres = null, int[]? keywords = null, string? language = null)
+    {
+        RegionCertification[] certifications = rating is null ? [] : [new RegionCertification("US", rating)];
+        return new ContentTitle(Movie, certifications, genres, keywords, language);
+    }
 
     private static ContentTitle Title(TitleKey key, params (string Region, string Rating)[] certifications) =>
         new(key, [.. certifications.Select(item => new RegionCertification(item.Region, item.Rating))]);
