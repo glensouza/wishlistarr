@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
+using Wishlistarr.Api.Kids;
 
 namespace Wishlistarr.Api.Security;
 
@@ -14,7 +15,7 @@ public sealed class TrustedNetworkAuthenticationHandler(
 {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (!trustedNetworks.IsTrusted(this.Context))
+        if (this.Context.Request.Cookies.ContainsKey(KidDevices.CookieName) || !trustedNetworks.IsTrusted(this.Context))
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }

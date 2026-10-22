@@ -131,6 +131,31 @@ public sealed class TrustedNetworkTests
     }
 
     [Fact]
+    public async Task Paired_kid_devices_never_get_the_bypass()
+    {
+        using AuthApiFactory factory = Create(enabled: true);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        int id = (await (await parent.PostAsJsonAsync("/api/v1/kid-profiles", new { name = "Ada", avatar = "fox" }))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        HttpClient device = await factory.PairDeviceAsync(parent, "Tablet", [id]);
+        device.DefaultRequestHeaders.Add(AuthApiFactory.RemoteIpHeader, "192.168.1.5");
+        HttpClient unpaired = factory.CreateClient();
+        unpaired.DefaultRequestHeaders.Add(AuthApiFactory.RemoteIpHeader, "192.168.1.5");
+
+        HttpResponseMessage parentRoute = await device.GetAsync("/api/v1/system/status");
+        JsonElement status = await device.GetFromJsonAsync<JsonElement>("/api/v1/auth/status");
+        HttpResponseMessage exitWithoutPassword = await device.PostAsJsonAsync("/api/v1/kid/exit", new { username = ApiFactory.ParentUsername, password = "wrong password" });
+        HttpResponseMessage picker = await device.GetAsync("/api/v1/kid/profiles");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, parentRoute.StatusCode);
+        Assert.Equal(JsonValueKind.Null, status.GetProperty("principalType").ValueKind);
+        Assert.Equal("Tablet", status.GetProperty("kidDevice").GetProperty("name").GetString());
+        Assert.Equal(HttpStatusCode.Unauthorized, exitWithoutPassword.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, picker.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await unpaired.GetAsync("/api/v1/system/status")).StatusCode);
+    }
+
+    [Fact]
     public void Invalid_network_configuration_is_rejected()
     {
         Assert.True(new AuthOptions { TrustedNetworks = ["192.168.1.0/24", "fd00::/8"], KnownProxies = ["10.0.0.1"] }.IsValid());
