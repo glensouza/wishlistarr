@@ -155,6 +155,7 @@ public sealed class RatingScalePropertyTests
                     ContentReasonCode.WithinRatingLimit or ContentReasonCode.NoRatingLimit or ContentReasonCode.ExplicitlyAllowed
                         or ContentReasonCode.NoBlockedGenre or ContentReasonCode.NoBlockedKeyword
                         or ContentReasonCode.NoLanguageLimit or ContentReasonCode.LanguageAllowed => decision.Outcome == ContentOutcome.Allowed,
+                    ContentReasonCode.UnknownGenres => decision.Outcome == ContentOutcome.NeedsApproval,
                     ContentReasonCode.AboveRatingLimit => decision.Outcome == ContentOutcome.Blocked && decision.Reason.Level > decision.Reason.MaxLevel,
                     ContentReasonCode.Unrated => decision.Outcome == ExpectedUnrated(policy.Unrated) && decision.Reason.MaxLevel == policy.MaxRatingFor(title.Key.Kind),
                     ContentReasonCode.ExplicitlyBlocked or ContentReasonCode.BlockedGenre or ContentReasonCode.BlockedKeyword or ContentReasonCode.LanguageNotAllowed =>

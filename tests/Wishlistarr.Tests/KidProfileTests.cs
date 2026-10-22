@@ -390,6 +390,46 @@ public sealed class KidProfileTests
         }
     }
 
+    [Fact]
+    public async Task Keyword_and_language_lists_stop_at_one_hundred_and_fifty()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        HttpResponseMessage accepted = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Ada",
+            avatar = "fox",
+            blockedKeywordIds = Enumerable.Range(1, 100),
+            allowedOriginalLanguages = Enumerable.Range(0, 50).Select(LanguageCode),
+        });
+        HttpResponseMessage tooManyKeywords = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Bea",
+            avatar = "fox",
+            blockedKeywordIds = Enumerable.Range(1, 101),
+        });
+        HttpResponseMessage tooManyLanguages = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Cy",
+            avatar = "fox",
+            allowedOriginalLanguages = Enumerable.Range(0, 51).Select(LanguageCode),
+        });
+        JsonElement profile = await accepted.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(100, KidProfiles.MaxBlockedKeywords);
+        Assert.Equal(50, KidProfiles.MaxAllowedLanguages);
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        Assert.Equal(100, Numbers(profile, "blockedKeywordIds").Count);
+        Assert.Equal(50, Texts(profile, "allowedOriginalLanguages").Count);
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyKeywords.StatusCode);
+        Assert.Contains("limited to 100", await tooManyKeywords.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyLanguages.StatusCode);
+        Assert.Contains("limited to 50", await tooManyLanguages.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    private static string LanguageCode(int index) => $"{(char)('a' + (index / 26))}{(char)('a' + (index % 26))}";
+
     private static List<int> Numbers(JsonElement profile, string name) =>
         [.. profile.GetProperty(name).EnumerateArray().Select(item => item.GetInt32())];
 

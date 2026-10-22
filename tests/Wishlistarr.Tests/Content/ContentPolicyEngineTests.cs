@@ -410,11 +410,7 @@ public sealed class ContentPolicyEngineTests
     [Fact]
     public void A_language_on_the_allow_list_does_not_block()
     {
-        ContentPolicy policy = new()
-        {
-            MaxMovieRating = RatingLevel.ParentalGuidance,
-            AllowedOriginalLanguages = ImmutableHashSet.Create("EN"),
-        };
+        ContentPolicy policy = ContentPolicy.ForProfile(8, null, null, null, ["EN"]);
 
         ContentDecision decision = Evaluate(MovieTitle(rating: "PG", language: "en"), policy);
 
@@ -435,20 +431,24 @@ public sealed class ContentPolicyEngineTests
     }
 
     [Fact]
-    public void Missing_genres_and_keywords_do_not_match_a_block()
+    public void Missing_genres_need_approval_when_genres_are_blocked_and_missing_keywords_do_not_match()
     {
-        ContentPolicy policy = new()
+        ContentPolicy blocking = new()
         {
             BlockedGenreIds = ImmutableHashSet.Create(28),
             BlockedKeywordIds = ImmutableHashSet.Create(9),
         };
+        ContentPolicy open = new();
 
-        ContentDecision decision = Evaluate(MovieTitle(), policy);
+        ContentDecision decision = Evaluate(MovieTitle(), blocking);
 
-        Assert.Equal(ContentReasonCode.NoRatingLimit, decision.Reason.Code);
-        Assert.Equal(ContentOutcome.Allowed, decision.Outcome);
-        Assert.Equal(ContentReasonCode.NoBlockedGenre, new GenreBlockRule().Evaluate(MovieTitle(), policy).Reason.Code);
-        Assert.Equal(ContentReasonCode.NoBlockedKeyword, new KeywordBlockRule().Evaluate(MovieTitle(keywords: []), policy).Reason.Code);
+        Assert.Equal(ContentOutcome.NeedsApproval, decision.Outcome);
+        Assert.Equal(ContentReasonCode.UnknownGenres, decision.Reason.Code);
+        Assert.Equal(ContentReasonCode.UnknownGenres, new GenreBlockRule().Evaluate(MovieTitle(genres: []), blocking).Reason.Code);
+        Assert.Equal(ContentReasonCode.NoBlockedGenre, new GenreBlockRule().Evaluate(MovieTitle(genres: [12]), blocking).Reason.Code);
+        Assert.Equal(ContentReasonCode.NoBlockedGenre, new GenreBlockRule().Evaluate(MovieTitle(), open).Reason.Code);
+        Assert.Equal(ContentReasonCode.NoBlockedKeyword, new KeywordBlockRule().Evaluate(MovieTitle(keywords: []), blocking).Reason.Code);
+        Assert.Equal(ContentReasonCode.NoBlockedKeyword, new KeywordBlockRule().Evaluate(MovieTitle(), blocking).Reason.Code);
     }
 
     [Fact]

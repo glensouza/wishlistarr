@@ -262,7 +262,7 @@ public sealed class KidProfiles(
         IReadOnlyList<int> BlockedKeywordIds,
         IReadOnlyList<string> AllowedOriginalLanguages);
 
-    private static bool TryNormalizeIds(
+    private static void TryNormalizeIds(
         IReadOnlyList<int>? ids,
         int max,
         string label,
@@ -273,13 +273,13 @@ public sealed class KidProfiles(
         error = null;
         if (ids is null || ids.Count == 0)
         {
-            return true;
+            return;
         }
 
         if (ids.Count > max)
         {
             error = $"{label} are limited to {max}.";
-            return false;
+            return;
         }
 
         List<int> distinct = [];
@@ -288,7 +288,7 @@ public sealed class KidProfiles(
             if (id <= 0)
             {
                 error = $"{label} must be positive TMDB ids.";
-                return false;
+                return;
             }
 
             if (!distinct.Contains(id))
@@ -298,10 +298,9 @@ public sealed class KidProfiles(
         }
 
         normalized = distinct;
-        return true;
     }
 
-    private static bool TryNormalizeLanguages(
+    private static void TryNormalizeLanguages(
         IReadOnlyList<string>? languages,
         out IReadOnlyList<string> normalized,
         out string? error)
@@ -310,13 +309,13 @@ public sealed class KidProfiles(
         error = null;
         if (languages is null || languages.Count == 0)
         {
-            return true;
+            return;
         }
 
         if (languages.Count > MaxAllowedLanguages)
         {
             error = $"Allowed languages are limited to {MaxAllowedLanguages}.";
-            return false;
+            return;
         }
 
         List<string> distinct = [];
@@ -326,7 +325,7 @@ public sealed class KidProfiles(
             if (code is null)
             {
                 error = "Allowed languages must be ISO 639-1 codes.";
-                return false;
+                return;
             }
 
             if (!distinct.Contains(code))
@@ -336,7 +335,6 @@ public sealed class KidProfiles(
         }
 
         normalized = distinct;
-        return true;
     }
 }
 

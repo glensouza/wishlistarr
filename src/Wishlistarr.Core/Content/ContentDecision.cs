@@ -17,6 +17,7 @@ public enum ContentReasonCode
     Unrated,
     BlockedGenre,
     NoBlockedGenre,
+    UnknownGenres,
     BlockedKeyword,
     NoBlockedKeyword,
     NoLanguageLimit,

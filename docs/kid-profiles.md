@@ -17,7 +17,7 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 
 ### Content rules
 
-`blockedGenreIds` and `blockedKeywordIds` are TMDB ids. `allowedOriginalLanguages` are ISO 639-1 codes such as `en`. Codes are stored lowercase. Duplicate ids are stored once, in the order given. At most 40 genres, 100 keywords and 50 languages are accepted; an id must be positive and a language must be two letters. How a missing language or a missing keyword list is decided is described in [content policy](content-policy.md).
+`blockedGenreIds` and `blockedKeywordIds` are TMDB ids. `allowedOriginalLanguages` are ISO 639-1 codes such as `en`. Codes are stored lowercase. Duplicate ids are stored once, in the order given. At most 40 genres, 100 keywords and 50 languages are accepted; an id must be positive and a language must be two letters. How a missing language, a missing genre list or a missing keyword list is decided is described in [content policy](content-policy.md).
 
 ### Plex label
 
