@@ -6,6 +6,15 @@ namespace Wishlistarr.Tests.Arr;
 
 public sealed class ArrBackendTests
 {
+    [Fact]
+    public void A_connection_does_not_print_its_api_key()
+    {
+        ArrConnection connection = new(new Uri("http://sonarr.local:8989/"), "secret-arr-key", 4, "/tv", [1]);
+
+        Assert.DoesNotContain("secret-arr-key", connection.ToString(), StringComparison.Ordinal);
+        Assert.Contains("sonarr.local", connection.ToString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(ArrService.Sonarr)]
     [InlineData(ArrService.Radarr)]

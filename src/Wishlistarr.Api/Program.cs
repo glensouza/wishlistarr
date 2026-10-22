@@ -22,6 +22,7 @@ using Wishlistarr.Core;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Arr;
 using Wishlistarr.Integrations.Plex;
+using Wishlistarr.Integrations.Seerr;
 using Wishlistarr.Integrations.Tmdb;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -70,6 +71,7 @@ builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
 builder.Services.AddPlex<StoredAppSettings>();
 builder.Services.AddArr<StoredAppSettings>();
+builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();

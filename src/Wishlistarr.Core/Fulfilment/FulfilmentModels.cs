@@ -18,7 +18,10 @@ public sealed record ArrConnection(
     string ApiKey,
     int? QualityProfileId,
     string? RootFolderPath,
-    IReadOnlyList<int> TagIds);
+    IReadOnlyList<int> TagIds)
+{
+    public override string ToString() => $"ArrConnection {{ Url = {this.Url} }}";
+}
 
 public sealed record ArrSettingsView(
     string? Url,
