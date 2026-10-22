@@ -8,6 +8,7 @@ namespace Wishlistarr.Tests.Plex;
 
 public sealed class InMemoryAppSettings : IAppSettings
 {
+    private readonly object gate = new();
     private readonly ConcurrentDictionary<string, StoredValue> values = new();
 
     public IReadOnlyDictionary<string, StoredValue> Values => this.values;
@@ -15,19 +16,55 @@ public sealed class InMemoryAppSettings : IAppSettings
     public async Task<string?> GetAsync(string key, CancellationToken ct = default)
     {
         await Task.Delay(1, ct);
-        return this.values.TryGetValue(key, out StoredValue? value) ? value.Value : null;
+        lock (this.gate)
+        {
+            return this.values.TryGetValue(key, out StoredValue? value) ? value.Value : null;
+        }
+    }
+
+    public async Task<IReadOnlyDictionary<string, string?>> GetAsync(IReadOnlyList<string> keys, CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
+        lock (this.gate)
+        {
+            Dictionary<string, string?> result = [];
+            foreach (string key in keys)
+            {
+                result[key] = this.values.TryGetValue(key, out StoredValue? value) ? value.Value : null;
+            }
+
+            return result;
+        }
     }
 
     public async Task SetAsync(string key, string value, bool isSecret, CancellationToken ct = default)
     {
         await Task.Delay(1, ct);
-        this.values[key] = new StoredValue(value, isSecret);
+        lock (this.gate)
+        {
+            this.values[key] = new StoredValue(value, isSecret);
+        }
+    }
+
+    public async Task SetAsync(IReadOnlyList<AppSettingChange> changes, CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
+        lock (this.gate)
+        {
+            foreach (AppSettingChange change in changes)
+            {
+                this.values[change.Key] = new StoredValue(change.Value, change.IsSecret);
+            }
+        }
     }
 
     public async Task DeleteAsync(string key, CancellationToken ct = default)
     {
         await Task.Delay(1, ct);
-        this.values.TryRemove(key, out _);
+        lock (this.gate)
+        {
+            this.values.TryRemove(key, out _);
+        }
     }
 
     public sealed record StoredValue(string Value, bool IsSecret);
