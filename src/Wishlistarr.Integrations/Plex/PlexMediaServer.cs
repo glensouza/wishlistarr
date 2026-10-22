@@ -79,9 +79,13 @@ internal sealed partial class PlexMediaServer(
             await this.ClearAsync(PlexSettingKeys.Server, ct);
         }
 
-        await settings.SetAsync(PlexSettingKeys.Token, pin.AuthToken, true, ct);
-        await settings.SetAsync(PlexSettingKeys.AccountId, accountId, false, ct);
-        await settings.SetAsync(PlexSettingKeys.AccountName, accountName, false, ct);
+        await settings.SetAsync(
+            [
+                new AppSettingChange(PlexSettingKeys.Token, pin.AuthToken, true),
+                new AppSettingChange(PlexSettingKeys.AccountId, accountId, false),
+                new AppSettingChange(PlexSettingKeys.AccountName, accountName, false),
+            ],
+            ct);
         this.pendingLinks.Remove(linkId);
         return new MediaServerLinkCheck(MediaServerLinkState.Linked, accountName);
     }

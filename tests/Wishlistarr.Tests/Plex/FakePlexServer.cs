@@ -80,6 +80,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     public Action<RecordedRequest>? AfterRequest { get; set; }
 
+    public Func<RecordedRequest, Task>? Delay { get; set; }
+
     public TimeSpan MetadataDelay { get; set; }
 
     public static async Task<FakePlexServer> StartAsync()
@@ -216,6 +218,11 @@ public sealed partial class FakePlexServer : IAsyncDisposable
     {
         RecordedRequest request = Record(context);
         this.requests.Enqueue(request);
+        if (this.Delay is not null)
+        {
+            await this.Delay(request);
+        }
+
         string path = request.Path;
 
         if (path.StartsWith("/api/", StringComparison.Ordinal))

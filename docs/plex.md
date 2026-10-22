@@ -14,6 +14,8 @@ Linking uses the plex.tv PIN flow, so nobody has to find or type a token.
 
 `GET /api/v1/plex/status` reports whether an account is linked, the account name, the client identifier and the selected server. `DELETE /api/v1/plex/link` forgets the account and the selected server.
 
+Two checks of the same approved link can run at the same time. Both report linked, and the sign-in is stored once.
+
 Wishlistarr identifies itself to Plex with a client identifier that is generated once and stored in the `plex.client_identifier` setting. It is kept when the account is unlinked, so Plex keeps seeing the same device.
 
 ## Choosing a server
