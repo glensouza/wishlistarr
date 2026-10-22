@@ -22,6 +22,9 @@ type FormState = {
   plexLabel: string
   plexUserId: string
   weeklyAllowance: string
+  blockedGenres: string
+  blockedKeywords: string
+  allowedLanguages: string
 }
 
 const emptyForm: FormState = {
@@ -34,6 +37,9 @@ const emptyForm: FormState = {
   plexLabel: '',
   plexUserId: '',
   weeklyAllowance: '',
+  blockedGenres: '',
+  blockedKeywords: '',
+  allowedLanguages: '',
 }
 
 function toForm(profile: KidProfile): FormState {
@@ -47,12 +53,34 @@ function toForm(profile: KidProfile): FormState {
     plexLabel: profile.plexLabel,
     plexUserId: profile.plexUserId ?? '',
     weeklyAllowance: profile.weeklyAllowance?.toString() ?? '',
+    blockedGenres: profile.blockedGenreIds.join(', '),
+    blockedKeywords: profile.blockedKeywordIds.join(', '),
+    allowedLanguages: profile.allowedOriginalLanguages.join(', '),
   }
+}
+
+function parseTokens(value: string): string[] {
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
+}
+
+function parseIds(value: string): number[] | null {
+  const ids: number[] = []
+  for (const token of parseTokens(value)) {
+    if (!/^[1-9]\d*$/.test(token)) return null
+    ids.push(Number(token))
+  }
+  return ids
 }
 
 const toNumber = (value: string) => (value.trim() === '' ? null : Number(value))
 
-function toInput(form: FormState): KidProfileInput {
+function toInput(form: FormState): KidProfileInput | null {
+  const blockedGenreIds = parseIds(form.blockedGenres)
+  const blockedKeywordIds = parseIds(form.blockedKeywords)
+  if (blockedGenreIds === null || blockedKeywordIds === null) return null
   return {
     name: form.name,
     avatar: form.avatar,
@@ -63,6 +91,9 @@ function toInput(form: FormState): KidProfileInput {
     plexLabel: form.plexLabel,
     plexUserId: form.plexUserId === '' ? null : form.plexUserId,
     weeklyAllowance: toNumber(form.weeklyAllowance),
+    blockedGenreIds,
+    blockedKeywordIds,
+    allowedOriginalLanguages: parseTokens(form.allowedLanguages),
   }
 }
 
@@ -176,6 +207,10 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
     setError(null)
     try {
       const input = toInput(form)
+      if (input === null) {
+        setError(t('admin.rulesInvalid'))
+        return
+      }
       if (profile) {
         await updateKidProfile(profile.id, input)
       } else {
@@ -267,6 +302,30 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
         value={form.plexUserId}
         onChange={(value) => set('plexUserId', value)}
       />
+      <label>
+        {t('admin.blockedGenres')}
+        <input
+          value={form.blockedGenres}
+          placeholder={t('admin.blockedGenresHint')}
+          onChange={(event) => set('blockedGenres', event.target.value)}
+        />
+      </label>
+      <label>
+        {t('admin.blockedKeywords')}
+        <input
+          value={form.blockedKeywords}
+          placeholder={t('admin.blockedKeywordsHint')}
+          onChange={(event) => set('blockedKeywords', event.target.value)}
+        />
+      </label>
+      <label>
+        {t('admin.allowedLanguages')}
+        <input
+          value={form.allowedLanguages}
+          placeholder={t('admin.allowedLanguagesHint')}
+          onChange={(event) => set('allowedLanguages', event.target.value)}
+        />
+      </label>
       <label>
         {t('admin.weekly')}
         <input

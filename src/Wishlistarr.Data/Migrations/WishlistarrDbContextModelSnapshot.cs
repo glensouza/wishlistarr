@@ -174,12 +174,24 @@ namespace Wishlistarr.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.PrimitiveCollection<string>("AllowedOriginalLanguages")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset?>("ArchivedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Avatar")
                         .IsRequired()
                         .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.PrimitiveCollection<string>("BlockedGenreIds")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.PrimitiveCollection<string>("BlockedKeywordIds")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")

@@ -22,6 +22,9 @@ const ada: KidProfile = {
   plexUserId: null,
   weeklyAllowance: 3,
   isLocked: false,
+  blockedGenreIds: [],
+  blockedKeywordIds: [],
+  allowedOriginalLanguages: [],
 }
 
 let calls: Call[]
@@ -117,6 +120,55 @@ it('creates a profile and leaves the label empty so it defaults to the name', as
     tvAgeLimit: null,
     plexLabel: '',
   })
+})
+
+it('sends content rules and keeps them when a profile is edited', async () => {
+  profiles = [
+    {
+      ...ada,
+      blockedGenreIds: [28, 12],
+      blockedKeywordIds: [1721],
+      allowedOriginalLanguages: ['en', 'ja'],
+    },
+  ]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    (screen.getByLabelText('Blocked genres') as HTMLInputElement).value,
+  ).toBe('28, 12')
+  expect(
+    (screen.getByLabelText('Blocked keywords') as HTMLInputElement).value,
+  ).toBe('1721')
+  expect(
+    (screen.getByLabelText('Allowed languages') as HTMLInputElement).value,
+  ).toBe('en, ja')
+  fireEvent.change(screen.getByLabelText('Blocked genres'), {
+    target: { value: '53' },
+  })
+  fireEvent.change(screen.getByLabelText('Allowed languages'), {
+    target: { value: 'EN, fr' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    blockedGenreIds: [53],
+    blockedKeywordIds: [1721],
+    allowedOriginalLanguages: ['EN', 'fr'],
+  })
+})
+
+it('does not save genres that are not ids', async () => {
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+  fireEvent.change(screen.getByLabelText('Blocked genres'), {
+    target: { value: 'horror' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('TMDB ids')
+  expect(writes()).toHaveLength(0)
 })
 
 it('edits a profile without resending an unchanged PIN', async () => {

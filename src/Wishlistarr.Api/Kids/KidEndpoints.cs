@@ -307,7 +307,10 @@ public sealed record KidProfileSummary(
     int? WeeklyAllowance,
     bool IsLocked,
     DateTimeOffset? LockedAt,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<int> BlockedGenreIds,
+    IReadOnlyList<int> BlockedKeywordIds,
+    IReadOnlyList<string> AllowedOriginalLanguages)
 {
     public static KidProfileSummary From(KidProfile profile) => From(profile, null);
 
@@ -323,5 +326,8 @@ public sealed record KidProfileSummary(
         profile.WeeklyAllowance,
         profile.LockedAt is not null || deviceLockedAt is not null,
         profile.LockedAt ?? deviceLockedAt,
-        profile.CreatedAt);
+        profile.CreatedAt,
+        profile.BlockedGenreIds,
+        profile.BlockedKeywordIds,
+        profile.AllowedOriginalLanguages);
 }
