@@ -71,6 +71,9 @@ internal sealed record PlexMetadata(
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 
+    [JsonPropertyName("updatedAt")]
+    public long? UpdatedAt { get; init; }
+
     [JsonPropertyName("librarySectionID")]
     public long? LibrarySectionId { get; init; }
 

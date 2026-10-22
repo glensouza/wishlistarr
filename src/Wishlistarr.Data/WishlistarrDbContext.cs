@@ -26,6 +26,16 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<WebhookEvent> WebhookEvents => this.Set<WebhookEvent>();
 
+    public DbSet<LibraryItem> LibraryItems => this.Set<LibraryItem>();
+
+    public DbSet<LibraryTitle> LibraryTitles => this.Set<LibraryTitle>();
+
+    public DbSet<LibraryExternalId> LibraryExternalIds => this.Set<LibraryExternalId>();
+
+    public DbSet<LibraryItemLabel> LibraryItemLabels => this.Set<LibraryItemLabel>();
+
+    public DbSet<LibraryRefreshState> LibraryRefreshStates => this.Set<LibraryRefreshState>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -142,6 +152,58 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(item => item.EventType).HasMaxLength(WebhookEvent.MaxEventTypeLength);
             entity.HasIndex(item => new { item.Source, item.DeliveryKey }).IsUnique();
             entity.HasIndex(item => item.ProcessedAt);
+        });
+
+        modelBuilder.Entity<LibraryItem>(entity =>
+        {
+            entity.Property(item => item.ServerId).HasMaxLength(100);
+            entity.Property(item => item.RatingKey).HasMaxLength(20);
+            entity.Property(item => item.Guid).HasMaxLength(256);
+            entity.Property(item => item.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.LibraryId).HasMaxLength(20);
+            entity.Property(item => item.Title).HasMaxLength(500);
+            entity.HasIndex(item => new { item.ServerId, item.RatingKey }).IsUnique();
+            entity.HasIndex(item => item.TitleId);
+            entity.HasOne(item => item.CanonicalTitle)
+                .WithMany(title => title.Items)
+                .HasForeignKey(item => item.TitleId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasMany(item => item.ExternalIds)
+                .WithOne(id => id.Item)
+                .HasForeignKey(id => id.ItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(item => item.Labels)
+                .WithOne(label => label.Item)
+                .HasForeignKey(label => label.ItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryTitle>(entity =>
+        {
+            entity.Property(title => title.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.HasIndex(title => new { title.Kind, title.TmdbId }).IsUnique();
+        });
+
+        modelBuilder.Entity<LibraryExternalId>(entity =>
+        {
+            entity.Property(id => id.Source).HasConversion<string>().HasMaxLength(16);
+            entity.Property(id => id.Value).HasMaxLength(256);
+            entity.Property(id => id.Origin).HasConversion<string>().HasMaxLength(16);
+            entity.HasIndex(id => new { id.Source, id.Value });
+            entity.HasIndex(id => new { id.ItemId, id.Source, id.Value }).IsUnique();
+        });
+
+        modelBuilder.Entity<LibraryItemLabel>(entity =>
+        {
+            entity.Property(label => label.Label).HasMaxLength(LibraryItemLabel.MaxLength).UseCollation("NOCASE");
+            entity.HasIndex(label => label.Label);
+            entity.HasIndex(label => new { label.ItemId, label.Label }).IsUnique();
+        });
+
+        modelBuilder.Entity<LibraryRefreshState>(entity =>
+        {
+            entity.Property(state => state.Id).ValueGeneratedNever();
+            entity.Property(state => state.ServerId).HasMaxLength(100);
         });
     }
 }

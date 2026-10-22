@@ -28,6 +28,7 @@ public sealed record KidRequestResult(KidRequestOutcome Outcome, MediaRequest? R
 public sealed partial class KidRequestFlow(
     WishlistarrDbContext db,
     MediaRequests requests,
+    RequestTitles titles,
     ITmdbClient tmdb,
     LibraryLookup library,
     LabelWriter labels,
@@ -69,7 +70,7 @@ public sealed partial class KidRequestFlow(
         }
 
         TmdbMediaType type = title.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-        string? name = await this.GetTitleNameAsync(type, title.TmdbId, ct);
+        string? name = await titles.FetchNameAsync(title.Kind, title.TmdbId, ct);
         if (name is null)
         {
             return new KidRequestResult(KidRequestOutcome.TitleNotFound);
@@ -135,20 +136,6 @@ public sealed partial class KidRequestFlow(
         }
 
         return new KidRequestResult(KidRequestOutcome.Created, instant ? await this.LabelAsync(request, matches, profile) : request);
-    }
-
-    private async Task<string?> GetTitleNameAsync(TmdbMediaType type, int tmdbId, CancellationToken ct)
-    {
-        try
-        {
-            TmdbDetails details = await tmdb.GetDetailsAsync(type, tmdbId, ct: ct);
-            string name = (details.Title ?? details.Name ?? string.Empty).Trim();
-            return name.Length == 0 ? null : name[..Math.Min(name.Length, MediaRequests.MaxTitleLength)];
-        }
-        catch (TmdbException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
     }
 
     private async Task<IReadOnlyList<MediaItem>> FindInLibraryAsync(TitleKey title, CancellationToken ct)

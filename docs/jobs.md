@@ -40,3 +40,5 @@ All endpoints require a parent.
 Implement `IBackgroundJob` and register it with `AddBackgroundJob<TJob>(name, description, defaultInterval)`. A `null` interval means the job only runs when triggered manually. Each run gets its own dependency injection scope.
 
 The built-in `job-history-cleanup` job deletes finished runs older than `Jobs:HistoryRetention`.
+
+The `tmdb-data-purge` job enforces the TMDB data retention described in [tmdb.md](tmdb.md).

@@ -71,7 +71,9 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                     .ExecuteUpdateAsync(
                         setters => setters
                             .SetProperty(request => request.RequestCount, request => request.RequestCount + 1)
-                            .SetProperty(request => request.LastRequestedAt, now),
+                            .SetProperty(request => request.LastRequestedAt, now)
+                            .SetProperty(request => request.Title, titleName.Trim())
+                            .SetProperty(request => request.TitleFetchedAt, now),
                         ct);
                 await db.Entry(existing).ReloadAsync(ct);
                 if (merged == 1)
@@ -88,6 +90,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                 Kind = title.Kind,
                 TmdbId = title.TmdbId,
                 Title = titleName.Trim(),
+                TitleFetchedAt = now,
                 State = RequestState.Pending,
                 RequestCount = 1,
                 CountsTowardAllowance = countsTowardAllowance,

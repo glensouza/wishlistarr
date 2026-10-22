@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Settings;
 
@@ -19,6 +20,7 @@ public static class PlexServiceCollectionExtensions
         services.AddSingleton<PlexMediaServer>();
         services.AddSingleton<IMediaServer>(provider => provider.GetRequiredService<PlexMediaServer>());
         services.AddSingleton<IMediaServerAccount>(provider => provider.GetRequiredService<PlexMediaServer>());
+        services.AddSingleton<ILibraryScanner>(provider => provider.GetRequiredService<PlexMediaServer>());
 
         services.AddHttpClient(PlexTvClient.HttpClientName, (provider, client) =>
             {

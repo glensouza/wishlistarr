@@ -18,5 +18,7 @@ public sealed class TmdbCache(IOptions<TmdbOptions> options) : IDisposable
     public void Set<T>(string key, T value, TimeSpan lifetime) =>
         this.cache.Set(key, value, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = lifetime });
 
+    public void Clear() => this.cache.Clear();
+
     public void Dispose() => this.cache.Dispose();
 }

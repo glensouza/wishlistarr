@@ -15,7 +15,7 @@ public static class KidRequestEndpoints
 
     public static void MapKidRequests(this RouteGroupBuilder kid)
     {
-        kid.MapPost("/requests", async (KidRequestBody? body, HttpContext context, KidRequestFlow flow, CancellationToken ct) =>
+        kid.MapPost("/requests", async (KidRequestBody? body, HttpContext context, KidRequestFlow flow, RequestTitles titles, CancellationToken ct) =>
         {
             if (body is not { Kind: MediaKind kind, TmdbId: > 0 and int tmdbId })
             {
@@ -43,8 +43,8 @@ public static class KidRequestEndpoints
 
             return result.Outcome switch
             {
-                KidRequestOutcome.Created => Results.Json(KidRequestResponse.From(result.Request!), statusCode: StatusCodes.Status201Created),
-                KidRequestOutcome.Merged => Results.Ok(KidRequestResponse.From(result.Request!)),
+                KidRequestOutcome.Created => Results.Json(KidRequestResponse.From(result.Request!, await titles.GetAsync(result.Request!, ct)), statusCode: StatusCodes.Status201Created),
+                KidRequestOutcome.Merged => Results.Ok(KidRequestResponse.From(result.Request!, await titles.GetAsync(result.Request!, ct))),
                 KidRequestOutcome.NotAllowed => Results.Problem(
                     statusCode: StatusCodes.Status422UnprocessableEntity,
                     title: "That one isn't available.",
@@ -80,6 +80,6 @@ public sealed record KidRequestBody(MediaKind? Kind, int? TmdbId);
 
 public sealed record KidRequestResponse(int Id, MediaKind Kind, int TmdbId, string Title, RequestState State, int RequestCount)
 {
-    public static KidRequestResponse From(MediaRequest request) =>
-        new(request.Id, request.Kind, request.TmdbId, request.Title, request.State, request.RequestCount);
+    public static KidRequestResponse From(MediaRequest request, string title) =>
+        new(request.Id, request.Kind, request.TmdbId, title, request.State, request.RequestCount);
 }

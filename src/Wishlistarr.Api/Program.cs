@@ -75,7 +75,9 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
+builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();
+builder.Services.AddLibraryIndex();
 builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.AddScoped<KidSearch>();
 builder.Services.ConfigureHttpJsonOptions(options =>

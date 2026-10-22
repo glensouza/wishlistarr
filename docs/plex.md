@@ -54,6 +54,8 @@ Items matched by the current Plex agents carry `tmdb://`, `tvdb://` and `imdb://
 
 Plex cannot search by external id, so the first lookup for a kind reads every library of that kind, 500 items per request, and keeps the result in memory for 10 minutes.
 
+The [library index](library.md) answers the same question from a local copy once its first full refresh has completed.
+
 ## Labels
 
 Wishlistarr tags movies and shows with each kid profile's label so Plex content filters can limit what that kid sees. `LabelWriter` adds and removes labels through `IMediaServer.GetLabelsAsync` and `SetLabelsAsync`; there is no endpoint for it yet.
