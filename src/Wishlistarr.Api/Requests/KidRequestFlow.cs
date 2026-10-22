@@ -77,10 +77,21 @@ public sealed partial class KidRequestFlow(
         }
 
         TmdbCertification? certification = await tmdb.GetCertificationAsync(type, title.TmdbId, [RatingScale.UsRegion], ct);
-        ContentTitle content = new(title, certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)]);
+        TmdbDetails details = await tmdb.GetDetailsAsync(type, title.TmdbId, ct: ct);
+        ContentTitle content = new(
+            title,
+            certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
+            details.Genres is null ? null : [.. details.Genres.Select(genre => genre.Id)],
+            null,
+            details.OriginalLanguage);
         ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
             content,
-            ContentPolicy.FromAgeLimits(profile.MovieAgeLimit, profile.TvAgeLimit));
+            ContentPolicy.ForProfile(
+                profile.MovieAgeLimit,
+                profile.TvAgeLimit,
+                profile.BlockedGenreIds,
+                profile.BlockedKeywordIds,
+                profile.AllowedOriginalLanguages));
         if (decision.Outcome == ContentOutcome.Blocked)
         {
             this.LogBlocked(profile.Id, title.Kind, title.TmdbId, decision.Reason.Code);

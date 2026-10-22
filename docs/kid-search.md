@@ -18,7 +18,7 @@ Failures answer `502` (TMDB unreachable) or `503` (no API key) with a message th
 
 ## Filtering
 
-Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title), using the profile's age limits.
+Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title). Search results supply TMDB genre ids (`genre_ids`) and the original language. They do not include keyword ids, so a keyword block on its own does not remove a result.
 
 - `Blocked` titles are removed before anything is returned.
 - Titles whose certification cannot be read, because TMDB failed for that title or the lookup did not finish within the budget below, are removed. Unknown never counts as allowed.

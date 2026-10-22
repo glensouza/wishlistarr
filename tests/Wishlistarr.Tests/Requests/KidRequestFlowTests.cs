@@ -124,6 +124,57 @@ public sealed class KidRequestFlowTests
     }
 
     [Fact]
+    public async Task A_blocked_genre_rejects_a_title_the_rating_would_allow()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, _) = await factory.SignInKidAsync(blockedGenreIds: [28]);
+
+        HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "movie", 603);
+        string text = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.DoesNotContain("28", text, StringComparison.Ordinal);
+        Assert.Empty(await factory.GetRequestsAsync());
+    }
+
+    [Fact]
+    public async Task A_language_outside_the_allow_list_is_rejected_and_a_listed_one_is_not()
+    {
+        using KidRequestApiFactory blocked = new();
+        (HttpClient kid, _) = await blocked.SignInKidAsync(allowedOriginalLanguages: ["ja"]);
+        using KidRequestApiFactory allowed = new();
+        (HttpClient ok, _) = await allowed.SignInKidAsync(allowedOriginalLanguages: ["EN"]);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await KidRequestApiFactory.RequestAsync(kid, "movie", 603)).StatusCode);
+        Assert.Empty(await blocked.GetRequestsAsync());
+        Assert.Equal(HttpStatusCode.Created, (await KidRequestApiFactory.RequestAsync(ok, "movie", 603)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_missing_language_is_rejected_when_an_allow_list_is_set()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, _) = await factory.SignInKidAsync(allowedOriginalLanguages: ["en"]);
+
+        HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "movie", 700);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Empty(await factory.GetRequestsAsync());
+    }
+
+    [Fact]
+    public async Task A_keyword_block_does_not_reject_a_title_with_no_keywords()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, _) = await factory.SignInKidAsync(blockedKeywordIds: [99]);
+
+        HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "movie", 700);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal("pending", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+    }
+
+    [Fact]
     public async Task Without_plex_allowed_titles_become_requests()
     {
         using KidRequestApiFactory factory = new();

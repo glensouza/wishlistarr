@@ -72,7 +72,7 @@ public sealed class FakeTmdbServer : IAsyncDisposable
     private static IEnumerable<KeyValuePair<string, string>> DefaultBodies()
     {
         const string Page = """
-            {"page":1,"results":[{"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","vote_average":8.2}],"total_pages":1,"total_results":1}
+            {"page":1,"results":[{"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","vote_average":8.2,"genre_ids":[28,878],"original_language":"en"}],"total_pages":1,"total_results":1}
             """;
         yield return new("/3/configuration", """{"images":{"base_url":"http://image.tmdb.org/t/p/"}}""");
         yield return new("/3/search/multi", Page);
@@ -82,7 +82,7 @@ public sealed class FakeTmdbServer : IAsyncDisposable
         yield return new("/3/discover/tv", Page);
         yield return new("/3/trending/movie/week", Page);
         yield return new("/3/trending/tv/day", Page);
-        yield return new("/3/movie/603", """{"id":603,"title":"The Matrix","overview":"A hacker learns the truth.","runtime":136,"genres":[{"id":28,"name":"Action"}],"vote_average":8.2}""");
+        yield return new("/3/movie/603", """{"id":603,"title":"The Matrix","overview":"A hacker learns the truth.","runtime":136,"genres":[{"id":28,"name":"Action"}],"original_language":"en","vote_average":8.2}""");
         yield return new("/3/tv/1399", """{"id":1399,"name":"Show","number_of_seasons":8,"genres":[],"vote_average":8.4}""");
         yield return new("/3/movie/603/credits", """{"cast":[{"id":6384,"name":"Actor","character":"Neo","profile_path":"/a.jpg"}],"crew":[{"id":9340,"name":"Director","job":"Director","department":"Directing"}]}""");
         yield return new("/3/movie/603/videos", """{"results":[{"id":"1","key":"abc","name":"Trailer","site":"YouTube","type":"Trailer","official":true}]}""");

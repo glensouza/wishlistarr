@@ -63,7 +63,12 @@ public sealed partial class KidSearch(
         TmdbPage<TmdbSearchResult> found = await tmdb.SearchAsync(query, page: page, ct: ct);
         List<Candidate> candidates = [.. found.Results.Select(ToCandidate).OfType<Candidate>().DistinctBy(item => item.Key)];
 
-        ContentPolicy policy = ContentPolicy.FromAgeLimits(profile.MovieAgeLimit, profile.TvAgeLimit);
+        ContentPolicy policy = ContentPolicy.ForProfile(
+            profile.MovieAgeLimit,
+            profile.TvAgeLimit,
+            profile.BlockedGenreIds,
+            profile.BlockedKeywordIds,
+            profile.AllowedOriginalLanguages);
         ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>> certifications = await this.LookUpAsync(candidates, ct);
 
         List<KidSearchItem> results = [];
@@ -74,7 +79,9 @@ public sealed partial class KidSearch(
                 continue;
             }
 
-            ContentDecision decision = ContentPolicyEngine.Default.Evaluate(new ContentTitle(candidate.Key, known), policy);
+            ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
+                new ContentTitle(candidate.Key, known, candidate.GenreIds, candidate.KeywordIds, candidate.OriginalLanguage),
+                policy);
             if (decision.Outcome != ContentOutcome.Blocked)
             {
                 results.Add(await this.ToItemAsync(candidate, decision.Outcome == ContentOutcome.NeedsApproval, ct));
@@ -105,7 +112,10 @@ public sealed partial class KidSearch(
             title,
             date is { Length: >= 4 } && date[..4].All(char.IsAsciiDigit) ? date[..4] : null,
             string.IsNullOrEmpty(overview) ? null : overview[..Math.Min(overview.Length, MaxOverviewLength)],
-            PosterUrl(result.PosterPath));
+            PosterUrl(result.PosterPath),
+            result.GenreIds,
+            null,
+            result.OriginalLanguage);
     }
 
     private static string? PosterUrl(string? path)
@@ -179,5 +189,13 @@ public sealed partial class KidSearch(
         return null;
     }
 
-    private sealed record Candidate(TitleKey Key, string Title, string? Year, string? Overview, string? PosterUrl);
+    private sealed record Candidate(
+        TitleKey Key,
+        string Title,
+        string? Year,
+        string? Overview,
+        string? PosterUrl,
+        IReadOnlyList<int>? GenreIds,
+        IReadOnlyList<int>? KeywordIds,
+        string? OriginalLanguage);
 }

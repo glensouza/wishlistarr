@@ -46,6 +46,8 @@ public sealed class TmdbClientTests
         TmdbSearchResult result = Assert.Single(page.Results);
         Assert.Equal(603, result.Id);
         Assert.Equal("The Matrix", result.Title);
+        Assert.Equal([28, 878], result.GenreIds);
+        Assert.Equal("en", result.OriginalLanguage);
         Assert.Equal("matrix", harness.Server.Requests[0].Query["query"]);
     }
 
@@ -62,7 +64,9 @@ public sealed class TmdbClientTests
         TmdbWatchProviders providers = await client.GetWatchProvidersAsync(TmdbMediaType.Movie, 603);
 
         Assert.Equal(136, details.Runtime);
+        Assert.Equal(28, Assert.Single(details.Genres!).Id);
         Assert.Equal("Action", Assert.Single(details.Genres!).Name);
+        Assert.Equal("en", details.OriginalLanguage);
         Assert.Equal("Neo", Assert.Single(credits.Cast).Character);
         Assert.Equal("Director", Assert.Single(credits.Crew).Job);
         Assert.Equal("YouTube", Assert.Single(videos.Results).Site);

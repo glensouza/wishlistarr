@@ -78,6 +78,30 @@ public sealed class KidSearchTests
     }
 
     [Fact]
+    public async Task Genre_and_language_rules_remove_titles_the_rating_would_allow()
+    {
+        const string Page = """
+            {"page":1,"total_pages":1,"total_results":2,"results":[
+              {"id":800,"media_type":"movie","title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01","genre_ids":[16],"original_language":"ja"},
+              {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31","genre_ids":[28],"original_language":"en"}]}
+            """;
+
+        using KidRequestApiFactory genres = CreateFactory();
+        genres.Tmdb.SetBody("/3/search/multi", Page);
+        (HttpClient genreKid, _) = await genres.SignInKidAsync("Genres", movieAgeLimit: 16, blockedGenreIds: [16]);
+        using KidRequestApiFactory languages = CreateFactory();
+        languages.Tmdb.SetBody("/3/search/multi", Page);
+        (HttpClient languageKid, _) = await languages.SignInKidAsync("Languages", movieAgeLimit: 16, allowedOriginalLanguages: ["en"]);
+        using KidRequestApiFactory keywords = CreateFactory();
+        keywords.Tmdb.SetBody("/3/search/multi", Page);
+        (HttpClient keywordKid, _) = await keywords.SignInKidAsync("Keywords", movieAgeLimit: 16, blockedKeywordIds: [99]);
+
+        Assert.Equal([603], Ids(await GetAsync(genreKid, "matrix")));
+        Assert.Equal([603], Ids(await GetAsync(languageKid, "matrix")));
+        Assert.Equal([800, 603], Ids(await GetAsync(keywordKid, "matrix")));
+    }
+
+    [Fact]
     public async Task Titles_whose_rating_cannot_be_read_are_left_out_while_unrated_ones_follow_the_policy_engine()
     {
         using KidRequestApiFactory factory = CreateFactory();
