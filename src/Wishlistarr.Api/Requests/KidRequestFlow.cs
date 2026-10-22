@@ -70,14 +70,12 @@ public sealed partial class KidRequestFlow(
         }
 
         TmdbMediaType type = title.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-        string? name = await titles.FetchNameAsync(title.Kind, title.TmdbId, ct);
-        if (name is null)
+        if (await titles.FetchAsync(title.Kind, title.TmdbId, ct) is not (string name, TmdbDetails details))
         {
             return new KidRequestResult(KidRequestOutcome.TitleNotFound);
         }
 
         TmdbCertification? certification = await tmdb.GetCertificationAsync(type, title.TmdbId, [RatingScale.UsRegion], ct);
-        TmdbDetails details = await tmdb.GetDetailsAsync(type, title.TmdbId, ct: ct);
         IReadOnlyList<int>? keywordIds = null;
         if (profile.BlockedKeywordIds.Count > 0)
         {

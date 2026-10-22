@@ -10,13 +10,16 @@ namespace Wishlistarr.Api.Requests;
 
 public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, TmdbRetention retention, TimeProvider time)
 {
-    public async Task<string?> FetchNameAsync(MediaKind kind, int tmdbId, CancellationToken ct)
+    public async Task<string?> FetchNameAsync(MediaKind kind, int tmdbId, CancellationToken ct) =>
+        (await this.FetchAsync(kind, tmdbId, ct))?.Name;
+
+    public async Task<(string Name, TmdbDetails Details)?> FetchAsync(MediaKind kind, int tmdbId, CancellationToken ct)
     {
         try
         {
             TmdbDetails details = await tmdb.GetDetailsAsync(kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv, tmdbId, ct: ct);
             string name = (details.Title ?? details.Name ?? string.Empty).Trim();
-            return name.Length == 0 ? null : name[..Math.Min(name.Length, MediaRequests.MaxTitleLength)];
+            return name.Length == 0 ? null : (name[..Math.Min(name.Length, MediaRequests.MaxTitleLength)], details);
         }
         catch (TmdbException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
