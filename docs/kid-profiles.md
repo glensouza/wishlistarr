@@ -1,6 +1,6 @@
 # Kid profiles
 
-A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile and enter its PIN to get a Kid session.
+A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
 
 ## Managing profiles
 
@@ -25,24 +25,24 @@ PINs are 4 to 8 digits. They are stored as salted PBKDF2 hashes (the ASP.NET Cor
 
 ### Deleting
 
-Deleting archives the profile instead of removing it: the row stays so request history can keep pointing at it, its PIN, Plex user mapping and sessions are cleared, and its name and label become available again. `removeOwnedLabels` is recorded on the archived profile (`RemoveOwnedLabelsOnArchive`) for the Plex label writer to act on later; nothing is removed from Plex yet.
+Deleting archives the profile instead of removing it: the row stays so request history can keep pointing at it, its PIN, Plex user mapping, sessions and device assignments are cleared, and its name and label become available again. `removeOwnedLabels` is recorded on the archived profile (`RemoveOwnedLabelsOnArchive`) for the Plex label writer to act on later; nothing is removed from Plex yet.
 
 ## Signing in
 
-- `GET /api/v1/kid/profiles` is anonymous and returns `{ id, name, avatar, requiresPin }` for each active profile, for the picker.
-- `POST /api/v1/kid/signin` is anonymous and takes `{ profileId, pin }`. Success returns the picker entry and sets the `wishlistarr.kid` cookie (HttpOnly, `SameSite=Strict`). The session is stored in the database and lasts 7 days (`Kids:SessionLifetime`).
+- `GET /api/v1/kid/profiles` needs a paired device and returns `{ id, name, avatar, requiresPin }` for each active profile assigned to it, for the picker.
+- `POST /api/v1/kid/signin` needs a paired device and takes `{ profileId, pin }`. Success returns the picker entry and sets the `wishlistarr.kid` cookie (HttpOnly, `SameSite=Strict`). The session is stored in the database, belongs to the device and lasts 7 days (`Kids:SessionLifetime`).
 - `GET /api/v1/kid/me` and `POST /api/v1/kid/signout` need a Kid session. Kid sessions are rejected on every parent endpoint. Writes made with a Kid cookie, including signing in again from a signed-in device, need the antiforgery token like parent writes.
 
-Unknown, archived and wrong-PIN attempts all answer `401 Invalid PIN.` with the same body, and an unknown profile still costs a password hash. Sign-in shares the per-address rate limit used by parent login.
+Unknown, archived, not assigned to the device and wrong-PIN attempts all answer `401 Invalid PIN.` with the same body, and an unknown profile still costs a password hash. Sign-in shares the per-address rate limit used by parent login.
 
 ### Backoff and lockout
 
-Each device gets a random `wishlistarr.device` cookie, and failed PINs are counted per device and profile. After the n-th consecutive failure the device must wait `2 s * 2^(n-1)` (`Kids:BackoffBase`), capped at 15 minutes (`Kids:BackoffMax`). Attempts during the wait get `429` with `Retry-After`, even with the right PIN. Counts are forgotten after an hour without failures (`Kids:FailureResetAfter`) and on a successful sign-in.
+Failed PINs are counted per paired device and profile. After the n-th consecutive failure the device must wait `2 s * 2^(n-1)` (`Kids:BackoffBase`), capped at 15 minutes (`Kids:BackoffMax`). Attempts during the wait get `429` with `Retry-After`, even with the right PIN. Counts are forgotten after an hour without failures (`Kids:FailureResetAfter`) and on a successful sign-in.
 
-A device that clears its cookies looks new, so failures are also counted across all devices for the profile. After 10 (`Kids:LockThreshold`) the profile is locked: sign-in answers `423` and existing Kid sessions stop working until a parent unlocks it.
+After 10 consecutive failures on one device (`Kids:LockThreshold`) the profile is locked on that device: sign-in there answers `423` until a parent unlocks the profile, and the parent profile list shows it as locked. Other devices are not affected, so failures on one device cannot lock a kid out elsewhere. Only a parent can pair a device, so a new device cannot be used to reset the count. Unlocking clears the counts on every device. Profiles locked before device pairing existed stay locked everywhere until unlocked.
 
-A profile that never existed is not subject to backoff, so repeated attempts can tell an id that was never used from one that has been. Only ids from the picker, or ones that were once valid, are worth testing.
+A profile that is not assigned to the device is not subject to backoff, so repeated attempts can tell an id that is assigned from one that is not. Only ids from the picker are worth testing, and they are already shown.
 
 ### Parent notifications
 
-After 5 consecutive failures on one device (`Kids:NotifyThreshold`) and when a profile locks, Wishlistarr calls `IParentNotifier.NotifyAsync` with a `ParentNotification(Kind, Message)`; the kinds are `kid.pin.failures` and `kid.profile.locked`. The only implementation for now writes a warning to the log. Messages contain the profile name and counts, never a PIN. Add another `IParentNotifier` registration to deliver them elsewhere.
+After 5 consecutive failures on one device (`Kids:NotifyThreshold`) and when a profile locks on a device, Wishlistarr calls `IParentNotifier.NotifyAsync` with a `ParentNotification(Kind, Message)`; the kinds are `kid.pin.failures` and `kid.profile.locked`. The only implementation for now writes a warning to the log. Messages contain the profile name, the device name and counts, never a PIN. Add another `IParentNotifier` registration to deliver them elsewhere.
