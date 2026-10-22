@@ -53,6 +53,7 @@ public static class KidEndpoints
             KidSignIn signIn,
             KidSessions sessions,
             KidDevices devices,
+            ParentSessions parentSessions,
             TimeProvider time,
             CancellationToken ct) =>
         {
@@ -73,6 +74,7 @@ public static class KidEndpoints
             switch (result.Outcome)
             {
                 case KidSignInOutcome.Succeeded when result.Profile is not null:
+                    await EndParentSessionAsync(context, parentSessions, ct);
                     await sessions.SignInAsync(context, result.Profile, device.Id, ct);
                     devices.RefreshCookie(context);
                     return Results.Ok(new KidPickerEntry(
@@ -246,6 +248,22 @@ public static class KidEndpoints
     private static async Task<KidDevice> RequireDeviceAsync(HttpContext context, KidDevices devices, CancellationToken ct) =>
         await devices.FindCurrentAsync(context, ct)
             ?? throw new InvalidOperationException("The paired device policy let a request without a device through.");
+
+    private static async Task EndParentSessionAsync(HttpContext context, ParentSessions sessions, CancellationToken ct)
+    {
+        if (!context.Request.Cookies.ContainsKey(SecuritySetup.CookieName))
+        {
+            return;
+        }
+
+        AuthenticateResult current = await context.AuthenticateAsync(AuthSchemes.Cookie);
+        if (current.Principal is ClaimsPrincipal user && Principals.TryGetSessionAccount(user, out int accountId, out string sessionId))
+        {
+            await sessions.RevokeAsync(accountId, sessionId, ct);
+        }
+
+        await context.SignOutAsync(AuthSchemes.Cookie);
+    }
 
     private static async Task EndKidSessionAsync(HttpContext context, KidSessions sessions, CancellationToken ct)
     {

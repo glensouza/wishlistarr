@@ -339,6 +339,30 @@ public sealed class KidDeviceTests
     }
 
     [Fact]
+    public async Task A_kid_signing_in_ends_the_parent_session_in_that_browser()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await factory.CreateProfileAsync(parent, "Ada")).GetProperty("id").GetInt32();
+        HttpClient tablet = await factory.PairDeviceAsync(parent, "Tablet", [id]);
+        await AuthApiFactory.AddAntiforgeryTokenAsync(tablet);
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            (await tablet.PostAsJsonAsync("/api/v1/kid/exit", new { username = ApiFactory.ParentUsername, password = ApiFactory.ParentPassword })).StatusCode);
+        await AuthApiFactory.AddAntiforgeryTokenAsync(tablet);
+
+        HttpResponseMessage signIn = await KidApiFactory.SignInAsync(tablet, id, null);
+        JsonElement status = await tablet.GetFromJsonAsync<JsonElement>("/api/v1/auth/status");
+
+        Assert.Equal(HttpStatusCode.OK, signIn.StatusCode);
+        Assert.Equal(Principals.Kid, status.GetProperty("principalType").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await tablet.GetAsync("/api/v1/kid/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await tablet.GetAsync(DevicesPath)).StatusCode);
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().ParentSessions.CountAsync());
+    }
+
+    [Fact]
     public async Task Parent_device_list_marks_the_current_browser_and_pending_codes()
     {
         using KidApiFactory factory = new();

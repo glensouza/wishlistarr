@@ -10,7 +10,7 @@ export default function KidGate({ children }: { children: ReactNode }) {
   if (!loaded) {
     return <p role="status">{t('app.loading')}</p>
   }
-  if (!status?.kidDevice || status.principalType === 'Parent') {
+  if (!status?.kidDevice) {
     return <Navigate to="/parent" replace />
   }
   return children
