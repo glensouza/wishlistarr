@@ -15,6 +15,14 @@ public enum ContentReasonCode
     WithinRatingLimit,
     AboveRatingLimit,
     Unrated,
+    BlockedGenre,
+    NoBlockedGenre,
+    UnknownGenres,
+    BlockedKeyword,
+    NoBlockedKeyword,
+    NoLanguageLimit,
+    LanguageAllowed,
+    LanguageNotAllowed,
 }
 
 public sealed record ContentReason(
@@ -22,6 +30,9 @@ public sealed record ContentReason(
     string? Region = null,
     string? Rating = null,
     RatingLevel? Level = null,
-    RatingLevel? MaxLevel = null);
+    RatingLevel? MaxLevel = null,
+    int? GenreId = null,
+    int? KeywordId = null,
+    string? OriginalLanguage = null);
 
 public sealed record ContentDecision(ContentOutcome Outcome, ContentReason Reason);

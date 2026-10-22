@@ -313,6 +313,9 @@ public sealed record KidProfileSummary(
     bool IsLocked,
     DateTimeOffset? LockedAt,
     DateTimeOffset CreatedAt,
+    IReadOnlyList<int> BlockedGenreIds,
+    IReadOnlyList<int> BlockedKeywordIds,
+    IReadOnlyList<string> AllowedOriginalLanguages,
     ProfileRestrictions? PlexRestrictions = null)
 {
     public static KidProfileSummary From(KidProfile profile) => From(profile, null, null);
@@ -330,5 +333,8 @@ public sealed record KidProfileSummary(
         profile.LockedAt is not null || deviceLockedAt is not null,
         profile.LockedAt ?? deviceLockedAt,
         profile.CreatedAt,
+        profile.BlockedGenreIds,
+        profile.BlockedKeywordIds,
+        profile.AllowedOriginalLanguages,
         restrictions);
 }

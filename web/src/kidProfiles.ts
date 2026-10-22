@@ -11,6 +11,9 @@ export type KidProfile = {
   plexUserId: string | null
   weeklyAllowance: number | null
   isLocked: boolean
+  blockedGenreIds: number[]
+  blockedKeywordIds: number[]
+  allowedOriginalLanguages: string[]
   plexRestrictions?: PlexRestrictions | null
 }
 
@@ -36,6 +39,9 @@ export type KidProfileInput = {
   plexLabel: string
   plexUserId: string | null
   weeklyAllowance: number | null
+  blockedGenreIds: number[]
+  blockedKeywordIds: number[]
+  allowedOriginalLanguages: string[]
 }
 
 const base = '/api/v1/kid-profiles'

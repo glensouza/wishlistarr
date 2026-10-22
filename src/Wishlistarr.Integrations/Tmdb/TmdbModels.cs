@@ -24,11 +24,15 @@ public sealed record TmdbSearchResult(
     [property: JsonPropertyName("backdrop_path")] string? BackdropPath,
     [property: JsonPropertyName("release_date")] string? ReleaseDate,
     [property: JsonPropertyName("first_air_date")] string? FirstAirDate,
-    [property: JsonPropertyName("vote_average")] double VoteAverage);
+    [property: JsonPropertyName("vote_average")] double VoteAverage,
+    [property: JsonPropertyName("genre_ids")] IReadOnlyList<int>? GenreIds = null,
+    [property: JsonPropertyName("original_language")] string? OriginalLanguage = null);
 
 public sealed record TmdbGenre(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("name")] string Name);
+
+public sealed record TmdbKeyword(int Id, string Name);
 
 public sealed record TmdbDetails(
     [property: JsonPropertyName("id")] int Id,
@@ -44,7 +48,8 @@ public sealed record TmdbDetails(
     [property: JsonPropertyName("number_of_seasons")] int? NumberOfSeasons,
     [property: JsonPropertyName("status")] string? Status,
     [property: JsonPropertyName("genres")] IReadOnlyList<TmdbGenre>? Genres,
-    [property: JsonPropertyName("vote_average")] double VoteAverage);
+    [property: JsonPropertyName("vote_average")] double VoteAverage,
+    [property: JsonPropertyName("original_language")] string? OriginalLanguage = null);
 
 public sealed record TmdbCastMember(
     [property: JsonPropertyName("id")] int Id,

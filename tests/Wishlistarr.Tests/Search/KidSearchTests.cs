@@ -78,6 +78,102 @@ public sealed class KidSearchTests
     }
 
     [Fact]
+    public async Task Genre_and_language_rules_remove_titles_the_rating_would_allow()
+    {
+        const string Page = """
+            {"page":1,"total_pages":1,"total_results":2,"results":[
+              {"id":800,"media_type":"movie","title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01","genre_ids":[16],"original_language":"ja"},
+              {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31","genre_ids":[28],"original_language":"en"}]}
+            """;
+
+        using KidRequestApiFactory genres = CreateFactory();
+        genres.Tmdb.SetBody("/3/search/multi", Page);
+        (HttpClient genreKid, _) = await genres.SignInKidAsync("Genres", movieAgeLimit: 16, blockedGenreIds: [16]);
+        using KidRequestApiFactory languages = CreateFactory();
+        languages.Tmdb.SetBody("/3/search/multi", Page);
+        (HttpClient languageKid, _) = await languages.SignInKidAsync("Languages", movieAgeLimit: 16, allowedOriginalLanguages: ["en"]);
+
+        Assert.Equal([603], Ids(await GetAsync(genreKid, "matrix")));
+        Assert.Equal([603], Ids(await GetAsync(languageKid, "matrix")));
+    }
+
+    [Fact]
+    public async Task A_title_with_no_genres_needs_a_parent_when_genres_are_blocked()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        factory.Tmdb.SetBody("/3/search/multi", """
+            {"page":1,"total_pages":1,"total_results":2,"results":[
+              {"id":800,"media_type":"movie","title":"Tiny Tale","overview":"Gentle.","poster_path":"/tiny.jpg","release_date":"2019-05-01"},
+              {"id":603,"media_type":"movie","title":"The Matrix","overview":"A hacker.","poster_path":"/matrix.jpg","release_date":"1999-03-31","genre_ids":[28]}]}
+            """);
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16, blockedGenreIds: [16]);
+
+        JsonElement results = (await GetAsync(kid, "matrix")).GetProperty("results");
+        JsonElement unknown = results.EnumerateArray().Single(item => item.GetProperty("tmdbId").GetInt32() == 800);
+        JsonElement known = results.EnumerateArray().Single(item => item.GetProperty("tmdbId").GetInt32() == 603);
+
+        Assert.True(unknown.GetProperty("needsParent").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("overview").ValueKind);
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("posterUrl").ValueKind);
+        Assert.False(known.GetProperty("needsParent").GetBoolean());
+        Assert.Equal("A hacker.", known.GetProperty("overview").GetString());
+    }
+
+    [Fact]
+    public async Task A_keyword_block_removes_movies_and_shows_whose_keywords_match()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        factory.Tmdb.SetBody("/3/search/multi", """
+            {"page":1,"total_pages":1,"total_results":3,"results":[
+              {"id":800,"media_type":"movie","title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01","genre_ids":[16],"original_language":"en"},
+              {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31","genre_ids":[28],"original_language":"en"},
+              {"id":82728,"media_type":"tv","name":"Bluey","poster_path":"/bluey.jpg","first_air_date":"2018-10-01","genre_ids":[16],"original_language":"en"}]}
+            """);
+        factory.Tmdb.SetBody("/3/movie/800/keywords", """{"id":800,"keywords":[{"id":99,"name":"monster"}]}""");
+        factory.Tmdb.SetBody("/3/movie/603/keywords", """{"id":603,"keywords":[{"id":818,"name":"based on novel or book"}]}""");
+        factory.Tmdb.SetBody("/3/tv/82728/keywords", """{"id":82728,"results":[{"name":"monster","id":99}]}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16, tvAgeLimit: 16, blockedKeywordIds: [99]);
+
+        string text = await (await kid.GetAsync($"{SearchPath}?q=matrix")).Content.ReadAsStringAsync();
+
+        Assert.Equal([603], Ids(JsonDocument.Parse(text).RootElement));
+        Assert.DoesNotContain("Tiny Tale", text);
+        Assert.DoesNotContain("Bluey", text);
+        Assert.Equal(1, factory.Tmdb.Count("/3/movie/800/keywords"));
+        Assert.Equal(1, factory.Tmdb.Count("/3/tv/82728/keywords"));
+    }
+
+    [Fact]
+    public async Task A_failed_keyword_lookup_drops_only_that_title()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        factory.Tmdb.SetBody("/3/search/multi", """
+            {"page":1,"total_pages":1,"total_results":2,"results":[
+              {"id":800,"media_type":"movie","title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01"},
+              {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
+            """);
+        factory.Tmdb.Enqueue("/3/movie/800/keywords", 500);
+        factory.Tmdb.SetBody("/3/movie/603/keywords", """{"id":603,"keywords":[]}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16, blockedKeywordIds: [99]);
+
+        Assert.Equal([603], Ids(await GetAsync(kid, "matrix")));
+        Assert.Equal(1, factory.Tmdb.Count("/3/movie/800/keywords"));
+    }
+
+    [Fact]
+    public async Task A_profile_without_keyword_blocks_does_not_ask_for_keywords()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        factory.Tmdb.SetBody("/3/movie/800", """{"id":800,"title":"Tiny Tale","genres":[{"id":16,"name":"Animation"}],"original_language":"en","vote_average":7}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16);
+
+        await GetAsync(kid, "matrix");
+        Assert.Equal(HttpStatusCode.Created, (await KidRequestApiFactory.RequestAsync(kid, "movie", 800)).StatusCode);
+
+        Assert.DoesNotContain(factory.Tmdb.Requests, request => request.Path.EndsWith("/keywords", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Titles_whose_rating_cannot_be_read_are_left_out_while_unrated_ones_follow_the_policy_engine()
     {
         using KidRequestApiFactory factory = CreateFactory();
@@ -139,7 +235,66 @@ public sealed class KidSearchTests
 
         Assert.NotNull(response);
         Assert.Equal(20, response.Results.Count);
+        Assert.Equal(0, tmdb.KeywordCalls);
         Assert.InRange(tmdb.PeakConcurrency, 2, KidSearch.MaxParallelLookups);
+    }
+
+    [Fact]
+    public async Task Keyword_lookups_share_the_certification_limit()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (_, int profileId) = await factory.SignInKidAsync(blockedKeywordIds: [99]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        GateClient tmdb = new(count: 20);
+        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+
+        KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
+
+        Assert.NotNull(response);
+        Assert.Equal(20, response.Results.Count);
+        Assert.Equal(20, tmdb.KeywordCalls);
+        Assert.InRange(tmdb.KeywordPeak, 2, KidSearch.MaxParallelLookups);
+    }
+
+    [Fact]
+    public async Task A_lookup_that_times_out_drops_only_that_title()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        using IServiceScope scope = factory.Services.CreateScope();
+        GateClient tmdb = new(count: 5) { TimeoutId = 2 };
+        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+
+        KidSearchResponse? response = await search.SearchAsync(profileId, "flaky", 1);
+
+        Assert.NotNull(response);
+        Assert.Equal([1, 3, 4, 5], response.Results.Select(item => item.TmdbId).Order());
+    }
+
+    [Fact]
+    public async Task Keyword_lookups_that_outlive_the_budget_are_dropped()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (_, int profileId) = await factory.SignInKidAsync(blockedKeywordIds: [99]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        GateClient tmdb = new(count: 4) { HangKeywords = true };
+        ManualTimeProvider time = new();
+        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], time, NullLogger<KidSearch>.Instance);
+
+        Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
+        using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
+        while (tmdb.KeywordRunning < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        Assert.False(pending.IsCompleted);
+        time.Advance(KidSearch.LookupBudget);
+        KidSearchResponse? response = await pending.WaitAsync(guard.Token);
+
+        Assert.NotNull(response);
+        Assert.Empty(response.Results);
+        Assert.Equal(0, tmdb.KeywordRunning);
     }
 
     [Fact]
@@ -410,12 +565,25 @@ public sealed class KidSearchTests
     {
         private int running;
         private int peak;
+        private int keywordRunning;
+        private int keywordPeak;
+        private int keywordCalls;
 
         public bool Hang { get; init; }
+
+        public bool HangKeywords { get; init; }
+
+        public int TimeoutId { get; init; }
 
         public int PeakConcurrency => this.peak;
 
         public int Running => Volatile.Read(ref this.running);
+
+        public int KeywordCalls => Volatile.Read(ref this.keywordCalls);
+
+        public int KeywordRunning => Volatile.Read(ref this.keywordRunning);
+
+        public int KeywordPeak => Volatile.Read(ref this.keywordPeak);
 
         public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) =>
             Task.FromResult(new TmdbPage<TmdbSearchResult>(
@@ -439,12 +607,42 @@ public sealed class KidSearchTests
                     await Task.Delay(Timeout.Infinite, ct);
                 }
 
+                if (id == this.TimeoutId)
+                {
+                    throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
+                }
+
                 await Task.Delay(50, ct);
                 return new TmdbCertification("US", "G", []);
             }
             finally
             {
                 Interlocked.Decrement(ref this.running);
+            }
+        }
+
+        public async Task<IReadOnlyList<TmdbKeyword>> GetKeywordsAsync(TmdbMediaType type, int id, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref this.keywordCalls);
+            int now = Interlocked.Increment(ref this.keywordRunning);
+            int seen;
+            while (now > (seen = Volatile.Read(ref this.keywordPeak)) && Interlocked.CompareExchange(ref this.keywordPeak, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                if (this.HangKeywords)
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+
+                await Task.Delay(50, ct);
+                return [];
+            }
+            finally
+            {
+                Interlocked.Decrement(ref this.keywordRunning);
             }
         }
 

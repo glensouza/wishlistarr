@@ -152,10 +152,15 @@ public sealed class RatingScalePropertyTests
                 ContentDecision decision = ContentPolicyEngine.Default.Evaluate(title, policy);
                 return decision.Reason.Code switch
                 {
-                    ContentReasonCode.WithinRatingLimit or ContentReasonCode.NoRatingLimit or ContentReasonCode.ExplicitlyAllowed => decision.Outcome == ContentOutcome.Allowed,
+                    ContentReasonCode.WithinRatingLimit or ContentReasonCode.NoRatingLimit or ContentReasonCode.ExplicitlyAllowed
+                        or ContentReasonCode.NoBlockedGenre or ContentReasonCode.NoBlockedKeyword
+                        or ContentReasonCode.NoLanguageLimit or ContentReasonCode.LanguageAllowed => decision.Outcome == ContentOutcome.Allowed,
+                    ContentReasonCode.UnknownGenres => decision.Outcome == ContentOutcome.NeedsApproval,
                     ContentReasonCode.AboveRatingLimit => decision.Outcome == ContentOutcome.Blocked && decision.Reason.Level > decision.Reason.MaxLevel,
                     ContentReasonCode.Unrated => decision.Outcome == ExpectedUnrated(policy.Unrated) && decision.Reason.MaxLevel == policy.MaxRatingFor(title.Key.Kind),
-                    _ => decision.Outcome == ContentOutcome.Blocked,
+                    ContentReasonCode.ExplicitlyBlocked or ContentReasonCode.BlockedGenre or ContentReasonCode.BlockedKeyword or ContentReasonCode.LanguageNotAllowed =>
+                        decision.Outcome == ContentOutcome.Blocked,
+                    _ => false,
                 };
             });
 

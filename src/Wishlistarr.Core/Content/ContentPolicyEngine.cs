@@ -14,7 +14,12 @@ public sealed class ContentPolicyEngine
         this.rules = [.. rules];
     }
 
-    public static ContentPolicyEngine Default { get; } = new([new RatingRule()]);
+    public static ContentPolicyEngine Default { get; } = new([
+        new RatingRule(),
+        new GenreBlockRule(),
+        new KeywordBlockRule(),
+        new OriginalLanguageRule(),
+    ]);
 
     public ContentDecision Evaluate(ContentTitle title, ContentPolicy policy)
     {

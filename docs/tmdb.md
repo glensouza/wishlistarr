@@ -9,7 +9,7 @@ Store the key in the `tmdb.api_key` setting with `PUT /api/v1/settings/tmdb.api_
 ## Behavior
 
 - Every request sends `include_adult=false`.
-- Responses are cached in a dedicated in-memory cache limited to 2000 entries (`CacheMaxEntries`): searches for 10 minutes, discover and trending for 1 hour, details, credits, videos, images and watch providers for 12 hours. Certifications are cached per title for 7 days, so changing the region order does not cause another request. Failed responses are not cached.
+- Responses are cached in a dedicated in-memory cache limited to 2000 entries (`CacheMaxEntries`): searches for 10 minutes, discover and trending for 1 hour, details, credits, videos, images, watch providers and keywords for 12 hours. Certifications are cached per title for 7 days, so changing the region order does not cause another request. Failed responses are not cached. Keyword lists for a movie come from `GET /movie/{id}/keywords` (`keywords`) and for a show from `GET /tv/{id}/keywords` (`results`).
 - `429` responses are retried up to 3 times, waiting for `Retry-After` when present and backing off exponentially otherwise. Each wait is capped at 30 seconds and the total wait at 45 seconds; after that the 429 is returned as an error.
 - Certifications come from `release_dates` for movies (theatrical releases preferred) and `content_ratings` for TV. The caller passes regions in priority order and gets the first one with a rating, along with its content descriptors.
 - The key is never written to logs: HTTP client logging is disabled for TMDB clients.
@@ -29,7 +29,7 @@ What is stored:
 | The TMDB id found for a Plex item that only has a TVDB or IMDb id | `LibraryExternalIds`, rows with origin `TmdbLookup` | Until the retention is reached, then deleted. The item is looked up again by the next library refresh. |
 | The title text of a kid request | `MediaRequests.Title` with `TitleFetchedAt` | Until the retention is reached, then cleared. The request keeps its kind, TMDB id and status, and the title is fetched again from TMDB the next time it is needed. |
 
-Ids that Plex reports, request ids and states, and library titles (a kind plus a TMDB id, nothing else) are not TMDB metadata and are not subject to the retention. Posters and other images are proxied from TMDB per request and are never written to disk. The in-memory response cache holds entries for at most 7 days and is emptied when stored TMDB data is cleared.
+Ids that Plex reports, request ids and states, and library titles (a kind plus a TMDB id, nothing else) are not TMDB metadata and are not subject to the retention. Posters and other images are proxied from TMDB per request and are never written to disk. Keyword ids read for a content decision are not written to the database either; they stay in the response cache. The in-memory response cache holds entries for at most 7 days and is emptied when stored TMDB data is cleared.
 
 The `tmdb-data-purge` job runs daily and waits for any running library refresh to finish before touching library data (clearing does the same). It first refreshes records that are still in use and older than half the retention (a library id for an item still in the library, the title of a request that is still open), then deletes everything older than the retention. If a refresh fails for any reason, including a TMDB timeout, expired records are deleted anyway, and each kind of data is purged independently so one failure never skips another.
 

@@ -51,7 +51,7 @@ public static class KidSearchEndpoints
         })
             .WithTags("Kid")
             .WithName("SearchKidTitles")
-            .WithSummary("Searches movies and shows for the signed-in profile. Titles the profile's content policy blocks, or whose rating cannot be checked in time, are never returned. Unrated titles come back masked, without poster or overview and flagged needsParent. The response carries no totals.")
+            .WithSummary("Searches movies and shows for the signed-in profile. Titles the profile's content policy blocks, or whose rating or keywords cannot be checked in time, are never returned. Unrated titles come back masked, without poster or overview and flagged needsParent. The response carries no totals.")
             .Produces<KidSearchResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status502BadGateway)

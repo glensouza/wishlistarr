@@ -1,19 +1,23 @@
 # Kid profiles
 
-A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
+A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
 
 ## Managing profiles
 
 All of these require the Parent role.
 
 - `GET /api/v1/kid-profiles` lists active profiles. PIN hashes are never returned, only `hasPin`.
-- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it.
+- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind.
 - `DELETE /api/v1/kid-profiles/{id}?removeOwnedLabels=true|false` archives the profile.
 - `POST /api/v1/kid-profiles/{id}/unlock` unlocks a locked profile and clears its failed PIN counts.
 
 The web form picks the Plex user from `GET /api/v1/plex/users` (or None); if Plex is not connected the picker says so and the profile can still be saved without a mapping. `plexUserId` is stored as given, up to 100 characters, and saving never calls Plex.
 
 Names are 1 to 50 characters and unique among active profiles (case-insensitive). Avatars are 1 to 32 lowercase letters, digits or dashes. Age limits are 0 to 21 and a missing limit means no rating limit; titles without a usable rating still follow the unrated policy (see [content policy](content-policy.md)). Weekly allowances are 0 to 1000; see [requests](requests.md#weekly-allowance) for how they are counted.
+
+### Content rules
+
+`blockedGenreIds` and `blockedKeywordIds` are TMDB ids. `allowedOriginalLanguages` are ISO 639-1 codes such as `en`. Codes are stored lowercase. Duplicate ids are stored once, in the order given. At most 40 genres, 100 keywords and 50 languages are accepted; an id must be positive and a language must be two letters. How a missing language, a missing genre list or a missing keyword list is decided is described in [content policy](content-policy.md).
 
 ### Plex label
 

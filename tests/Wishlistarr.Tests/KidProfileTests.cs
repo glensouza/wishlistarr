@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Data;
 
 namespace Wishlistarr.Tests;
@@ -55,6 +56,72 @@ public sealed class KidProfileTests
         Assert.Equal("owl", listed.GetProperty("avatar").GetString());
         Assert.False(listed.TryGetProperty("pinHash", out _));
         Assert.False(listed.TryGetProperty("pin", out _));
+        Assert.Empty(Numbers(listed, "blockedGenreIds"));
+        Assert.Empty(Numbers(listed, "blockedKeywordIds"));
+        Assert.Empty(Texts(listed, "allowedOriginalLanguages"));
+    }
+
+    [Fact]
+    public async Task Content_rules_are_stored_separately_on_each_profile()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        HttpResponseMessage created = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Ada",
+            avatar = "fox",
+            blockedGenreIds = new int[] { 28, 28, 12 },
+            blockedKeywordIds = new int[] { 1721 },
+            allowedOriginalLanguages = new string[] { "EN", "ja" },
+        });
+        JsonElement profile = await created.Content.ReadFromJsonAsync<JsonElement>();
+        int id = profile.GetProperty("id").GetInt32();
+        HttpResponseMessage other = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Ben",
+            avatar = "fox",
+            blockedGenreIds = new[] { 16 },
+        });
+        HttpResponseMessage zero = await parent.PostAsJsonAsync(
+            "/api/v1/kid-profiles",
+            new { name = "Cy", avatar = "fox", blockedGenreIds = new[] { 0 } });
+        HttpResponseMessage word = await parent.PostAsJsonAsync(
+            "/api/v1/kid-profiles",
+            new { name = "Cy", avatar = "fox", allowedOriginalLanguages = new[] { "english" } });
+        HttpResponseMessage tooMany = await parent.PostAsJsonAsync(
+            "/api/v1/kid-profiles",
+            new { name = "Cy", avatar = "fox", blockedGenreIds = Enumerable.Range(1, KidProfiles.MaxBlockedGenres + 1) });
+        HttpResponseMessage edited = await parent.PutAsJsonAsync($"/api/v1/kid-profiles/{id}", new
+        {
+            name = "Ada",
+            avatar = "fox",
+            blockedKeywordIds = new[] { 9 },
+        });
+        List<JsonElement> list = await parent.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid-profiles") ?? [];
+
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal([28, 12], Numbers(profile, "blockedGenreIds"));
+        Assert.Equal([1721], Numbers(profile, "blockedKeywordIds"));
+        Assert.Equal(["en", "ja"], Texts(profile, "allowedOriginalLanguages"));
+        Assert.Equal(HttpStatusCode.Created, other.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, zero.StatusCode);
+        Assert.Contains("positive TMDB ids", await zero.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.BadRequest, word.StatusCode);
+        Assert.Contains("ISO 639-1", await word.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+        Assert.Contains("limited to 40", await tooMany.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        JsonElement updated = await edited.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(HttpStatusCode.OK, edited.StatusCode);
+        Assert.Empty(Numbers(updated, "blockedGenreIds"));
+        Assert.Equal([9], Numbers(updated, "blockedKeywordIds"));
+        Assert.Empty(Texts(updated, "allowedOriginalLanguages"));
+        JsonElement ada = Assert.Single(list, item => item.GetProperty("name").GetString() == "Ada");
+        JsonElement ben = Assert.Single(list, item => item.GetProperty("name").GetString() == "Ben");
+        Assert.Equal([9], Numbers(ada, "blockedKeywordIds"));
+        Assert.Equal([16], Numbers(ben, "blockedGenreIds"));
+        Assert.Empty(Numbers(ben, "blockedKeywordIds"));
+        Assert.Empty(Texts(ben, "allowedOriginalLanguages"));
     }
 
     [Fact]
@@ -322,4 +389,50 @@ public sealed class KidProfileTests
             Assert.Equal(expected, (await client.PostAsync("/api/v1/kid-profiles/1/unlock", null)).StatusCode);
         }
     }
+
+    [Fact]
+    public async Task Keyword_list_stops_at_one_hundred_and_language_list_at_fifty()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        HttpResponseMessage accepted = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Ada",
+            avatar = "fox",
+            blockedKeywordIds = Enumerable.Range(1, 100),
+            allowedOriginalLanguages = Enumerable.Range(0, 50).Select(LanguageCode),
+        });
+        HttpResponseMessage tooManyKeywords = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Bea",
+            avatar = "fox",
+            blockedKeywordIds = Enumerable.Range(1, 101),
+        });
+        HttpResponseMessage tooManyLanguages = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Cy",
+            avatar = "fox",
+            allowedOriginalLanguages = Enumerable.Range(0, 51).Select(LanguageCode),
+        });
+        JsonElement profile = await accepted.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(100, KidProfiles.MaxBlockedKeywords);
+        Assert.Equal(50, KidProfiles.MaxAllowedLanguages);
+        Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        Assert.Equal(100, Numbers(profile, "blockedKeywordIds").Count);
+        Assert.Equal(50, Texts(profile, "allowedOriginalLanguages").Count);
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyKeywords.StatusCode);
+        Assert.Contains("limited to 100", await tooManyKeywords.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.BadRequest, tooManyLanguages.StatusCode);
+        Assert.Contains("limited to 50", await tooManyLanguages.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    private static string LanguageCode(int index) => $"{(char)('a' + (index / 26))}{(char)('a' + (index % 26))}";
+
+    private static List<int> Numbers(JsonElement profile, string name) =>
+        [.. profile.GetProperty(name).EnumerateArray().Select(item => item.GetInt32())];
+
+    private static List<string> Texts(JsonElement profile, string name) =>
+        [.. profile.GetProperty(name).EnumerateArray().Select(item => item.GetString()!)];
 }

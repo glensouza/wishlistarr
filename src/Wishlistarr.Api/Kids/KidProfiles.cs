@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Data;
 
@@ -17,6 +18,9 @@ public sealed class KidProfiles(
     public const int MaxAgeLimit = 21;
     public const int MaxWeeklyAllowance = 1000;
     public const int MaxPlexUserIdLength = 100;
+    public const int MaxBlockedGenres = 40;
+    public const int MaxBlockedKeywords = 100;
+    public const int MaxAllowedLanguages = 50;
 
     public async Task<IReadOnlyList<KidProfile>> ListAsync(CancellationToken ct = default) =>
         await db.KidProfiles.AsNoTracking().Where(profile => profile.ArchivedAt == null).OrderBy(profile => profile.Id).ToListAsync(ct);
@@ -121,6 +125,9 @@ public sealed class KidProfiles(
         profile.TvAgeLimit = input.TvAgeLimit;
         profile.PlexUserId = input.PlexUserId;
         profile.WeeklyAllowance = input.WeeklyAllowance;
+        profile.BlockedGenreIds = [.. input.BlockedGenreIds];
+        profile.BlockedKeywordIds = [.. input.BlockedKeywordIds];
+        profile.AllowedOriginalLanguages = [.. input.AllowedOriginalLanguages];
     }
 
     private static ValidatedProfile? Validate(KidProfileRequest request, out string? error)
@@ -130,6 +137,9 @@ public sealed class KidProfiles(
         string avatar = request.Avatar?.Trim() ?? string.Empty;
         string label = string.IsNullOrWhiteSpace(request.PlexLabel) ? name : request.PlexLabel.Trim();
         string? plexUserId = string.IsNullOrWhiteSpace(request.PlexUserId) ? null : request.PlexUserId.Trim();
+        IReadOnlyList<int> genres = [];
+        IReadOnlyList<int> keywords = [];
+        IReadOnlyList<string> languages = [];
 
         if (name.Length is 0 or > MaxNameLength)
         {
@@ -161,6 +171,21 @@ public sealed class KidProfiles(
             error = $"Plex user ids are limited to {MaxPlexUserIdLength} characters.";
         }
 
+        if (error is null)
+        {
+            TryNormalizeIds(request.BlockedGenreIds, MaxBlockedGenres, "Blocked genres", out genres, out error);
+        }
+
+        if (error is null)
+        {
+            TryNormalizeIds(request.BlockedKeywordIds, MaxBlockedKeywords, "Blocked keywords", out keywords, out error);
+        }
+
+        if (error is null)
+        {
+            TryNormalizeLanguages(request.AllowedOriginalLanguages, out languages, out error);
+        }
+
         return error is null
             ? new ValidatedProfile(
                 name,
@@ -170,7 +195,10 @@ public sealed class KidProfiles(
                 request.MovieAgeLimit,
                 request.TvAgeLimit,
                 plexUserId,
-                request.WeeklyAllowance)
+                request.WeeklyAllowance,
+                genres,
+                keywords,
+                languages)
             : null;
     }
 
@@ -229,7 +257,85 @@ public sealed class KidProfiles(
         int? MovieAgeLimit,
         int? TvAgeLimit,
         string? PlexUserId,
-        int? WeeklyAllowance);
+        int? WeeklyAllowance,
+        IReadOnlyList<int> BlockedGenreIds,
+        IReadOnlyList<int> BlockedKeywordIds,
+        IReadOnlyList<string> AllowedOriginalLanguages);
+
+    private static void TryNormalizeIds(
+        IReadOnlyList<int>? ids,
+        int max,
+        string label,
+        out IReadOnlyList<int> normalized,
+        out string? error)
+    {
+        normalized = [];
+        error = null;
+        if (ids is null || ids.Count == 0)
+        {
+            return;
+        }
+
+        if (ids.Count > max)
+        {
+            error = $"{label} are limited to {max}.";
+            return;
+        }
+
+        List<int> distinct = [];
+        foreach (int id in ids)
+        {
+            if (id <= 0)
+            {
+                error = $"{label} must be positive TMDB ids.";
+                return;
+            }
+
+            if (!distinct.Contains(id))
+            {
+                distinct.Add(id);
+            }
+        }
+
+        normalized = distinct;
+    }
+
+    private static void TryNormalizeLanguages(
+        IReadOnlyList<string>? languages,
+        out IReadOnlyList<string> normalized,
+        out string? error)
+    {
+        normalized = [];
+        error = null;
+        if (languages is null || languages.Count == 0)
+        {
+            return;
+        }
+
+        if (languages.Count > MaxAllowedLanguages)
+        {
+            error = $"Allowed languages are limited to {MaxAllowedLanguages}.";
+            return;
+        }
+
+        List<string> distinct = [];
+        foreach (string? language in languages)
+        {
+            string? code = ContentLanguages.Canonical(language);
+            if (code is null)
+            {
+                error = "Allowed languages must be ISO 639-1 codes.";
+                return;
+            }
+
+            if (!distinct.Contains(code))
+            {
+                distinct.Add(code);
+            }
+        }
+
+        normalized = distinct;
+    }
 }
 
 public sealed record KidProfileRequest(
@@ -241,7 +347,10 @@ public sealed record KidProfileRequest(
     int? TvAgeLimit,
     string? PlexLabel,
     string? PlexUserId,
-    int? WeeklyAllowance);
+    int? WeeklyAllowance,
+    IReadOnlyList<int>? BlockedGenreIds = null,
+    IReadOnlyList<int>? BlockedKeywordIds = null,
+    IReadOnlyList<string>? AllowedOriginalLanguages = null);
 
 public sealed record ProfileOutcome(KidProfile? Profile, int Status, string? Error)
 {

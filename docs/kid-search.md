@@ -18,11 +18,11 @@ Failures answer `502` (TMDB unreachable) or `503` (no API key) with a message th
 
 ## Filtering
 
-Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title), using the profile's age limits.
+Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title). Search results supply TMDB genre ids (`genre_ids`) and the original language. When the profile blocks keywords, each title's keyword ids are read from `GET /movie/{id}/keywords` or `GET /tv/{id}/keywords` in the same lookup pass as its certification. A profile with no keyword blocks does not call that endpoint.
 
-- `Blocked` titles are removed before anything is returned.
-- Titles whose certification cannot be read, because TMDB failed for that title or the lookup did not finish within the budget below, are removed. Unknown never counts as allowed.
-- A title TMDB has no US certification for follows the policy engine: with the default policy it needs approval. It is still returned so the kid can ask for it, but masked: `overview` and `posterUrl` are `null` (the poster path and text never leave the server) and `needsParent` is `true`. Asking for it creates a pending request for a parent. For every other result `needsParent` is `false`.
+- `Blocked` titles are removed before anything is returned. A keyword id on the profile's list blocks the title. A successful keyword lookup that returns none does not.
+- Titles whose certification cannot be read, because TMDB failed for that title or the lookup did not finish within the budget below, are removed. The same applies to a keyword lookup when the profile has keyword blocks. Unknown never counts as allowed.
+- A title TMDB has no US certification for follows the policy engine: with the default policy it needs approval. A title with no genre ids does too, when the profile blocks genres. It is still returned so the kid can ask for it, but masked: `overview` and `posterUrl` are `null` (the poster path and text never leave the server) and `needsParent` is `true`. Asking for it creates a pending request for a parent. For every other result `needsParent` is `false`.
 
 A lookup that fails is logged at debug level with the title it was for, and a search that runs out of time logs a warning.
 
@@ -31,9 +31,9 @@ A lookup that fails is logged at debug level with the title it was for, and a se
 | Step | Budget |
 | --- | --- |
 | Warm cache (search page and every certification cached) | target under 100 ms of server time |
-| Cold cache, one page of 20 titles | about 1 TMDB search round trip plus 3 rounds of 8 parallel certification lookups; target under 2 s |
-| Hard limit for certification lookups | 3 s; titles still unresolved are dropped |
+| Cold cache, one page of 20 titles | about 1 TMDB search round trip plus 3 rounds of 8 parallel certification lookups; target under 2 s. Keyword lookups, when the profile has them, run in those same rounds |
+| Hard limit for certification and keyword lookups | 3 s; titles still unresolved are dropped |
 
-The 3 s limit covers the certification lookups only. The TMDB search call itself is not bounded by it; it follows the TMDB client's own HTTP timeout and retries.
+The 3 s limit covers the certification lookups and, when the profile blocks keywords, the keyword lookups. The TMDB search call itself is not bounded by it; it follows the TMDB client's own HTTP timeout and retries.
 
-Certifications are looked up concurrently, at most 8 at a time, through the TMDB client's cache: a title is fetched once and then cached for 7 days, search pages for 10 minutes, and failed lookups are not cached so they are retried on the next search. The browser waits 300 ms after the last key press before searching and cancels the request it no longer needs, so a fast typist sends one search per pause rather than one per letter.
+Certifications are looked up concurrently, at most 8 at a time, through the TMDB client's cache. A certification is fetched once and then cached for 7 days, search pages for 10 minutes, and keywords for 12 hours. Failed lookups are not cached, so they are retried on the next search. When the profile blocks keywords, each title's keyword lookup is part of that same pass and the same limit of 8. The browser waits 300 ms after the last key press before searching and cancels the request it no longer needs, so a fast typist sends one search per pause rather than one per letter.

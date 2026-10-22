@@ -20,6 +20,12 @@ public sealed class KidProfile
 
     public int? WeeklyAllowance { get; set; }
 
+    public List<int> BlockedGenreIds { get; set; } = [];
+
+    public List<int> BlockedKeywordIds { get; set; } = [];
+
+    public List<string> AllowedOriginalLanguages { get; set; } = [];
+
     public int FailedPinCount { get; set; }
 
     public DateTimeOffset? LastFailedPinAt { get; set; }

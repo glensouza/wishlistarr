@@ -63,18 +63,26 @@ public sealed partial class KidSearch(
         TmdbPage<TmdbSearchResult> found = await tmdb.SearchAsync(query, page: page, ct: ct);
         List<Candidate> candidates = [.. found.Results.Select(ToCandidate).OfType<Candidate>().DistinctBy(item => item.Key)];
 
-        ContentPolicy policy = ContentPolicy.FromAgeLimits(profile.MovieAgeLimit, profile.TvAgeLimit);
-        ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>> certifications = await this.LookUpAsync(candidates, ct);
+        ContentPolicy policy = ContentPolicy.ForProfile(
+            profile.MovieAgeLimit,
+            profile.TvAgeLimit,
+            profile.BlockedGenreIds,
+            profile.BlockedKeywordIds,
+            profile.AllowedOriginalLanguages);
+        bool keywords = policy.BlockedKeywordIds.Count > 0;
+        ConcurrentDictionary<TitleKey, KnownTitle> known = await this.LookUpAsync(candidates, keywords, ct);
 
         List<KidSearchItem> results = [];
         foreach (Candidate candidate in candidates)
         {
-            if (!certifications.TryGetValue(candidate.Key, out IReadOnlyList<RegionCertification>? known))
+            if (!known.TryGetValue(candidate.Key, out KnownTitle? title))
             {
                 continue;
             }
 
-            ContentDecision decision = ContentPolicyEngine.Default.Evaluate(new ContentTitle(candidate.Key, known), policy);
+            ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
+                new ContentTitle(candidate.Key, title.Certifications, candidate.GenreIds, title.KeywordIds, candidate.OriginalLanguage),
+                policy);
             if (decision.Outcome != ContentOutcome.Blocked)
             {
                 results.Add(await this.ToItemAsync(candidate, decision.Outcome == ContentOutcome.NeedsApproval, ct));
@@ -105,7 +113,9 @@ public sealed partial class KidSearch(
             title,
             date is { Length: >= 4 } && date[..4].All(char.IsAsciiDigit) ? date[..4] : null,
             string.IsNullOrEmpty(overview) ? null : overview[..Math.Min(overview.Length, MaxOverviewLength)],
-            PosterUrl(result.PosterPath));
+            PosterUrl(result.PosterPath),
+            result.GenreIds,
+            result.OriginalLanguage);
     }
 
     private static string? PosterUrl(string? path)
@@ -114,11 +124,12 @@ public sealed partial class KidSearch(
         return TmdbImageProxy.IsAllowed(PosterSize, file) ? $"{PosterRoute}/{PosterSize}/{file}" : null;
     }
 
-    private async Task<ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>>> LookUpAsync(
+    private async Task<ConcurrentDictionary<TitleKey, KnownTitle>> LookUpAsync(
         IReadOnlyList<Candidate> candidates,
+        bool keywords,
         CancellationToken ct)
     {
-        ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>> known = [];
+        ConcurrentDictionary<TitleKey, KnownTitle> known = [];
         using CancellationTokenSource deadline = new(LookupBudget, time);
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
         try
@@ -132,9 +143,17 @@ public sealed partial class KidSearch(
                     {
                         TmdbMediaType type = candidate.Key.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
                         TmdbCertification? certification = await tmdb.GetCertificationAsync(type, candidate.Key.TmdbId, [RatingScale.UsRegion], token);
-                        known[candidate.Key] = certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)];
+                        IReadOnlyList<int>? keywordIds = null;
+                        if (keywords)
+                        {
+                            keywordIds = [.. (await tmdb.GetKeywordsAsync(type, candidate.Key.TmdbId, token)).Select(item => item.Id)];
+                        }
+
+                        known[candidate.Key] = new KnownTitle(
+                            certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
+                            keywordIds);
                     }
-                    catch (Exception ex) when (ex is TmdbException or HttpRequestException)
+                    catch (Exception ex) when (ex is TmdbException or HttpRequestException || (ex is TaskCanceledException && !token.IsCancellationRequested))
                     {
                         this.LogLookupFailed(ex, candidate.Key.Kind, candidate.Key.TmdbId);
                     }
@@ -159,10 +178,10 @@ public sealed partial class KidSearch(
             await this.AvailabilityAsync(candidate.Key, ct),
             needsParent);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Certification lookup failed for {Kind} {TmdbId}")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Certification or keyword lookup failed for {Kind} {TmdbId}")]
     private partial void LogLookupFailed(Exception exception, MediaKind kind, int tmdbId);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Certification lookups did not finish within {Seconds} s; unresolved titles were left out")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Certification and keyword lookups did not finish within {Seconds} s; unresolved titles were left out")]
     private partial void LogBudgetExceeded(double seconds);
 
     private async Task<Availability?> AvailabilityAsync(TitleKey title, CancellationToken ct)
@@ -179,5 +198,14 @@ public sealed partial class KidSearch(
         return null;
     }
 
-    private sealed record Candidate(TitleKey Key, string Title, string? Year, string? Overview, string? PosterUrl);
+    private sealed record Candidate(
+        TitleKey Key,
+        string Title,
+        string? Year,
+        string? Overview,
+        string? PosterUrl,
+        IReadOnlyList<int>? GenreIds,
+        string? OriginalLanguage);
+
+    private sealed record KnownTitle(IReadOnlyList<RegionCertification> Certifications, IReadOnlyList<int>? KeywordIds);
 }

@@ -17,9 +17,10 @@ public sealed class TmdbClientTests
         await client.DiscoverAsync(TmdbMediaType.Movie, new TmdbDiscoverQuery(Genres: "28"));
         await client.GetTrendingAsync(TmdbMediaType.Movie);
         await client.GetDetailsAsync(TmdbMediaType.Movie, 603);
+        await client.GetKeywordsAsync(TmdbMediaType.Movie, 603);
         await client.GetCertificationAsync(TmdbMediaType.Movie, 603, ["US"]);
 
-        Assert.Equal(6, harness.Server.Requests.Count);
+        Assert.Equal(7, harness.Server.Requests.Count);
         Assert.All(harness.Server.Requests, request => Assert.Equal("false", request.Query["include_adult"]));
     }
 
@@ -46,6 +47,8 @@ public sealed class TmdbClientTests
         TmdbSearchResult result = Assert.Single(page.Results);
         Assert.Equal(603, result.Id);
         Assert.Equal("The Matrix", result.Title);
+        Assert.Equal([28, 878], result.GenreIds);
+        Assert.Equal("en", result.OriginalLanguage);
         Assert.Equal("matrix", harness.Server.Requests[0].Query["query"]);
     }
 
@@ -62,7 +65,9 @@ public sealed class TmdbClientTests
         TmdbWatchProviders providers = await client.GetWatchProvidersAsync(TmdbMediaType.Movie, 603);
 
         Assert.Equal(136, details.Runtime);
+        Assert.Equal(28, Assert.Single(details.Genres!).Id);
         Assert.Equal("Action", Assert.Single(details.Genres!).Name);
+        Assert.Equal("en", details.OriginalLanguage);
         Assert.Equal("Neo", Assert.Single(credits.Cast).Character);
         Assert.Equal("Director", Assert.Single(credits.Crew).Job);
         Assert.Equal("YouTube", Assert.Single(videos.Results).Site);
@@ -134,6 +139,27 @@ public sealed class TmdbClientTests
         Assert.Equal(["Language", "Violence"], us?.Descriptors);
         Assert.Equal("DE", fallback?.Region);
         Assert.Equal("16", fallback?.Rating);
+    }
+
+    [Fact]
+    public async Task Movie_keywords_and_tv_keywords_use_different_fields_and_are_cached()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+
+        IReadOnlyList<TmdbKeyword> movie = await harness.Client.GetKeywordsAsync(TmdbMediaType.Movie, 603);
+        IReadOnlyList<TmdbKeyword> show = await harness.Client.GetKeywordsAsync(TmdbMediaType.Tv, 1399);
+        await harness.Client.GetKeywordsAsync(TmdbMediaType.Movie, 603);
+        harness.Server.SetBody("/3/movie/604/keywords", """{"id":604,"keywords":[]}""");
+        harness.Server.SetBody("/3/movie/605/keywords", """{"id":605,"results":[{"id":99,"name":"wrong field"}]}""");
+        harness.Server.SetBody("/3/tv/1400/keywords", """{"id":1400,"keywords":[{"id":99,"name":"wrong field"}]}""");
+
+        Assert.Equal([(818, "based on novel or book"), (1721, "fight")], movie.Select(item => (item.Id, item.Name)));
+        Assert.Equal([(818, "based on novel or book"), (41521, "kingdom"), (12554, "dragon")], show.Select(item => (item.Id, item.Name)));
+        Assert.Equal(1, harness.Server.Count("/3/movie/603/keywords"));
+        Assert.Equal(1, harness.Server.Count("/3/tv/1399/keywords"));
+        Assert.Empty(await harness.Client.GetKeywordsAsync(TmdbMediaType.Movie, 604));
+        Assert.Empty(await harness.Client.GetKeywordsAsync(TmdbMediaType.Movie, 605));
+        Assert.Empty(await harness.Client.GetKeywordsAsync(TmdbMediaType.Tv, 1400));
     }
 
     [Fact]
