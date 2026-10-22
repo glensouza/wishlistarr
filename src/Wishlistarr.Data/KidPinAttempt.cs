@@ -8,11 +8,17 @@ public sealed class KidPinAttempt
 
     public KidProfile? KidProfile { get; set; }
 
-    public required string DeviceHash { get; set; }
+    public string? DeviceHash { get; set; }
+
+    public int? KidDeviceId { get; set; }
+
+    public KidDevice? KidDevice { get; set; }
 
     public int FailedCount { get; set; }
 
     public DateTimeOffset LastFailedAt { get; set; }
 
     public DateTimeOffset NextAttemptAt { get; set; }
+
+    public DateTimeOffset? LockedAt { get; set; }
 }

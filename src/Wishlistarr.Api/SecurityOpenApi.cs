@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Security;
 
 namespace Wishlistarr.Api;
@@ -9,6 +10,7 @@ public static class SecurityOpenApi
 {
     public const string ApiKeySchemeName = "ApiKey";
     public const string SessionSchemeName = "ParentSession";
+    public const string KidDeviceSchemeName = "KidDevice";
 
     public static OpenApiOptions AddSecuritySchemes(this OpenApiOptions options)
     {
@@ -30,6 +32,13 @@ public static class SecurityOpenApi
                 Name = SecuritySetup.CookieName,
                 Description = $"Parent session cookie. Writes also need the {SecuritySetup.AntiforgeryHeaderName} header.",
             };
+            document.Components.SecuritySchemes[KidDeviceSchemeName] = new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.ApiKey,
+                In = ParameterLocation.Cookie,
+                Name = KidDevices.CookieName,
+                Description = "Device cookie set when a browser is paired as a kid device.",
+            };
             return Task.CompletedTask;
         });
 
@@ -47,6 +56,16 @@ public static class SecurityOpenApi
                 operation.Security.Add(new OpenApiSecurityRequirement
                 {
                     [new OpenApiSecuritySchemeReference(SessionSchemeName, context.Document)] = [],
+                });
+            }
+
+            if (metadata.OfType<IAuthorizeData>().Any(data => data.Policy == Policies.KidDevice)
+                && !metadata.OfType<IAllowAnonymous>().Any())
+            {
+                operation.Security ??= [];
+                operation.Security.Add(new OpenApiSecurityRequirement
+                {
+                    [new OpenApiSecuritySchemeReference(KidDeviceSchemeName, context.Document)] = [],
                 });
             }
 

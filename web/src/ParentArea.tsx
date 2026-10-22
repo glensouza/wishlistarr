@@ -1,37 +1,73 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { resetAntiforgery } from './api'
+import { useAuthStatus } from './authStatus'
 import { useT } from './i18n'
+import { useKidSession } from './kid/KidSession'
+import { parentSignOut } from './kidDevices'
+import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
+import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
-
-type AuthStatus = { setupRequired: boolean; principalType: string | null }
 
 export default function ParentArea() {
   const t = useT()
-  const [status, setStatus] = useState<AuthStatus | null>(null)
-  const [version, setVersion] = useState(0)
+  const navigate = useNavigate()
+  const { status, refresh } = useAuthStatus()
+  const { clear } = useKidSession()
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let current = true
-    fetch('/api/v1/auth/status')
-      .then((response) => response.json() as Promise<AuthStatus>)
-      .then(
-        (loaded) => current && setStatus(loaded),
-        () => current && setStatus(null),
+  async function signOut() {
+    setError(null)
+    try {
+      await parentSignOut()
+      resetAntiforgery()
+      refresh()
+      if (status?.kidDevice) navigate('/')
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : t('app.somethingWrong'),
       )
-    return () => {
-      current = false
     }
-  }, [version])
+  }
+
+  const isParent = status?.principalType === 'Parent'
+  const kidDevice = status?.kidDevice ?? null
 
   return (
     <>
       <h1>{t('parent.title')}</h1>
-      {status?.principalType === 'Parent' && <KidProfilesAdmin />}
-      {status !== null && status.principalType !== 'Parent' && (
-        <ParentSignIn
-          setupRequired={status.setupRequired}
-          onSignedIn={() => setVersion((current) => current + 1)}
-        />
+      {isParent && (
+        <>
+          <KidProfilesAdmin />
+          <KidDevicesAdmin />
+          {error && <p role="alert">{error}</p>}
+          <button type="button" onClick={() => void signOut()}>
+            {kidDevice ? t('parent.returnToKidMode') : t('parent.signOut')}
+          </button>
+        </>
+      )}
+      {status !== null && !isParent && kidDevice && (
+        <>
+          <ParentSignIn
+            setupRequired={false}
+            kidDeviceName={kidDevice.name}
+            onSignedIn={() => {
+              clear()
+              refresh()
+            }}
+          />
+          <Link to="/">{t('exit.back')}</Link>
+        </>
+      )}
+      {status !== null && !isParent && !kidDevice && (
+        <>
+          <ParentSignIn
+            setupRequired={status.setupRequired}
+            onSignedIn={refresh}
+          />
+          {!status.setupRequired && <PairDevice />}
+        </>
       )}
     </>
   )

@@ -19,8 +19,7 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         "/api/v1/auth/antiforgery",
         "/api/v1/auth/setup",
         "/api/v1/auth/login",
-        "/api/v1/kid/profiles",
-        "/api/v1/kid/signin",
+        "/api/v1/kid/pair",
         "/api/v1/webhooks/{source}/{token}",
         "/api/{**path}",
     ];
@@ -65,13 +64,42 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
             if (pattern.StartsWith("/api", StringComparison.Ordinal)
                 && !PublicApiRoutes.Contains(pattern)
                 && !IsParentOnly(endpoint)
-                && !IsKidOnly(endpoint))
+                && !IsKidOnly(endpoint)
+                && !IsKidDeviceOnly(endpoint))
             {
                 unprotected.Add(pattern);
             }
         }
 
         Assert.Empty(unprotected);
+    }
+
+    [Fact]
+    public async Task Unpaired_browsers_are_rejected_on_every_paired_device_route()
+    {
+        await factory.EnsureParentAsync();
+        HttpClient anonymous = factory.CreateClient();
+        HttpClient forged = factory.CreateClient();
+        forged.DefaultRequestHeaders.Add("Cookie", "wishlistarr.device=1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+
+        List<(string Method, string Path)> routes = [.. this.GetRoutes(IsKidDeviceOnly)];
+        List<string> leaks = [];
+        foreach ((string method, string path) in routes)
+        {
+            foreach (HttpClient client in new[] { anonymous, forged })
+            {
+                HttpResponseMessage response = await client.SendAsync(CreateRequest(method, path));
+                if (response.StatusCode != HttpStatusCode.Unauthorized)
+                {
+                    leaks.Add($"{method} {path} returned {(int)response.StatusCode} without a paired device");
+                }
+            }
+        }
+
+        Assert.Contains(("GET", "/api/v1/kid/profiles"), routes);
+        Assert.Contains(("POST", "/api/v1/kid/signin"), routes);
+        Assert.Contains(("POST", "/api/v1/kid/exit"), routes);
+        Assert.Empty(leaks);
     }
 
     [Fact]
@@ -93,9 +121,11 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         Assert.False((await authorization.AuthorizeAsync(anonymous, Policies.Parent)).Succeeded);
     }
 
-    private IEnumerable<(string Method, string Path)> GetParentRoutes()
+    private IEnumerable<(string Method, string Path)> GetParentRoutes() => this.GetRoutes(IsParentOnly);
+
+    private IEnumerable<(string Method, string Path)> GetRoutes(Func<Endpoint, bool> filter)
     {
-        foreach (RouteEndpoint endpoint in this.GetRouteEndpoints().Where(IsParentOnly))
+        foreach (RouteEndpoint endpoint in this.GetRouteEndpoints().Where(filter))
         {
             string path = RouteParameter().Replace(Pattern(endpoint), "x");
             IReadOnlyList<string> methods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? ["GET"];
@@ -115,6 +145,10 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
 
     private static bool IsKidOnly(Endpoint endpoint) =>
         endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(data => data.Policy == Policies.Kid)
+        && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
+
+    private static bool IsKidDeviceOnly(Endpoint endpoint) =>
+        endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(data => data.Policy == Policies.KidDevice)
         && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
 
     private static string Pattern(RouteEndpoint endpoint) => "/" + endpoint.RoutePattern.RawText?.TrimStart('/');

@@ -32,6 +32,8 @@ Plain HTTP is skipped entirely when the server requires secure connections. With
 
 When the saved connection stops answering, the next request runs the selection again and saves whichever connection answers.
 
+The addresses plex.tv lists for a server are controlled by whoever owns that server. When the linked account only has access to a shared server, the owner decides which connections appear, so a shared server can be unreachable even though the account can see it.
+
 Server addresses only come from plex.tv for the chosen server. They must be plain `http` or `https` base addresses with no credentials, path, query or fragment, redirects are not followed, and the generic `PUT /api/v1/settings/{key}` endpoint refuses every `plex.` key. There is no way to enter a server address by hand.
 
 ## Settings and secrets
@@ -42,7 +44,7 @@ The account token (`plex.token`) and the server access token (`plex.server_token
 
 - `POST /api/v1/settings/plex/test` returns `{ "valid", "message", "serverName", "version" }`. It reports a missing link, a missing server or a rejected token as `valid: false`, and answers `502` when Plex cannot be reached.
 - `GET /api/v1/plex/libraries` lists the server's libraries with their id, title, type (`movie`, `show`, `music`, `photo` or `other`) and agent.
-- `GET /api/v1/plex/users` lists Plex Home users and friends, each once, with `isHomeUser`, `isManaged` and `isAdmin`. This list is used later to map kid profiles to Plex users.
+- `GET /api/v1/plex/users` lists Plex Home users (`/api/home/users`) and users the server is shared with (`/api/users`), each once, with `isHomeUser`, `isManaged` and `isAdmin`. This list is used later to map kid profiles to Plex users.
 
 Endpoints that need a linked account or a selected server answer `409` until that is done.
 

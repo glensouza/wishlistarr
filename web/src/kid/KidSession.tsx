@@ -17,12 +17,14 @@ type SessionValue = {
   session: SessionState
   signedIn: (name: string) => void
   signOut: () => Promise<void>
+  clear: () => void
 }
 
 const KidSessionContext = createContext<SessionValue>({
   session: { status: 'out' },
   signedIn: () => {},
   signOut: async () => {},
+  clear: () => {},
 })
 
 export function KidSessionProvider({ children }: { children: ReactNode }) {
@@ -53,9 +55,11 @@ export function KidSessionProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const clear = useCallback(() => setSession({ status: 'out' }), [])
+
   const value = useMemo(
-    () => ({ session, signedIn, signOut }),
-    [session, signedIn, signOut],
+    () => ({ session, signedIn, signOut, clear }),
+    [session, signedIn, signOut, clear],
   )
   return (
     <KidSessionContext.Provider value={value}>

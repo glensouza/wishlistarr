@@ -18,13 +18,21 @@ public sealed class KidOptions
 
     public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromDays(7);
 
+    public TimeSpan PairingCodeLifetime { get; set; } = TimeSpan.FromMinutes(10);
+
+    public TimeSpan DeviceCookieLifetime { get; set; } = TimeSpan.FromDays(365);
+
     public bool IsValid() =>
         this.BackoffBase > TimeSpan.Zero
         && this.BackoffMax >= this.BackoffBase
         && this.FailureResetAfter > TimeSpan.Zero
         && this.NotifyThreshold > 0
         && this.LockThreshold >= this.NotifyThreshold
-        && this.SessionLifetime > TimeSpan.Zero;
+        && this.SessionLifetime > TimeSpan.Zero
+        && this.PairingCodeLifetime > TimeSpan.Zero
+        && this.PairingCodeLifetime <= TimeSpan.FromHours(1)
+        && this.DeviceCookieLifetime > TimeSpan.Zero
+        && this.DeviceCookieLifetime <= TimeSpan.FromDays(400);
 
     public TimeSpan GetBackoff(int failedCount)
     {

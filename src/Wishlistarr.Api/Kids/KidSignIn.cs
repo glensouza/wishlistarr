@@ -19,12 +19,12 @@ public sealed class KidSignIn(
     private static readonly KidProfile DummyProfile = new() { Name = string.Empty, Avatar = string.Empty, PlexLabel = string.Empty };
     private static readonly string DummyHash = new PasswordHasher<KidProfile>().HashPassword(DummyProfile, DummyPin);
 
-    public async Task<KidSignInResult> VerifyAsync(int profileId, string? pin, string deviceHash, CancellationToken ct = default)
+    public async Task<KidSignInResult> VerifyAsync(int profileId, string? pin, int deviceId, CancellationToken ct = default)
     {
         await AttemptLock.WaitAsync(ct);
         try
         {
-            return await this.VerifyLockedAsync(profileId, pin, deviceHash, ct);
+            return await this.VerifyLockedAsync(profileId, pin, deviceId, ct);
         }
         finally
         {
@@ -32,24 +32,28 @@ public sealed class KidSignIn(
         }
     }
 
-    private async Task<KidSignInResult> VerifyLockedAsync(int profileId, string? pin, string deviceHash, CancellationToken ct)
+    private async Task<KidSignInResult> VerifyLockedAsync(int profileId, string? pin, int deviceId, CancellationToken ct)
     {
         KidOptions config = options.Value;
         DateTimeOffset now = time.GetUtcNow();
-        KidProfile? profile = await db.KidProfiles.FirstOrDefaultAsync(row => row.Id == profileId && row.ArchivedAt == null, ct);
+        KidProfile? profile = await db.KidProfiles.FirstOrDefaultAsync(
+            row => row.Id == profileId
+                && row.ArchivedAt == null
+                && db.KidDeviceProfiles.Any(assignment => assignment.KidDeviceId == deviceId && assignment.KidProfileId == row.Id),
+            ct);
         if (profile is null)
         {
             hasher.VerifyHashedPassword(DummyProfile, DummyHash, pin ?? DummyPin);
             return KidSignInResult.Invalid();
         }
 
-        if (profile.LockedAt is not null)
+        KidPinAttempt? attempt = await db.KidPinAttempts
+            .FirstOrDefaultAsync(row => row.KidProfileId == profile.Id && row.KidDeviceId == deviceId, ct);
+        if (profile.LockedAt is not null || attempt?.LockedAt is not null)
         {
             return KidSignInResult.ProfileLocked();
         }
 
-        KidPinAttempt? attempt = await db.KidPinAttempts
-            .FirstOrDefaultAsync(row => row.KidProfileId == profile.Id && row.DeviceHash == deviceHash, ct);
         if (attempt is not null && attempt.NextAttemptAt > now)
         {
             return KidSignInResult.Backoff(attempt.NextAttemptAt);
@@ -78,15 +82,13 @@ public sealed class KidSignIn(
                 db.KidPinAttempts.Remove(attempt);
             }
 
-            profile.FailedPinCount = 0;
-            profile.LastFailedPinAt = null;
             await db.SaveChangesAsync(ct);
             return KidSignInResult.Success(profile);
         }
 
         if (attempt is null)
         {
-            attempt = new KidPinAttempt { KidProfileId = profile.Id, DeviceHash = deviceHash };
+            attempt = new KidPinAttempt { KidProfileId = profile.Id, KidDeviceId = deviceId };
             db.KidPinAttempts.Add(attempt);
         }
         else if (now - attempt.LastFailedAt >= config.FailureResetAfter)
@@ -94,38 +96,31 @@ public sealed class KidSignIn(
             attempt.FailedCount = 0;
         }
 
-        if (profile.LastFailedPinAt is DateTimeOffset lastProfileFailure && now - lastProfileFailure >= config.FailureResetAfter)
-        {
-            profile.FailedPinCount = 0;
-        }
-
         attempt.FailedCount++;
         attempt.LastFailedAt = now;
         attempt.NextAttemptAt = now + config.GetBackoff(attempt.FailedCount);
-        profile.FailedPinCount++;
-        profile.LastFailedPinAt = now;
-        bool locked = profile.FailedPinCount >= config.LockThreshold;
+        bool locked = attempt.FailedCount >= config.LockThreshold;
         if (locked)
         {
-            profile.LockedAt = now;
+            attempt.LockedAt = now;
         }
 
         await db.SaveChangesAsync(ct);
 
-        if (locked)
+        if (locked || attempt.FailedCount == config.NotifyThreshold)
         {
+            string deviceName = await db.KidDevices
+                .Where(device => device.Id == deviceId)
+                .Select(device => device.Name)
+                .FirstOrDefaultAsync(ct) ?? "a device that has since been removed";
             await notifier.NotifyAsync(
-                new ParentNotification(
-                    ParentNotificationKinds.ProfileLocked,
-                    $"{profile.Name} was locked after {profile.FailedPinCount} wrong PINs. Unlock the profile to let them sign in again."),
-                ct);
-        }
-        else if (attempt.FailedCount == config.NotifyThreshold)
-        {
-            await notifier.NotifyAsync(
-                new ParentNotification(
-                    ParentNotificationKinds.PinFailures,
-                    $"{attempt.FailedCount} wrong PINs in a row were entered for {profile.Name} on one device."),
+                locked
+                    ? new ParentNotification(
+                        ParentNotificationKinds.ProfileLocked,
+                        $"{profile.Name} was locked on {deviceName} after {attempt.FailedCount} wrong PINs. Unlock the profile to let them sign in there again.")
+                    : new ParentNotification(
+                        ParentNotificationKinds.PinFailures,
+                        $"{attempt.FailedCount} wrong PINs in a row were entered for {profile.Name} on {deviceName}."),
                 ct);
         }
 

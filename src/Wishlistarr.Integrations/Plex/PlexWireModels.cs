@@ -35,12 +35,7 @@ internal sealed record PlexResourceConnection(
     [property: JsonPropertyName("relay")] bool Relay,
     [property: JsonPropertyName("IPv6")] bool IPv6);
 
-internal sealed record PlexFriend(
-    [property: JsonPropertyName("id")] long Id,
-    [property: JsonPropertyName("title")] string? Title,
-    [property: JsonPropertyName("username")] string? Username,
-    [property: JsonPropertyName("restricted")] bool Restricted,
-    [property: JsonPropertyName("home")] bool Home);
+internal sealed record PlexFriend(long Id, string? Title, string? Username, bool Restricted, bool Home);
 
 internal sealed record PlexHomeUser(long Id, string? Title, string? Username, bool Restricted, bool Admin);
 

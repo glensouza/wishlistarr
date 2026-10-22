@@ -51,19 +51,46 @@ internal sealed class PlexTvClient(IHttpClientFactory factory, IOptions<PlexOpti
 
     public async Task<IReadOnlyList<PlexFriend>> GetFriendsAsync(string clientIdentifier, string token, CancellationToken ct)
     {
-        using HttpRequestMessage request = this.Create(HttpMethod.Get, "api/v2/friends", clientIdentifier, token);
-        using HttpResponseMessage response = await this.SendAsync(request, ct);
-        return await PlexHttp.ReadAsync<List<PlexFriend>>(response, Service, ct);
+        XDocument? document = await this.GetXmlAsync("api/users", clientIdentifier, token, ct);
+        return
+        [
+            .. (document?.Root?.Elements("User") ?? [])
+                .Select(user => (User: user, Id: ParseLong((string?)user.Attribute("id"))))
+                .Where(entry => entry.Id > 0)
+                .Select(entry => new PlexFriend(
+                    entry.Id,
+                    (string?)entry.User.Attribute("title"),
+                    (string?)entry.User.Attribute("username"),
+                    IsTrue((string?)entry.User.Attribute("restricted")),
+                    IsTrue((string?)entry.User.Attribute("home")))),
+        ];
     }
 
     public async Task<IReadOnlyList<PlexHomeUser>> GetHomeUsersAsync(string clientIdentifier, string token, CancellationToken ct)
     {
-        using HttpRequestMessage request = this.Create(HttpMethod.Get, "api/home/users", clientIdentifier, token);
+        XDocument? document = await this.GetXmlAsync("api/home/users", clientIdentifier, token, ct);
+        return
+        [
+            .. (document?.Root?.Elements("User") ?? [])
+                .Select(user => (User: user, Id: ParseLong((string?)user.Attribute("id"))))
+                .Where(entry => entry.Id > 0)
+                .Select(entry => new PlexHomeUser(
+                    entry.Id,
+                    (string?)entry.User.Attribute("title"),
+                    (string?)entry.User.Attribute("username"),
+                    IsTrue((string?)entry.User.Attribute("restricted")),
+                    IsTrue((string?)entry.User.Attribute("admin")))),
+        ];
+    }
+
+    private async Task<XDocument?> GetXmlAsync(string path, string clientIdentifier, string token, CancellationToken ct)
+    {
+        using HttpRequestMessage request = this.Create(HttpMethod.Get, path, clientIdentifier, token);
         request.Headers.Accept.Clear();
         using HttpResponseMessage response = await this.SendAsync(request, ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            return [];
+            return null;
         }
 
         PlexHttp.EnsureSuccess(response, Service);
@@ -74,19 +101,7 @@ internal sealed class PlexTvClient(IHttpClientFactory factory, IOptions<PlexOpti
             DtdProcessing = DtdProcessing.Prohibit,
             XmlResolver = null,
         });
-        XDocument document = await XDocument.LoadAsync(reader, LoadOptions.None, ct);
-        return
-        [
-            .. (document.Root?.Elements("User") ?? [])
-                .Select(user => (User: user, Id: ParseLong((string?)user.Attribute("id"))))
-                .Where(entry => entry.Id > 0)
-                .Select(entry => new PlexHomeUser(
-                    entry.Id,
-                    (string?)entry.User.Attribute("title"),
-                    (string?)entry.User.Attribute("username"),
-                    IsTrue((string?)entry.User.Attribute("restricted")),
-                    IsTrue((string?)entry.User.Attribute("admin")))),
-        ];
+        return await XDocument.LoadAsync(reader, LoadOptions.None, ct);
     }
 
     private static long ParseLong(string? value) =>

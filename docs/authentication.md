@@ -1,8 +1,8 @@
 # Authentication
 
-Wishlistarr has two kinds of signed-in principal: a **Parent** and a **Kid**. They are separate roles checked by separate authorization policies, and a principal that carries both roles is rejected by both. Every endpoint under `/api` is either public, requires the Parent policy, or (the few Kid session routes) requires the Kid policy; a test walks the endpoint list to keep it that way and to confirm a Kid principal gets `403` on every parent route.
+Wishlistarr has two kinds of signed-in principal: a **Parent** and a **Kid**. They are separate roles checked by separate authorization policies, and a principal that carries both roles is rejected by both. Every endpoint under `/api` is either public, requires the Parent policy, requires the Kid policy (the kid session routes) or requires the KidDevice policy (the profile picker, kid sign-in and leaving kid mode, which need a paired device); a test walks the endpoint list to keep it that way, to confirm a Kid principal gets `403` on every parent route and to confirm a browser without a paired device gets `401` on every KidDevice route.
 
-Public endpoints: `GET /api/health`, `GET /api/v1/auth/status`, `GET /api/v1/auth/antiforgery`, `POST /api/v1/auth/setup`, `POST /api/v1/auth/login`, `GET /api/v1/kid/profiles` (the profile picker) and `POST /api/v1/kid/signin`. Kid sessions and PIN limits are described in [kid-profiles.md](kid-profiles.md).
+Public endpoints: `GET /api/health`, `GET /api/v1/auth/status`, `GET /api/v1/auth/antiforgery`, `POST /api/v1/auth/setup`, `POST /api/v1/auth/login` and `POST /api/v1/kid/pair`. Kid sessions and PIN limits are described in [kid-profiles.md](kid-profiles.md), and device pairing in [kid-devices.md](kid-devices.md).
 
 ## First run
 
@@ -65,4 +65,4 @@ Risks to weigh before turning it on:
 - Anyone on a trusted network gets full parent access: kids on the home Wi-Fi, guests, and any compromised device. Pick ranges that only parent devices use, such as a separate VLAN, rather than the whole home network.
 - If a reverse proxy sits in front of Wishlistarr and is not listed in `KnownProxies`, every request appears to come from the proxy's address. If that address is inside a trusted network, the whole internet gets parent access.
 - Only the last `X-Forwarded-For` entry, the one added by the listed proxy, is used. Chains of several proxies are not supported.
-- Any request from a trusted address that carries no API key or session cookie is treated as a parent, so a kid's device on a trusted range has parent access.
+- Any request from a trusted address that carries no API key or session cookie is treated as a parent, so an unpaired kid's browser on a trusted range has parent access. Browsers paired as kid devices never get the bypass: a request carrying the `wishlistarr.device` cookie is not treated as a parent, so leaving kid mode on a paired device always needs the parent's password (see [kid-devices.md](kid-devices.md)).

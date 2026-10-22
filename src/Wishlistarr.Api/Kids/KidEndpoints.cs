@@ -15,22 +15,45 @@ public static class KidEndpoints
     {
         RouteGroupBuilder kid = app.MapGroup("/api/v1/kid").WithTags("Kid");
 
-        kid.MapGet("/profiles", async (KidProfiles profiles, CancellationToken ct) =>
-            (await profiles.ListAsync(ct)).Select(profile => new KidPickerEntry(
+        kid.MapPost("/pair", async (KidPairRequest? request, HttpContext context, KidDevices devices, CancellationToken ct) =>
+        {
+            KidDevice? device = await devices.RedeemAsync(context, request?.Code, ct);
+            return device is null
+                ? Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "That pairing code is not valid or has expired.")
+                : Results.Ok(new KidDeviceStatus(device.Name));
+        })
+            .AllowAnonymous()
+            .RequireRateLimiting(SecuritySetup.LoginRateLimitPolicy)
+            .WithName("PairKidDevice")
+            .WithSummary("Pairs this browser as a kid device with a one-time code from a parent and sets the device cookie.")
+            .Produces<KidDeviceStatus>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        RouteGroupBuilder paired = kid.MapGroup("/").RequireAuthorization(Policies.KidDevice)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        paired.MapGet("/profiles", async (HttpContext context, KidDevices devices, CancellationToken ct) =>
+        {
+            KidDevice device = await RequireDeviceAsync(context, devices, ct);
+            return (await devices.ListProfilesAsync(device.Id, ct)).Select(profile => new KidPickerEntry(
                 profile.Id,
                 profile.Name,
                 profile.Avatar,
-                profile.PinHash is not null)))
-            .AllowAnonymous()
+                profile.PinHash is not null));
+        })
             .WithName("ListKidPickerProfiles")
-            .WithSummary("Lists the profiles shown on the sign-in picker.")
+            .WithSummary("Lists the profiles assigned to this paired device for the sign-in picker.")
             .Produces<IEnumerable<KidPickerEntry>>();
 
-        kid.MapPost("/signin", async (
+        paired.MapPost("/signin", async (
             KidSignInRequest? request,
             HttpContext context,
             KidSignIn signIn,
             KidSessions sessions,
+            KidDevices devices,
+            ParentSessions parentSessions,
             TimeProvider time,
             CancellationToken ct) =>
         {
@@ -46,12 +69,14 @@ public static class KidEndpoints
                     title: $"PINs are {KidPins.MinLength} to {KidPins.MaxLength} digits.");
             }
 
-            string device = KidDevices.Resolve(context);
-            KidSignInResult result = await signIn.VerifyAsync(profileId, request.Pin, device, ct);
+            KidDevice device = await RequireDeviceAsync(context, devices, ct);
+            KidSignInResult result = await signIn.VerifyAsync(profileId, request.Pin, device.Id, ct);
             switch (result.Outcome)
             {
                 case KidSignInOutcome.Succeeded when result.Profile is not null:
-                    await sessions.SignInAsync(context, result.Profile, ct);
+                    await EndParentSessionAsync(context, parentSessions, ct);
+                    await sessions.SignInAsync(context, result.Profile, device.Id, ct);
+                    devices.RefreshCookie(context);
                     return Results.Ok(new KidPickerEntry(
                         result.Profile.Id,
                         result.Profile.Name,
@@ -72,14 +97,31 @@ public static class KidEndpoints
                     return Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Invalid PIN.");
             }
         })
-            .AllowAnonymous()
             .RequireRateLimiting(SecuritySetup.LoginRateLimitPolicy)
             .WithName("KidSignIn")
-            .WithSummary("Signs a kid in to a profile with its PIN and starts a cookie session.")
+            .WithSummary("Signs a kid in on a paired device to one of its profiles with the PIN and starts a cookie session.")
             .Produces<KidPickerEntry>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status423Locked)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        paired.MapPost("/exit", async (
+            Credentials? credentials,
+            HttpContext context,
+            SetupState setup,
+            ParentAccounts accounts,
+            ParentSessions parentSessions,
+            KidSessions kidSessions,
+            TimeProvider time,
+            CancellationToken ct) =>
+            await AuthEndpoints.LoginAsync(credentials, context, setup, accounts, parentSessions, time, () => EndKidSessionAsync(context, kidSessions, ct), ct))
+            .RequireRateLimiting(SecuritySetup.LoginRateLimitPolicy)
+            .WithName("ExitKidMode")
+            .WithSummary("Leaves kid mode on a paired device: checks the parent's credentials, ends any kid session and starts a parent session.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         RouteGroupBuilder signedIn = kid.MapGroup("/").RequireAuthorization(Policies.Kid)
@@ -122,7 +164,11 @@ public static class KidEndpoints
         RouteGroupBuilder profiles = parent.MapGroup("/kid-profiles").WithTags("Kid profiles");
 
         profiles.MapGet("/", async (KidProfiles service, CancellationToken ct) =>
-            (await service.ListAsync(ct)).Select(KidProfileSummary.From))
+        {
+            IReadOnlyDictionary<int, DateTimeOffset> locks = await service.ListDeviceLocksAsync(ct);
+            return (await service.ListAsync(ct)).Select(profile =>
+                KidProfileSummary.From(profile, locks.TryGetValue(profile.Id, out DateTimeOffset lockedAt) ? lockedAt : null));
+        })
             .WithName("ListKidProfiles")
             .WithSummary("Lists kid profiles. Archived profiles are not included and PIN hashes are never returned.")
             .Produces<IEnumerable<KidProfileSummary>>();
@@ -188,13 +234,52 @@ public static class KidEndpoints
         string? sessionId = context.Principal?.FindFirst(Principals.SessionIdClaim)?.Value;
         string? profileId = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         KidSessions sessions = context.HttpContext.RequestServices.GetRequiredService<KidSessions>();
+        KidDevice? device = await context.HttpContext.RequestServices.GetRequiredService<KidDevices>()
+            .FindCurrentAsync(context.HttpContext, context.HttpContext.RequestAborted);
         if (sessionId is null
             || profileId is null
-            || !await sessions.ValidateAsync(sessionId, profileId, context.HttpContext.RequestAborted))
+            || !await sessions.ValidateAsync(sessionId, profileId, device?.Id, context.HttpContext.RequestAborted))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(AuthSchemes.KidCookie);
         }
+    }
+
+    private static async Task<KidDevice> RequireDeviceAsync(HttpContext context, KidDevices devices, CancellationToken ct) =>
+        await devices.FindCurrentAsync(context, ct)
+            ?? throw new InvalidOperationException("The paired device policy let a request without a device through.");
+
+    private static async Task EndParentSessionAsync(HttpContext context, ParentSessions sessions, CancellationToken ct)
+    {
+        if (!context.Request.Cookies.ContainsKey(SecuritySetup.CookieName))
+        {
+            return;
+        }
+
+        AuthenticateResult current = await context.AuthenticateAsync(AuthSchemes.Cookie);
+        if (current.Principal is ClaimsPrincipal user && Principals.TryGetSessionAccount(user, out int accountId, out string sessionId))
+        {
+            await sessions.RevokeAsync(accountId, sessionId, ct);
+        }
+
+        await context.SignOutAsync(AuthSchemes.Cookie);
+    }
+
+    private static async Task EndKidSessionAsync(HttpContext context, KidSessions sessions, CancellationToken ct)
+    {
+        AuthenticateResult current = await context.AuthenticateAsync(AuthSchemes.KidCookie);
+        string? sessionId = current.Principal?.FindFirst(Principals.SessionIdClaim)?.Value;
+        if (sessionId is not null
+            && int.TryParse(
+                current.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int profileId))
+        {
+            await sessions.RevokeAsync(profileId, sessionId, ct);
+        }
+
+        await context.SignOutAsync(AuthSchemes.KidCookie);
     }
 
     private static void SetRetryAfter(HttpContext context, DateTimeOffset until, TimeProvider time)
@@ -224,7 +309,9 @@ public sealed record KidProfileSummary(
     DateTimeOffset? LockedAt,
     DateTimeOffset CreatedAt)
 {
-    public static KidProfileSummary From(KidProfile profile) => new(
+    public static KidProfileSummary From(KidProfile profile) => From(profile, null);
+
+    public static KidProfileSummary From(KidProfile profile, DateTimeOffset? deviceLockedAt) => new(
         profile.Id,
         profile.Name,
         profile.Avatar,
@@ -234,7 +321,7 @@ public sealed record KidProfileSummary(
         profile.PlexLabel,
         profile.PlexUserId,
         profile.WeeklyAllowance,
-        profile.LockedAt is not null,
-        profile.LockedAt,
+        profile.LockedAt is not null || deviceLockedAt is not null,
+        profile.LockedAt ?? deviceLockedAt,
         profile.CreatedAt);
 }

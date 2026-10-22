@@ -22,7 +22,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Ann", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
 
         HttpResponseMessage before = await device.GetAsync("/api/v1/kid/me");
         HttpResponseMessage signIn = await KidApiFactory.SignInAsync(device, id, Pin);
@@ -47,7 +47,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Bo", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
         await KidApiFactory.SignInAsync(device, id, Pin);
         await AuthApiFactory.AddAntiforgeryTokenAsync(device);
 
@@ -66,7 +66,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Cat", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
         await KidApiFactory.SignInAsync(device, id, Pin);
 
         factory.Clock.Advance(TimeSpan.FromDays(8));
@@ -81,7 +81,7 @@ public sealed class KidSignInTests
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Di")).GetProperty("id").GetInt32();
 
-        HttpResponseMessage response = await KidApiFactory.SignInAsync(factory.CreateDevice(), id, null);
+        HttpResponseMessage response = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), id, null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -92,7 +92,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Ed", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
 
         HttpResponseMessage missing = await KidApiFactory.SignInAsync(device, id, null);
         HttpResponseMessage malformed = await KidApiFactory.SignInAsync(device, id, "12");
@@ -109,7 +109,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Flo", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
 
         List<int> waits = [];
         for (int attempt = 0; attempt < 5; attempt++)
@@ -138,8 +138,8 @@ public sealed class KidSignInTests
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Gil", pin: Pin)).GetProperty("id").GetInt32();
         int other = (await factory.CreateProfileAsync(parent, "Hu", pin: "2468")).GetProperty("id").GetInt32();
-        HttpClient first = factory.CreateDevice();
-        HttpClient second = factory.CreateDevice();
+        HttpClient first = await factory.CreateDeviceAsync();
+        HttpClient second = await factory.CreateDeviceAsync();
 
         await KidApiFactory.SignInAsync(first, id, WrongPin);
         HttpResponseMessage firstBlocked = await KidApiFactory.SignInAsync(first, id, Pin);
@@ -169,7 +169,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Ivy", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
         await factory.FailAndWaitAsync(device, id, WrongPin);
         await factory.FailAndWaitAsync(device, id, WrongPin);
 
@@ -186,7 +186,7 @@ public sealed class KidSignInTests
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Jay", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
 
         for (int attempt = 0; attempt < 4; attempt++)
         {
@@ -206,30 +206,29 @@ public sealed class KidSignInTests
     }
 
     [Fact]
-    public async Task Profile_locks_after_repeated_failures_across_devices_until_a_parent_unlocks_it()
+    public async Task Profile_locks_on_a_device_after_repeated_failures_until_a_parent_unlocks_it()
     {
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Kim", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient first = factory.CreateDevice();
-        HttpClient second = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
 
-        for (int attempt = 0; attempt < 5; attempt++)
+        for (int attempt = 0; attempt < 10; attempt++)
         {
-            await factory.FailAndWaitAsync(first, id, WrongPin);
-            await factory.FailAndWaitAsync(second, id, WrongPin);
+            await factory.FailAndWaitAsync(device, id, WrongPin);
         }
 
-        HttpResponseMessage rightPinWhileLocked = await KidApiFactory.SignInAsync(factory.CreateDevice(), id, Pin);
+        HttpResponseMessage rightPinWhileLocked = await KidApiFactory.SignInAsync(device, id, Pin);
         List<JsonElement> listed = await parent.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid-profiles") ?? [];
         HttpResponseMessage unlock = await parent.PostAsync($"/api/v1/kid-profiles/{id}/unlock", null);
-        HttpResponseMessage afterUnlock = await KidApiFactory.SignInAsync(first, id, Pin);
+        HttpResponseMessage afterUnlock = await KidApiFactory.SignInAsync(device, id, Pin);
 
         Assert.Equal(HttpStatusCode.Locked, rightPinWhileLocked.StatusCode);
         Assert.True(Assert.Single(listed).GetProperty("isLocked").GetBoolean());
         Assert.Equal(
             [ParentNotificationKinds.PinFailures, ParentNotificationKinds.ProfileLocked],
             factory.Notifier.Sent.Select(sent => sent.Kind));
+        Assert.Contains("Tablet", factory.Notifier.Sent[^1].Message);
         Assert.Equal(HttpStatusCode.NoContent, unlock.StatusCode);
         Assert.Equal(HttpStatusCode.OK, afterUnlock.StatusCode);
         List<JsonElement> relisted = await parent.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid-profiles") ?? [];
@@ -239,21 +238,31 @@ public sealed class KidSignInTests
     }
 
     [Fact]
-    public async Task Locking_ends_existing_kid_sessions()
+    public async Task Failures_on_one_device_cannot_lock_the_kid_out_on_another()
     {
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Leo", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient signedIn = factory.CreateDevice();
-        await KidApiFactory.SignInAsync(signedIn, id, Pin);
-        HttpClient attacker = factory.CreateDevice();
+        HttpClient kidsTablet = await factory.CreateDeviceAsync();
+        Assert.Equal(HttpStatusCode.OK, (await KidApiFactory.SignInAsync(kidsTablet, id, Pin)).StatusCode);
+        await AuthApiFactory.AddAntiforgeryTokenAsync(kidsTablet);
+        HttpClient other = await factory.CreateDeviceAsync();
 
         for (int attempt = 0; attempt < 10; attempt++)
         {
-            await factory.FailAndWaitAsync(attacker, id, WrongPin);
+            await factory.FailAndWaitAsync(other, id, WrongPin);
         }
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await signedIn.GetAsync("/api/v1/kid/me")).StatusCode);
+        HttpResponseMessage otherLocked = await KidApiFactory.SignInAsync(other, id, Pin);
+        HttpResponseMessage stillSignedIn = await kidsTablet.GetAsync("/api/v1/kid/me");
+        HttpResponseMessage signInAgain = await KidApiFactory.SignInAsync(kidsTablet, id, Pin);
+        HttpResponseMessage wrongOnTablet = await KidApiFactory.SignInAsync(kidsTablet, id, WrongPin);
+
+        Assert.Equal(HttpStatusCode.Locked, otherLocked.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, stillSignedIn.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, signInAgain.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongOnTablet.StatusCode);
+        Assert.Equal(2, await KidApiFactory.GetBackoffSecondsAsync(kidsTablet, id));
     }
 
     [Fact]
@@ -265,9 +274,9 @@ public sealed class KidSignInTests
         int archived = (await factory.CreateProfileAsync(parent, "Ned", pin: "2468")).GetProperty("id").GetInt32();
         await parent.DeleteAsync($"/api/v1/kid-profiles/{archived}");
 
-        HttpResponseMessage wrong = await KidApiFactory.SignInAsync(factory.CreateDevice(), live, WrongPin);
-        HttpResponseMessage unknown = await KidApiFactory.SignInAsync(factory.CreateDevice(), 12345, WrongPin);
-        HttpResponseMessage gone = await KidApiFactory.SignInAsync(factory.CreateDevice(), archived, "2468");
+        HttpResponseMessage wrong = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), live, WrongPin);
+        HttpResponseMessage unknown = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), 12345, WrongPin);
+        HttpResponseMessage gone = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), archived, "2468");
 
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, unknown.StatusCode);
@@ -286,9 +295,10 @@ public sealed class KidSignInTests
         await factory.CreateProfileAsync(parent, "Oz", pin: Pin, movieAgeLimit: 7, plexLabel: "secret-label");
         await factory.CreateProfileAsync(parent, "Pia", pin: "2468", movieAgeLimit: 12);
         int removed = (await factory.CreateProfileAsync(parent, "Quin", pin: "1357", movieAgeLimit: 12)).GetProperty("id").GetInt32();
+        HttpClient device = await factory.CreateDeviceAsync();
         await parent.DeleteAsync($"/api/v1/kid-profiles/{removed}");
 
-        List<JsonElement> picker = await factory.CreateClient().GetFromJsonAsync<List<JsonElement>>("/api/v1/kid/profiles") ?? [];
+        List<JsonElement> picker = await device.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid/profiles") ?? [];
 
         Assert.Equal(["Oz", "Pia"], picker.Select(entry => entry.GetProperty("name").GetString()));
         foreach (JsonElement entry in picker)
@@ -300,15 +310,20 @@ public sealed class KidSignInTests
     }
 
     [Fact]
-    public async Task Sign_in_and_picker_are_the_only_anonymous_kid_routes()
+    public async Task Kid_routes_need_a_paired_device_or_a_kid_session()
     {
         using KidApiFactory factory = new();
-        await factory.EnsureParentAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await factory.CreateProfileAsync(parent, "Sam")).GetProperty("id").GetInt32();
         HttpClient anonymous = factory.CreateClient();
+        HttpClient device = await factory.CreateDeviceAsync();
 
-        Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/api/v1/kid/profiles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/kid/profiles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await KidApiFactory.SignInAsync(anonymous, id, null)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/v1/kid/me")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/v1/kid/signout", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await device.GetAsync("/api/v1/kid/profiles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await device.GetAsync("/api/v1/kid/me")).StatusCode);
     }
 
     [Fact]
@@ -321,12 +336,12 @@ public sealed class KidSignInTests
     }
 
     [Fact]
-    public async Task Sign_in_is_rate_limited_per_address()
+    public async Task Sign_in_and_pairing_are_rate_limited_per_address()
     {
         using KidApiFactory factory = new() { Settings = new Dictionary<string, string?> { ["Auth:LoginAttemptsPerMinute"] = "2" } };
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await factory.CreateProfileAsync(parent, "Ray", pin: Pin)).GetProperty("id").GetInt32();
-        HttpClient device = factory.CreateDevice();
+        HttpClient device = await factory.CreateDeviceAsync();
 
         HttpStatusCode last = HttpStatusCode.OK;
         for (int attempt = 0; attempt < 6 && last != HttpStatusCode.TooManyRequests; attempt++)
@@ -335,6 +350,9 @@ public sealed class KidSignInTests
         }
 
         Assert.Equal(HttpStatusCode.TooManyRequests, last);
+        HttpResponseMessage pair = await factory.CreateClient().PostAsJsonAsync("/api/v1/kid/pair", new { code = "ABCD-2345" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, pair.StatusCode);
+        Assert.True(pair.Headers.Contains("Retry-After"));
     }
 
     [Fact]

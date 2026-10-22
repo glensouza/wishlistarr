@@ -411,8 +411,11 @@ public sealed partial class FakePlexServer : IAsyncDisposable
             case "/api/v2/resources":
                 await WriteAsync(context, this.ResourcesJson);
                 break;
+            case "/api/users":
+                await WriteAsync(context, Fixture("users.xml"), "application/xml");
+                break;
             case "/api/v2/friends":
-                await WriteAsync(context, Fixture("friends.json"));
+                context.Response.StatusCode = StatusCodes.Status410Gone;
                 break;
             case "/api/home/users":
                 await WriteAsync(context, Fixture("home-users.xml"), "application/xml");

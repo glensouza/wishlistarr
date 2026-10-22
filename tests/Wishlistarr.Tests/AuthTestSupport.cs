@@ -38,6 +38,17 @@ public class AuthApiFactory : ApiFactory
         return client;
     }
 
+    public async Task<HttpClient> PairDeviceAsync(HttpClient parent, string name, IReadOnlyList<int> profileIds)
+    {
+        HttpResponseMessage created = await parent.PostAsJsonAsync("/api/v1/kid-devices", new { name, profileIds });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        string code = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString()!;
+        HttpClient device = this.CreateClient();
+        HttpResponseMessage paired = await device.PostAsJsonAsync("/api/v1/kid/pair", new { code });
+        Assert.Equal(HttpStatusCode.OK, paired.StatusCode);
+        return device;
+    }
+
     public static async Task AddAntiforgeryTokenAsync(HttpClient client)
     {
         JsonElement body = await client.GetFromJsonAsync<JsonElement>("/api/v1/auth/antiforgery");
