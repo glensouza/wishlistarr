@@ -408,6 +408,15 @@ public sealed class ContentPolicyEngineTests
     }
 
     [Fact]
+    public void Languages_set_directly_on_a_policy_are_canonicalised()
+    {
+        ContentPolicy policy = new() { AllowedOriginalLanguages = ImmutableHashSet.Create(" EN ", "x") };
+
+        Assert.Equal(["en"], policy.AllowedOriginalLanguages);
+        Assert.Equal(ContentOutcome.Allowed, Evaluate(MovieTitle(rating: "PG", language: "en"), policy with { MaxMovieRating = RatingLevel.Teen }).Outcome);
+    }
+
+    [Fact]
     public void A_language_on_the_allow_list_does_not_block()
     {
         ContentPolicy policy = ContentPolicy.ForProfile(8, null, null, null, ["EN"]);

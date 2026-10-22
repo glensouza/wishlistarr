@@ -40,7 +40,11 @@ public sealed record ContentPolicy
 
     public IReadOnlySet<int> BlockedKeywordIds { get; init; } = ImmutableHashSet<int>.Empty;
 
-    public IReadOnlySet<string> AllowedOriginalLanguages { get; init; } = ImmutableHashSet<string>.Empty;
+    public IReadOnlySet<string> AllowedOriginalLanguages
+    {
+        get;
+        init => field = ToLanguages(value);
+    } = ImmutableHashSet<string>.Empty;
 
     public RatingLevel? MaxRatingFor(MediaKind kind) => kind == MediaKind.Movie ? this.MaxMovieRating : this.MaxTvRating;
 
@@ -65,22 +69,8 @@ public sealed record ContentPolicy
 
     private static HashSet<int> ToIds(IEnumerable<int>? ids) => ids is null ? [] : [.. ids];
 
-    private static HashSet<string> ToLanguages(IEnumerable<string>? languages)
-    {
-        HashSet<string> codes = [];
-        if (languages is null)
-        {
-            return codes;
-        }
-
-        foreach (string language in languages)
-        {
-            if (ContentLanguages.Canonical(language) is string code)
-            {
-                codes.Add(code);
-            }
-        }
-
-        return codes;
-    }
+    private static ImmutableHashSet<string> ToLanguages(IEnumerable<string>? languages) =>
+        languages is null
+            ? []
+            : [.. languages.Select(ContentLanguages.Canonical).OfType<string>()];
 }
