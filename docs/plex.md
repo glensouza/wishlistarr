@@ -70,4 +70,6 @@ Wishlistarr tags movies and shows with each kid profile's label so Plex content 
 - Writes to the same item are serialized inside the app.
 - Labels are compared case-insensitively.
 
+Whether Plex users enforce these labels is described in [plex-restrictions.md](plex-restrictions.md).
+
 Every label the app applies is recorded in the `OwnedLabels` table with the server id, the item guid, the rating key, the label, the kid profile, the source of the change and the time. Items are matched by guid, so the record survives Plex assigning a new rating key. A label that was already on the item is not recorded, and removal only ever touches labels that are in this table, so labels added by hand in Plex are left alone.

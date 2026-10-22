@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
+using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 
 namespace Wishlistarr.Api.Kids;
@@ -163,14 +164,18 @@ public static class KidEndpoints
     {
         RouteGroupBuilder profiles = parent.MapGroup("/kid-profiles").WithTags("Kid profiles");
 
-        profiles.MapGet("/", async (KidProfiles service, CancellationToken ct) =>
+        profiles.MapGet("/", async (KidProfiles service, PlexEnforcement enforcement, CancellationToken ct) =>
         {
             IReadOnlyDictionary<int, DateTimeOffset> locks = await service.ListDeviceLocksAsync(ct);
-            return (await service.ListAsync(ct)).Select(profile =>
-                KidProfileSummary.From(profile, locks.TryGetValue(profile.Id, out DateTimeOffset lockedAt) ? lockedAt : null));
+            IReadOnlyList<KidProfile> active = await service.ListAsync(ct);
+            IReadOnlyDictionary<int, ProfileRestrictions> restrictions = await enforcement.CheckAsync(active, ct);
+            return active.Select(profile => KidProfileSummary.From(
+                profile,
+                locks.TryGetValue(profile.Id, out DateTimeOffset lockedAt) ? lockedAt : null,
+                restrictions.GetValueOrDefault(profile.Id)));
         })
             .WithName("ListKidProfiles")
-            .WithSummary("Lists kid profiles. Archived profiles are not included and PIN hashes are never returned.")
+            .WithSummary("Lists kid profiles. Archived profiles are not included and PIN hashes are never returned. Profiles mapped to a Plex user include whether that user enforces the label for movies and TV.")
             .Produces<IEnumerable<KidProfileSummary>>();
 
         profiles.MapPost("/", async (KidProfileRequest? request, KidProfiles service, CancellationToken ct) =>
@@ -307,11 +312,12 @@ public sealed record KidProfileSummary(
     int? WeeklyAllowance,
     bool IsLocked,
     DateTimeOffset? LockedAt,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    ProfileRestrictions? PlexRestrictions = null)
 {
-    public static KidProfileSummary From(KidProfile profile) => From(profile, null);
+    public static KidProfileSummary From(KidProfile profile) => From(profile, null, null);
 
-    public static KidProfileSummary From(KidProfile profile, DateTimeOffset? deviceLockedAt) => new(
+    public static KidProfileSummary From(KidProfile profile, DateTimeOffset? deviceLockedAt, ProfileRestrictions? restrictions) => new(
         profile.Id,
         profile.Name,
         profile.Avatar,
@@ -323,5 +329,6 @@ public sealed record KidProfileSummary(
         profile.WeeklyAllowance,
         profile.LockedAt is not null || deviceLockedAt is not null,
         profile.LockedAt ?? deviceLockedAt,
-        profile.CreatedAt);
+        profile.CreatedAt,
+        restrictions);
 }

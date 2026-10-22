@@ -234,3 +234,44 @@ it('says so when Plex has no users', async () => {
 
   expect(await screen.findByText(/No Plex users found/)).toBeTruthy()
 })
+
+it('shows what Plex enforces for a mapped profile and how to fix it', async () => {
+  profiles = [
+    {
+      ...ada,
+      plexUserId: '10',
+      plexRestrictions: {
+        movies: { state: 'enforced', mode: 'allowOnly' },
+        television: { state: 'notEnforced', mode: null },
+      },
+    },
+    {
+      ...ada,
+      id: 2,
+      name: 'Ben',
+      plexUserId: '11',
+      plexRestrictions: {
+        movies: { state: 'notEnforced', mode: null },
+        television: { state: 'unknown', mode: null },
+      },
+    },
+    { ...ada, id: 3, name: 'Cy' },
+  ]
+  render(<KidProfilesAdmin />)
+
+  expect(
+    await screen.findByText('Plex enforces the label for movies (allow only)'),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(/Plex does not enforce the label for TV shows/),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(/Plex does not enforce the label for movies/),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(
+      'Could not tell whether Plex enforces the label for TV shows',
+    ),
+  ).toBeTruthy()
+  expect(screen.getAllByLabelText('Plex label enforcement')).toHaveLength(2)
+})

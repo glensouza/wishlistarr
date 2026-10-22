@@ -12,5 +12,9 @@ public sealed class PlexOptions
 
     public TimeSpan LookupCacheLifetime { get; set; } = TimeSpan.FromMinutes(10);
 
+    public TimeSpan RestrictionCacheLifetime { get; set; } = TimeSpan.FromSeconds(60);
+
+    public TimeSpan RestrictionTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
     public int PageSize { get; set; } = 500;
 }
