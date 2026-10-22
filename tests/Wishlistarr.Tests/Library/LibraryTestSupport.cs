@@ -135,6 +135,8 @@ public sealed class FakeTmdbFinder : ITmdbClient
             : throw new TmdbException("TMDB answered 404.", HttpStatusCode.NotFound);
     }
 
+    public Task<IReadOnlyList<TmdbKeyword>> GetKeywordsAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
+
     public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
     public Task<TmdbCertification?> GetCertificationAsync(TmdbMediaType type, int id, IReadOnlyList<string> regions, CancellationToken ct = default) => throw new NotSupportedException();

@@ -69,18 +69,19 @@ public sealed partial class KidSearch(
             profile.BlockedGenreIds,
             profile.BlockedKeywordIds,
             profile.AllowedOriginalLanguages);
-        ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>> certifications = await this.LookUpAsync(candidates, ct);
+        bool keywords = policy.BlockedKeywordIds.Count > 0;
+        ConcurrentDictionary<TitleKey, KnownTitle> known = await this.LookUpAsync(candidates, keywords, ct);
 
         List<KidSearchItem> results = [];
         foreach (Candidate candidate in candidates)
         {
-            if (!certifications.TryGetValue(candidate.Key, out IReadOnlyList<RegionCertification>? known))
+            if (!known.TryGetValue(candidate.Key, out KnownTitle? title))
             {
                 continue;
             }
 
             ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
-                new ContentTitle(candidate.Key, known, candidate.GenreIds, candidate.KeywordIds, candidate.OriginalLanguage),
+                new ContentTitle(candidate.Key, title.Certifications, candidate.GenreIds, title.KeywordIds, candidate.OriginalLanguage),
                 policy);
             if (decision.Outcome != ContentOutcome.Blocked)
             {
@@ -114,7 +115,6 @@ public sealed partial class KidSearch(
             string.IsNullOrEmpty(overview) ? null : overview[..Math.Min(overview.Length, MaxOverviewLength)],
             PosterUrl(result.PosterPath),
             result.GenreIds,
-            null,
             result.OriginalLanguage);
     }
 
@@ -124,11 +124,12 @@ public sealed partial class KidSearch(
         return TmdbImageProxy.IsAllowed(PosterSize, file) ? $"{PosterRoute}/{PosterSize}/{file}" : null;
     }
 
-    private async Task<ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>>> LookUpAsync(
+    private async Task<ConcurrentDictionary<TitleKey, KnownTitle>> LookUpAsync(
         IReadOnlyList<Candidate> candidates,
+        bool keywords,
         CancellationToken ct)
     {
-        ConcurrentDictionary<TitleKey, IReadOnlyList<RegionCertification>> known = [];
+        ConcurrentDictionary<TitleKey, KnownTitle> known = [];
         using CancellationTokenSource deadline = new(LookupBudget, time);
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
         try
@@ -142,7 +143,15 @@ public sealed partial class KidSearch(
                     {
                         TmdbMediaType type = candidate.Key.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
                         TmdbCertification? certification = await tmdb.GetCertificationAsync(type, candidate.Key.TmdbId, [RatingScale.UsRegion], token);
-                        known[candidate.Key] = certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)];
+                        IReadOnlyList<int>? keywordIds = null;
+                        if (keywords)
+                        {
+                            keywordIds = [.. (await tmdb.GetKeywordsAsync(type, candidate.Key.TmdbId, token)).Select(item => item.Id)];
+                        }
+
+                        known[candidate.Key] = new KnownTitle(
+                            certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
+                            keywordIds);
                     }
                     catch (Exception ex) when (ex is TmdbException or HttpRequestException)
                     {
@@ -169,7 +178,7 @@ public sealed partial class KidSearch(
             await this.AvailabilityAsync(candidate.Key, ct),
             needsParent);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Certification lookup failed for {Kind} {TmdbId}")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Certification or keyword lookup failed for {Kind} {TmdbId}")]
     private partial void LogLookupFailed(Exception exception, MediaKind kind, int tmdbId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Certification lookups did not finish within {Seconds} s; unresolved titles were left out")]
@@ -196,6 +205,7 @@ public sealed partial class KidSearch(
         string? Overview,
         string? PosterUrl,
         IReadOnlyList<int>? GenreIds,
-        IReadOnlyList<int>? KeywordIds,
         string? OriginalLanguage);
+
+    private sealed record KnownTitle(IReadOnlyList<RegionCertification> Certifications, IReadOnlyList<int>? KeywordIds);
 }

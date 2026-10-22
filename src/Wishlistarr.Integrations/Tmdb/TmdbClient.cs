@@ -45,6 +45,12 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
     public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) =>
         this.GetAsync<TmdbDetails>($"{Segment(type)}/{id}", [("language", language)], DetailLifetime, ct);
 
+    public async Task<IReadOnlyList<TmdbKeyword>> GetKeywordsAsync(TmdbMediaType type, int id, CancellationToken ct = default)
+    {
+        KeywordsResponse response = await this.GetAsync<KeywordsResponse>($"{Segment(type)}/{id}/keywords", [], DetailLifetime, ct);
+        return ReadKeywords(type == TmdbMediaType.Movie ? response.Keywords : response.Results);
+    }
+
     public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) =>
         this.GetAsync<TmdbCredits>($"{Segment(type)}/{id}/credits", [("language", language)], DetailLifetime, ct);
 
@@ -160,6 +166,9 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
     private static string[] Clean(IReadOnlyList<string>? descriptors) =>
         [.. (descriptors ?? []).Where(item => !string.IsNullOrWhiteSpace(item))];
 
+    private static IReadOnlyList<TmdbKeyword> ReadKeywords(IReadOnlyList<KeywordItem>? items) =>
+        items is null ? [] : [.. items.Select(item => new TmdbKeyword(item.Id, item.Name ?? string.Empty))];
+
     private static string Segment(TmdbMediaType type) => type == TmdbMediaType.Movie ? "movie" : "tv";
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
@@ -249,4 +258,12 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
         [property: JsonPropertyName("iso_3166_1")] string Region,
         [property: JsonPropertyName("rating")] string Rating,
         [property: JsonPropertyName("descriptors")] IReadOnlyList<string>? Descriptors);
+
+    private sealed record KeywordsResponse(
+        [property: JsonPropertyName("keywords")] IReadOnlyList<KeywordItem>? Keywords,
+        [property: JsonPropertyName("results")] IReadOnlyList<KeywordItem>? Results);
+
+    private sealed record KeywordItem(
+        [property: JsonPropertyName("id")] int Id,
+        [property: JsonPropertyName("name")] string? Name);
 }

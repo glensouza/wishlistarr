@@ -32,6 +32,8 @@ public sealed record TmdbGenre(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("name")] string Name);
 
+public sealed record TmdbKeyword(int Id, string Name);
+
 public sealed record TmdbDetails(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("title")] string? Title,

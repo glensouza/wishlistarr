@@ -78,11 +78,27 @@ public sealed partial class KidRequestFlow(
 
         TmdbCertification? certification = await tmdb.GetCertificationAsync(type, title.TmdbId, [RatingScale.UsRegion], ct);
         TmdbDetails details = await tmdb.GetDetailsAsync(type, title.TmdbId, ct: ct);
+        IReadOnlyList<int>? keywordIds = null;
+        if (profile.BlockedKeywordIds.Count > 0)
+        {
+            try
+            {
+                keywordIds = [.. (await tmdb.GetKeywordsAsync(type, title.TmdbId, ct)).Select(keyword => keyword.Id)];
+            }
+            catch (Exception ex) when (ex is not TmdbNotConfiguredException
+                && !ct.IsCancellationRequested
+                && ex is TmdbException or HttpRequestException or TaskCanceledException)
+            {
+                this.LogKeywordLookupFailed(ex, title.Kind, title.TmdbId);
+                return new KidRequestResult(KidRequestOutcome.NotAllowed);
+            }
+        }
+
         ContentTitle content = new(
             title,
             certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
             details.Genres is null ? null : [.. details.Genres.Select(genre => genre.Id)],
-            null,
+            keywordIds,
             details.OriginalLanguage);
         ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
             content,
@@ -216,6 +232,9 @@ public sealed partial class KidRequestFlow(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Request by profile {ProfileId} for {Kind} {TmdbId} was blocked by content policy ({Reason})")]
     private partial void LogBlocked(int profileId, MediaKind kind, int tmdbId, ContentReasonCode reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword lookup failed for {Kind} {TmdbId}; the request was refused")]
+    private partial void LogKeywordLookupFailed(Exception ex, MediaKind kind, int tmdbId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for {Kind} {TmdbId} failed; treating it as not in the library")]
     private partial void LogLookupFailed(Exception ex, MediaKind kind, int tmdbId);

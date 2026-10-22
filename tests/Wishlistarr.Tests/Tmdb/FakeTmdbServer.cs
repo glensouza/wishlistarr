@@ -88,6 +88,17 @@ public sealed class FakeTmdbServer : IAsyncDisposable
         yield return new("/3/movie/603/videos", """{"results":[{"id":"1","key":"abc","name":"Trailer","site":"YouTube","type":"Trailer","official":true}]}""");
         yield return new("/3/movie/603/images", """{"posters":[{"file_path":"/p.jpg","width":500,"height":750,"iso_639_1":"en"}],"backdrops":[],"logos":[]}""");
         yield return new("/3/movie/603/watch/providers", """{"results":{"US":{"link":"https://example.test","flatrate":[{"provider_id":8,"provider_name":"Stream","logo_path":"/s.jpg"}]}}}""");
+        yield return new("/3/movie/603/keywords", """
+            {"id":603,"keywords":[
+              {"id":818,"name":"based on novel or book"},
+              {"id":1721,"name":"fight"}]}
+            """);
+        yield return new("/3/tv/1399/keywords", """
+            {"id":1399,"results":[
+              {"name":"based on novel or book","id":818},
+              {"name":"kingdom","id":41521},
+              {"name":"dragon","id":12554}]}
+            """);
         yield return new("/3/movie/603/release_dates", """
             {"results":[
               {"iso_3166_1":"GB","release_dates":[{"certification":"15","descriptors":[],"type":3}]},

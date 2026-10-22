@@ -16,6 +16,7 @@ Every decision is a `ContentDecision(Outcome, Reason)`. The outcome is `Allowed`
 | `Unrated` | from the unrated policy | region, rating, max level |
 | `BlockedGenre` | Blocked | genre id |
 | `NoBlockedGenre` | Allowed | |
+| `UnknownGenres` | NeedsApproval | |
 | `BlockedKeyword` | Blocked | keyword id |
 | `NoBlockedKeyword` | Allowed | |
 | `NoLanguageLimit` | Allowed | |
@@ -38,17 +39,17 @@ Titles are identified by `TitleKey(Kind, TmdbId)`. A show is decided at series l
 
 A profile can block TMDB genre ids, the same integers `TmdbGenre.Id` carries (for example `28` for Action). A title is blocked when any of its genre ids is on that list. The reason is `BlockedGenre` and the id is the first blocked id in the title's own list.
 
-A title with no genre ids is not blocked by this rule. There is no genre to match, so a missing list is not treated as a hit. An empty block list blocks nothing. Either way the rule's own decision is `NoBlockedGenre`, which only becomes the engine's decision when no earlier rule is equally or more restrictive.
+When the profile blocks at least one genre and the title has no genre ids, the rule cannot tell whether a blocked genre is present. Unknown does not count as allowed, so the decision is `UnknownGenres` and the outcome is `NeedsApproval`. An empty list and a missing list are the same. An empty block list blocks nothing, and the decision is then `NoBlockedGenre` even when the title has no genres. `NoBlockedGenre` and `UnknownGenres` become the engine's decision only when no earlier rule is equally or more restrictive.
 
 ## Keywords
 
-Keyword blocks use TMDB keyword ids, integers in the same way as genre ids. A title is blocked when any of its keyword ids is on the profile's list. The reason is `BlockedKeyword` and the id is the first blocked id in the title's own list.
+Keyword blocks use TMDB keyword ids. A movie's list comes from `GET /movie/{id}/keywords` (`keywords`) and a show's from `GET /tv/{id}/keywords` (`results`); each entry is an `id` and a `name`. A title is blocked when any of its keyword ids is on the profile's list. The reason is `BlockedKeyword` and the id is the first blocked id in the title's own list.
 
-A title with no keyword ids is not blocked by this rule. Keyword metadata is often absent, and absence is not evidence that a blocked keyword is present. An empty block list blocks nothing. The rule's own decision is then `NoBlockedKeyword`.
+The engine does not call TMDB. Callers pass the ids from a lookup that succeeded. An empty list is not a match, and the rule's decision is `NoBlockedKeyword`. An empty block list blocks nothing. When the profile has keyword blocks, [search](kid-search.md) and [requests](requests.md) do that lookup and refuse the title if it fails or times out, instead of passing an empty list in place of a failure.
 
 ## Original language
 
-A profile can list the original languages it allows. Codes are ISO 639-1, the two-letter `original_language` value TMDB returns (`en`, `ja`, `zh`). Comparison is case-insensitive, and the reason reports the code in lowercase. A value that is not two ASCII letters is not a language code: `en-US` is ignored, not treated as `en`.
+A profile can list the original languages it allows. Codes are ISO 639-1, the two-letter `original_language` value TMDB returns (`en`, `ja`, `zh`). TMDB uses `cn` for Cantonese and `xx` for no language, so `zh` does not cover Cantonese. `xx` is a language code like any other: a title marked with it is not treated as missing a language. Comparison is case-insensitive. Profiles store the codes in lowercase, and the rule uses that set. The reason reports the code in lowercase. A value that is not two ASCII letters is not a language code: `en-US` is ignored, not treated as `en`.
 
 An empty allow list means no language restriction (`NoLanguageLimit`). That includes a title with no language.
 

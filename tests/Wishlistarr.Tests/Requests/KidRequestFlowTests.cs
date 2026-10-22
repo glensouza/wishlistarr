@@ -163,15 +163,48 @@ public sealed class KidRequestFlowTests
     }
 
     [Fact]
-    public async Task A_keyword_block_does_not_reject_a_title_with_no_keywords()
+    public async Task A_title_with_no_genres_needs_approval_when_the_profile_blocks_genres()
     {
         using KidRequestApiFactory factory = new();
-        (HttpClient kid, _) = await factory.SignInKidAsync(blockedKeywordIds: [99]);
+        await factory.LinkPlexAsync();
+        factory.Tmdb.SetBody("/3/movie/603", """{"id":603,"title":"The Matrix","genres":[],"original_language":"en","vote_average":8.2}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(blockedGenreIds: [16]);
 
-        HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "movie", 700);
+        HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "movie", 603);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Equal("pending", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        Assert.Equal(0, factory.LabelWrites);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+    }
+
+    [Fact]
+    public async Task A_keyword_block_rejects_a_match_and_a_failed_lookup_but_not_an_empty_list()
+    {
+        using KidRequestApiFactory movies = new();
+        movies.Tmdb.SetBody("/3/movie/603/keywords", """{"id":603,"keywords":[{"id":1721,"name":"fight"}]}""");
+        movies.Tmdb.SetBody("/3/movie/700/keywords", """{"id":700,"keywords":[]}""");
+        movies.Tmdb.Enqueue("/3/movie/701/keywords", 500);
+        (HttpClient movieKid, _) = await movies.SignInKidAsync(blockedKeywordIds: [1721]);
+        using KidRequestApiFactory shows = new();
+        shows.Tmdb.SetBody("/3/tv/82728/keywords", """{"id":82728,"results":[{"name":"animation","id":6054}]}""");
+        (HttpClient showKid, _) = await shows.SignInKidAsync("Bea", blockedKeywordIds: [6054]);
+
+        HttpResponseMessage blocked = await KidRequestApiFactory.RequestAsync(movieKid, "movie", 603);
+        HttpResponseMessage empty = await KidRequestApiFactory.RequestAsync(movieKid, "movie", 700);
+        HttpResponseMessage failed = await KidRequestApiFactory.RequestAsync(movieKid, "movie", 701);
+        HttpResponseMessage show = await KidRequestApiFactory.RequestAsync(showKid, "show", 82728);
+        string blockedText = await blocked.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, blocked.StatusCode);
+        Assert.Equal("notAllowed", JsonDocument.Parse(blockedText).RootElement.GetProperty("code").GetString());
+        Assert.DoesNotContain("1721", blockedText, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Created, empty.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, failed.StatusCode);
+        Assert.Equal([700], (await movies.GetRequestsAsync()).Select(request => request.TmdbId));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, show.StatusCode);
+        Assert.Empty(await shows.GetRequestsAsync());
+        Assert.Equal(1, shows.Tmdb.Count("/3/tv/82728/keywords"));
     }
 
     [Fact]
