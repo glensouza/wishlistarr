@@ -14,6 +14,7 @@
     "time_zone": "America/Chicago",
     "postal_code": "00000",
     "in_privacy_restricted_country": false,
+    "in_privacy_restricted_region": false,
     "subdivisions": "Illinois",
     "coordinates": "0.0000, 0.0000"
   },

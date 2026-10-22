@@ -47,7 +47,8 @@ The plex.tv endpoints are undocumented, so the client and the test fixtures foll
 - Managed users in `/api/users` have no `username` or `email` attribute, and are also marked `home="1"` and `restricted="1"`. Plex Home users in `/api/home/users` carry `admin`, `guest` and `restricted`; guests have an empty `username`.
 - Libraries that use the `com.plexapp.agents.none` agent have no external guids and never match a lookup.
 - Devices such as phones appear in the resources list without an access token and are skipped because they do not provide `server`.
-- The PIN calls are the only ones not checked against a live account, because creating a PIN writes to the account.
+- The PIN flow was checked with one throwaway PIN that was never claimed. Creating it answers `201`, and reading it back answers `200` with the same shape and `authToken: null` until it is approved. Its location block also carries `in_privacy_restricted_region`.
+- Shared servers were not verified live, because the account used only owns its servers. The listed connections for a shared server follow the owner's settings, as described above.
 
 ## Settings and secrets
 
