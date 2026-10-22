@@ -42,11 +42,15 @@ A kid session belongs to the device it started on. It ends when the device is re
 
 On a paired device the **Parents** link leads to **Leave kid mode**, which asks for the parent's username and password. `POST /api/v1/kid/exit` takes `{ username, password }`, checks them the same way as parent login (including the account lockout), ends the kid session on the device and starts a parent session. A wrong password leaves the kid session as it was. While a kid is signed in the request needs the antiforgery token, like other kid writes.
 
+Paired devices never get the trusted-network bypass. A request that carries the device cookie is not treated as a parent even when it comes from a trusted network, so the password is needed there too.
+
 The device stays paired. When the parent chooses **Return to kid mode** the parent session ends and the device shows the profile picker again. A kid signing in on the device also ends any parent session left open in that browser. To stop using a device for kids altogether, revoke it under **Kid devices**.
 
 ## PIN limits per device
 
 Wrong PINs are counted per paired device and profile. Backoff and the lock after `Kids:LockThreshold` failures apply only to that device, so failures on one device cannot lock a kid out on another. See [kid-profiles.md](kid-profiles.md#backoff-and-lockout).
+
+With the defaults, someone guessing on one device can make 9 wrong guesses (about 17 minutes of backoff between them) before the tenth would lock the profile there. If they stop at 9 and wait for the count to reset after an hour without failures, they get roughly 9 guesses per device per hour. Guessing a 4 digit PIN that way takes about a month on average, and each extra digit multiplies that by ten. Only a parent can pair a device, so guessing cannot be spread across new devices. Parents get a `kid.pin.failures` notification after 5 failures in a row on a device.
 
 ## Upgrading
 
