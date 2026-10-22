@@ -72,4 +72,5 @@ public static class Policies
 {
     public const string Parent = "Parent";
     public const string Kid = "Kid";
+    public const string KidDevice = "KidDevice";
 }

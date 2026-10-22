@@ -16,6 +16,12 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<KidPinAttempt> KidPinAttempts => this.Set<KidPinAttempt>();
 
+    public DbSet<KidDevice> KidDevices => this.Set<KidDevice>();
+
+    public DbSet<KidDeviceProfile> KidDeviceProfiles => this.Set<KidDeviceProfile>();
+
+    public DbSet<KidPairingCode> KidPairingCodes => this.Set<KidPairingCode>();
+
     public DbSet<OwnedLabel> OwnedLabels => this.Set<OwnedLabel>();
 
     public DbSet<MediaRequest> MediaRequests => this.Set<MediaRequest>();
@@ -91,6 +97,44 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
         {
             entity.Property(attempt => attempt.DeviceHash).HasMaxLength(64);
             entity.HasIndex(attempt => new { attempt.KidProfileId, attempt.DeviceHash }).IsUnique();
+            entity.HasIndex(attempt => new { attempt.KidProfileId, attempt.KidDeviceId }).IsUnique();
+        });
+
+        modelBuilder.Entity<KidDevice>(entity =>
+        {
+            entity.Property(device => device.Name).HasMaxLength(50);
+            entity.Property(device => device.TokenHash).HasMaxLength(64);
+            entity.HasMany(device => device.Profiles)
+                .WithOne(assignment => assignment.KidDevice)
+                .HasForeignKey(assignment => assignment.KidDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany<KidSession>()
+                .WithOne(session => session.KidDevice)
+                .HasForeignKey(session => session.KidDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany<KidPinAttempt>()
+                .WithOne(attempt => attempt.KidDevice)
+                .HasForeignKey(attempt => attempt.KidDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany<KidPairingCode>()
+                .WithOne(code => code.KidDevice)
+                .HasForeignKey(code => code.KidDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<KidDeviceProfile>(entity =>
+        {
+            entity.HasKey(assignment => new { assignment.KidDeviceId, assignment.KidProfileId });
+            entity.HasOne(assignment => assignment.KidProfile)
+                .WithMany()
+                .HasForeignKey(assignment => assignment.KidProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<KidPairingCode>(entity =>
+        {
+            entity.Property(code => code.CodeHash).HasMaxLength(64);
+            entity.HasIndex(code => code.KidDeviceId).IsUnique();
         });
 
         modelBuilder.Entity<OwnedLabel>(entity =>

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Data;
 
@@ -12,16 +13,18 @@ public static class AuthEndpoints
     {
         RouteGroupBuilder auth = app.MapGroup("/api/v1/auth").WithTags("Auth").AllowAnonymous();
 
-        auth.MapGet("/status", (HttpContext context, SetupState setup) =>
+        auth.MapGet("/status", async (HttpContext context, SetupState setup, KidDevices devices, CancellationToken ct) =>
         {
             string? principalType = Principals.GetPrincipalType(context.User);
+            KidDevice? device = await devices.FindCurrentAsync(context, ct);
             return new AuthStatusResponse(
                 !setup.IsComplete,
                 principalType,
-                principalType is null ? null : context.User.Identity?.Name);
+                principalType is null ? null : context.User.Identity?.Name,
+                device is null ? null : new KidDeviceStatus(device.Name));
         })
             .WithName("GetAuthStatus")
-            .WithSummary("Reports whether first-run setup is required and who is signed in.")
+            .WithSummary("Reports whether first-run setup is required, who is signed in and whether this browser is a paired kid device.")
             .Produces<AuthStatusResponse>();
 
         auth.MapGet("/antiforgery", (HttpContext context, IAntiforgery antiforgery) =>
@@ -68,44 +71,14 @@ public static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
-        auth.MapPost("/login", async (
+        auth.MapPost("/login", (
             Credentials? credentials,
             HttpContext context,
             SetupState setup,
             ParentAccounts accounts,
             ParentSessions sessions,
             TimeProvider time,
-            CancellationToken ct) =>
-        {
-            if (credentials is not { Username: string username, Password: string password })
-            {
-                return CredentialsRequired();
-            }
-
-            if (!setup.IsComplete)
-            {
-                return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Setup required.");
-            }
-
-            LoginResult result = await accounts.LoginAsync(username, password, ct);
-            switch (result.Outcome)
-            {
-                case LoginOutcome.Succeeded when result.Account is not null:
-                    await sessions.SignInAsync(context, result.Account, ct);
-                    return Results.NoContent();
-                case LoginOutcome.LockedOut when result.LockedUntil is DateTimeOffset until:
-                    int seconds = Math.Max(1, (int)Math.Ceiling((until - time.GetUtcNow()).TotalSeconds));
-                    context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status429TooManyRequests,
-                        title: "Too many failed sign-in attempts.",
-                        detail: "Sign-in is locked. Try again later.");
-                default:
-                    return Results.Problem(
-                        statusCode: StatusCodes.Status401Unauthorized,
-                        title: "Invalid username or password.");
-            }
-        })
+            CancellationToken ct) => LoginAsync(credentials, context, setup, accounts, sessions, time, null, ct))
             .RequireRateLimiting(SecuritySetup.LoginRateLimitPolicy)
             .WithName("Login")
             .WithSummary("Signs a parent in with a username and password and starts a cookie session.")
@@ -163,12 +136,57 @@ public static class AuthEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 
+    public static async Task<IResult> LoginAsync(
+        Credentials? credentials,
+        HttpContext context,
+        SetupState setup,
+        ParentAccounts accounts,
+        ParentSessions sessions,
+        TimeProvider time,
+        Func<Task>? beforeSignIn,
+        CancellationToken ct)
+    {
+        if (credentials is not { Username: string username, Password: string password })
+        {
+            return CredentialsRequired();
+        }
+
+        if (!setup.IsComplete)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Setup required.");
+        }
+
+        LoginResult result = await accounts.LoginAsync(username, password, ct);
+        switch (result.Outcome)
+        {
+            case LoginOutcome.Succeeded when result.Account is not null:
+                if (beforeSignIn is not null)
+                {
+                    await beforeSignIn();
+                }
+
+                await sessions.SignInAsync(context, result.Account, ct);
+                return Results.NoContent();
+            case LoginOutcome.LockedOut when result.LockedUntil is DateTimeOffset until:
+                int seconds = Math.Max(1, (int)Math.Ceiling((until - time.GetUtcNow()).TotalSeconds));
+                context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status429TooManyRequests,
+                    title: "Too many failed sign-in attempts.",
+                    detail: "Sign-in is locked. Try again later.");
+            default:
+                return Results.Problem(
+                    statusCode: StatusCodes.Status401Unauthorized,
+                    title: "Invalid username or password.");
+        }
+    }
+
     private static IResult CredentialsRequired() =>
         Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A username and password are required.");
 }
 
 public sealed record Credentials(string? Username, string? Password);
 
-public sealed record AuthStatusResponse(bool SetupRequired, string? PrincipalType, string? Name);
+public sealed record AuthStatusResponse(bool SetupRequired, string? PrincipalType, string? Name, KidDeviceStatus? KidDevice);
 
 public sealed record AntiforgeryResponse(string Token, string HeaderName);

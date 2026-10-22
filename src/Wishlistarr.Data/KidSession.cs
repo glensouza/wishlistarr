@@ -8,6 +8,10 @@ public sealed class KidSession
 
     public KidProfile? KidProfile { get; set; }
 
+    public int? KidDeviceId { get; set; }
+
+    public KidDevice? KidDevice { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset LastSeenAt { get; set; }

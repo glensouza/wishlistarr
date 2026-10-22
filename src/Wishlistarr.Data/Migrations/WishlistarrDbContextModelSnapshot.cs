@@ -55,6 +55,78 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("JobRuns");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.KidDevice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("PairedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("KidDevices");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidDeviceProfile", b =>
+                {
+                    b.Property<int>("KidDeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("KidDeviceId", "KidProfileId");
+
+                    b.HasIndex("KidProfileId");
+
+                    b.ToTable("KidDeviceProfiles");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidPairingCode", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("KidDeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KidDeviceId")
+                        .IsUnique();
+
+                    b.ToTable("KidPairingCodes");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.KidPinAttempt", b =>
                 {
                     b.Property<int>("Id")
@@ -62,11 +134,13 @@ namespace Wishlistarr.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("DeviceHash")
-                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("FailedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("KidDeviceId")
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("KidProfileId")
@@ -75,12 +149,20 @@ namespace Wishlistarr.Data.Migrations
                     b.Property<DateTimeOffset>("LastFailedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("LockedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("NextAttemptAt")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("KidDeviceId");
+
                     b.HasIndex("KidProfileId", "DeviceHash")
+                        .IsUnique();
+
+                    b.HasIndex("KidProfileId", "KidDeviceId")
                         .IsUnique();
 
                     b.ToTable("KidPinAttempts");
@@ -169,6 +251,9 @@ namespace Wishlistarr.Data.Migrations
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("KidDeviceId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("KidProfileId")
                         .HasColumnType("INTEGER");
 
@@ -184,6 +269,8 @@ namespace Wishlistarr.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("KidDeviceId");
 
                     b.HasIndex("KidProfileId");
 
@@ -641,24 +728,68 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("WebhookEvents");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.KidDeviceProfile", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidDevice", "KidDevice")
+                        .WithMany("Profiles")
+                        .HasForeignKey("KidDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
+                        .WithMany()
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("KidDevice");
+
+                    b.Navigation("KidProfile");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidPairingCode", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidDevice", "KidDevice")
+                        .WithMany()
+                        .HasForeignKey("KidDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("KidDevice");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.KidPinAttempt", b =>
                 {
+                    b.HasOne("Wishlistarr.Data.KidDevice", "KidDevice")
+                        .WithMany()
+                        .HasForeignKey("KidDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
                         .WithMany("PinAttempts")
                         .HasForeignKey("KidProfileId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.Navigation("KidDevice");
+
                     b.Navigation("KidProfile");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.KidSession", b =>
                 {
+                    b.HasOne("Wishlistarr.Data.KidDevice", "KidDevice")
+                        .WithMany()
+                        .HasForeignKey("KidDeviceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Wishlistarr.Data.KidProfile", "KidProfile")
                         .WithMany("Sessions")
                         .HasForeignKey("KidProfileId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("KidDevice");
 
                     b.Navigation("KidProfile");
                 });
@@ -737,6 +868,11 @@ namespace Wishlistarr.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("ParentAccount");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.KidDevice", b =>
+                {
+                    b.Navigation("Profiles");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.KidProfile", b =>

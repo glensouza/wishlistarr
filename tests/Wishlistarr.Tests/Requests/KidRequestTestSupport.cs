@@ -107,7 +107,7 @@ public sealed class KidRequestApiFactory : AuthApiFactory
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         int profileId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
-        HttpClient kid = this.CreateClient();
+        HttpClient kid = await this.PairDeviceAsync(parent, "Tablet", [profileId]);
         Assert.Equal(HttpStatusCode.OK, (await KidApiFactory.SignInAsync(kid, profileId, null)).StatusCode);
         await AddAntiforgeryTokenAsync(kid);
         return (kid, profileId);

@@ -86,9 +86,15 @@ public sealed class KidProfiles(
         profile.FailedPinCount = 0;
         db.KidSessions.RemoveRange(await db.KidSessions.Where(session => session.KidProfileId == id).ToListAsync(ct));
         db.KidPinAttempts.RemoveRange(await db.KidPinAttempts.Where(attempt => attempt.KidProfileId == id).ToListAsync(ct));
+        db.KidDeviceProfiles.RemoveRange(await db.KidDeviceProfiles.Where(assignment => assignment.KidProfileId == id).ToListAsync(ct));
         await db.SaveChangesAsync(ct);
         return true;
     }
+
+    public async Task<IReadOnlyDictionary<int, DateTimeOffset>> ListDeviceLocksAsync(CancellationToken ct = default) =>
+        (await db.KidPinAttempts.AsNoTracking().Where(attempt => attempt.LockedAt != null).ToListAsync(ct))
+            .GroupBy(attempt => attempt.KidProfileId)
+            .ToDictionary(group => group.Key, group => group.Min(attempt => attempt.LockedAt!.Value));
 
     public async Task<bool> UnlockAsync(int id, CancellationToken ct = default)
     {

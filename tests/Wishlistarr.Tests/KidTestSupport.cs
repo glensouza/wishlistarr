@@ -81,7 +81,12 @@ public sealed class KidApiFactory : AuthApiFactory
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    public HttpClient CreateDevice() => this.CreateClient();
+    public async Task<HttpClient> CreateDeviceAsync()
+    {
+        HttpClient parent = await this.CreateAuthorizedClientAsync();
+        List<JsonElement> profiles = await parent.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid-profiles") ?? [];
+        return await this.PairDeviceAsync(parent, "Tablet", [.. profiles.Select(profile => profile.GetProperty("id").GetInt32())]);
+    }
 
     public async Task<HttpResponseMessage> FailAndWaitAsync(HttpClient device, int profileId, string wrongPin)
     {

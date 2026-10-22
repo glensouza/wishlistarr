@@ -228,8 +228,8 @@ public sealed class KidProfileTests
         int id = profile.GetProperty("id").GetInt32();
 
         HttpResponseMessage update = await parent.PutAsJsonAsync($"/api/v1/kid-profiles/{id}", new { name = "Nia B", avatar = "fox" });
-        HttpResponseMessage wrong = await KidApiFactory.SignInAsync(factory.CreateDevice(), id, "5556");
-        HttpResponseMessage signIn = await KidApiFactory.SignInAsync(factory.CreateDevice(), id, "5555");
+        HttpResponseMessage wrong = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), id, "5556");
+        HttpResponseMessage signIn = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), id, "5555");
 
         Assert.Equal(HttpStatusCode.OK, update.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
@@ -243,14 +243,14 @@ public sealed class KidProfileTests
         HttpClient parent = await factory.CreateSignedInClientAsync();
         JsonElement profile = await factory.CreateProfileAsync(parent, "Oli", pin: "3333", plexLabel: "oli-label");
         int id = profile.GetProperty("id").GetInt32();
-        HttpClient kid = factory.CreateDevice();
+        HttpClient kid = await factory.CreateDeviceAsync();
         Assert.Equal(HttpStatusCode.OK, (await KidApiFactory.SignInAsync(kid, id, "3333")).StatusCode);
 
         HttpResponseMessage delete = await parent.DeleteAsync($"/api/v1/kid-profiles/{id}?removeOwnedLabels=true");
         HttpResponseMessage again = await parent.DeleteAsync($"/api/v1/kid-profiles/{id}");
         List<JsonElement> list = await parent.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid-profiles") ?? [];
         HttpResponseMessage kidAfter = await kid.GetAsync("/api/v1/kid/me");
-        HttpResponseMessage signIn = await KidApiFactory.SignInAsync(factory.CreateDevice(), id, "3333");
+        HttpResponseMessage signIn = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), id, "3333");
         HttpResponseMessage reuse = await parent.PostAsJsonAsync(
             "/api/v1/kid-profiles",
             new { name = "Oli", avatar = "fox", plexLabel = "oli-label" });

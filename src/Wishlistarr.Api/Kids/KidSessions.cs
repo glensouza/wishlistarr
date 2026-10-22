@@ -11,7 +11,7 @@ namespace Wishlistarr.Api.Kids;
 
 public sealed class KidSessions(WishlistarrDbContext db, IOptions<KidOptions> options, TimeProvider time)
 {
-    public async Task SignInAsync(HttpContext context, KidProfile profile, CancellationToken ct = default)
+    public async Task SignInAsync(HttpContext context, KidProfile profile, int deviceId, CancellationToken ct = default)
     {
         DateTimeOffset now = time.GetUtcNow();
         List<KidSession> existing = await db.KidSessions.Where(session => session.KidProfileId == profile.Id).ToListAsync(ct);
@@ -22,6 +22,7 @@ public sealed class KidSessions(WishlistarrDbContext db, IOptions<KidOptions> op
         {
             Id = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).Replace('+', '-').Replace('/', '_').TrimEnd('='),
             KidProfileId = profile.Id,
+            KidDeviceId = deviceId,
             CreatedAt = now,
             LastSeenAt = now,
             ExpiresAt = now + options.Value.SessionLifetime,
@@ -42,14 +43,19 @@ public sealed class KidSessions(WishlistarrDbContext db, IOptions<KidOptions> op
             new AuthenticationProperties { IsPersistent = true, ExpiresUtc = created.ExpiresAt, AllowRefresh = false });
     }
 
-    public async Task<bool> ValidateAsync(string sessionId, string profileId, CancellationToken ct = default)
+    public async Task<bool> ValidateAsync(string sessionId, string profileId, int? deviceId, CancellationToken ct = default)
     {
         KidSession? session = await db.KidSessions.Include(row => row.KidProfile).FirstOrDefaultAsync(row => row.Id == sessionId, ct);
         DateTimeOffset now = time.GetUtcNow();
         if (session is null
+            || deviceId is null
+            || session.KidDeviceId != deviceId
             || session.ExpiresAt <= now
             || session.KidProfile is not { ArchivedAt: null, LockedAt: null }
-            || session.KidProfileId.ToString(CultureInfo.InvariantCulture) != profileId)
+            || session.KidProfileId.ToString(CultureInfo.InvariantCulture) != profileId
+            || !await db.KidDeviceProfiles.AnyAsync(
+                assignment => assignment.KidDeviceId == deviceId && assignment.KidProfileId == session.KidProfileId,
+                ct))
         {
             return false;
         }

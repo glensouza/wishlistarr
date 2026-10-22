@@ -57,6 +57,8 @@ public static class SecuritySetup
         services.AddScoped<KidProfiles>();
         services.AddScoped<KidSignIn>();
         services.AddScoped<KidSessions>();
+        services.AddScoped<KidDevices>();
+        services.AddSingleton<IAuthorizationHandler, PairedDeviceHandler>();
 
         services.AddAuthentication(AuthSchemes.Default)
             .AddPolicyScheme(AuthSchemes.Default, null, options => options.ForwardDefaultSelector = SelectScheme)
@@ -93,7 +95,8 @@ public static class SecuritySetup
             .AddPolicy(Policies.Kid, policy => policy
                 .RequireAuthenticatedUser()
                 .RequireRole(Principals.Kid)
-                .RequireAssertion(context => !context.User.IsInRole(Principals.Parent)));
+                .RequireAssertion(context => !context.User.IsInRole(Principals.Parent)))
+            .AddPolicy(Policies.KidDevice, policy => policy.AddRequirements(new PairedDeviceRequirement()));
 
         services.AddAntiforgery(options =>
         {
