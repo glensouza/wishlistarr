@@ -27,6 +27,13 @@ beforeEach(() => {
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
+      if (path === '/api/v1/auth/status') {
+        return Response.json({
+          setupRequired: false,
+          principalType: signedInAs ? 'Kid' : null,
+          kidDevice: { name: 'Tablet' },
+        })
+      }
       calls.push({
         method,
         path,

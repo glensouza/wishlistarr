@@ -1,24 +1,38 @@
 import { useState, type FormEvent } from 'react'
 import { useT } from './i18n'
 import { request, resetAntiforgery } from './api'
+import { exitKidMode } from './kidDevices'
 
-type Props = { setupRequired: boolean; onSignedIn: () => void }
+type Props = {
+  setupRequired: boolean
+  onSignedIn: () => void
+  kidDeviceName?: string
+}
 
-export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
+export default function ParentSignIn({
+  setupRequired,
+  onSignedIn,
+  kidDeviceName,
+}: Props) {
   const t = useT()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const exiting = kidDeviceName !== undefined
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError(null)
     try {
-      await request(
-        'POST',
-        setupRequired ? '/api/v1/auth/setup' : '/api/v1/auth/login',
-        { username, password },
-      )
+      if (exiting) {
+        await exitKidMode(username, password)
+      } else {
+        await request(
+          'POST',
+          setupRequired ? '/api/v1/auth/setup' : '/api/v1/auth/login',
+          { username, password },
+        )
+      }
       resetAntiforgery()
       onSignedIn()
     } catch (failure) {
@@ -28,11 +42,19 @@ export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
     }
   }
 
+  let title = setupRequired ? t('parent.setupTitle') : t('parent.signInTitle')
+  let action = setupRequired ? t('parent.createAccount') : t('parent.signIn')
+  if (exiting) {
+    title = t('exit.title')
+    action = t('exit.submit')
+  }
+
   return (
     <form onSubmit={submit}>
-      <h2>
-        {setupRequired ? t('parent.setupTitle') : t('parent.signInTitle')}
-      </h2>
+      <h2>{title}</h2>
+      {exiting && (
+        <p className="muted">{t('exit.intro', { device: kidDeviceName })}</p>
+      )}
       <label>
         {t('parent.username')}
         <input
@@ -51,9 +73,7 @@ export default function ParentSignIn({ setupRequired, onSignedIn }: Props) {
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button type="submit">
-        {setupRequired ? t('parent.createAccount') : t('parent.signIn')}
-      </button>
+      <button type="submit">{action}</button>
     </form>
   )
 }

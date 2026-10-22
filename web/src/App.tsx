@@ -1,5 +1,7 @@
 import { Link, Route, Routes } from 'react-router-dom'
+import { AuthStatusProvider } from './authStatus'
 import { useT } from './i18n'
+import KidGate from './kid/KidGate'
 import KidHome from './kid/KidHome'
 import { KidSessionProvider } from './kid/KidSession'
 import ProfilePicker from './kid/ProfilePicker'
@@ -18,15 +20,31 @@ function NotFound() {
 
 export default function App() {
   return (
-    <KidSessionProvider>
-      <Routes>
-        <Route element={<Shell />}>
-          <Route index element={<ProfilePicker />} />
-          <Route path="home" element={<KidHome />} />
-          <Route path="parent" element={<ParentArea />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      </Routes>
-    </KidSessionProvider>
+    <AuthStatusProvider>
+      <KidSessionProvider>
+        <Routes>
+          <Route element={<Shell />}>
+            <Route
+              index
+              element={
+                <KidGate>
+                  <ProfilePicker />
+                </KidGate>
+              }
+            />
+            <Route
+              path="home"
+              element={
+                <KidGate>
+                  <KidHome />
+                </KidGate>
+              }
+            />
+            <Route path="parent" element={<ParentArea />} />
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        </Routes>
+      </KidSessionProvider>
+    </AuthStatusProvider>
   )
 }

@@ -73,6 +73,22 @@ export const en = {
   'parent.signIn': 'Sign in',
   'parent.createAccount': 'Create account',
   'parent.signInFailed': 'Sign-in failed',
+  'parent.signOut': 'Sign out',
+  'parent.returnToKidMode': 'Return to kid mode',
+
+  'pair.title': 'Use this device for kids',
+  'pair.intro':
+    'Enter the pairing code a parent created under Kid devices. Only paired devices show the profile picker.',
+  'pair.code': 'Pairing code',
+  'pair.submit': 'Pair this device',
+  'pair.invalid':
+    'That code did not work. It may have expired or already been used.',
+  'pair.failed': 'We could not pair this device. Try again.',
+
+  'exit.title': 'Leave kid mode',
+  'exit.intro': 'A parent needs to sign in to leave kid mode on {device}.',
+  'exit.submit': 'Leave kid mode',
+  'exit.back': 'Back to the profiles',
 
   'admin.title': 'Kid profiles',
   'admin.none': 'No profiles yet.',
@@ -101,6 +117,36 @@ export const en = {
   'admin.removeLabels': 'Also remove the Plex labels this profile owns',
   'admin.confirmDelete': 'Confirm delete',
   'admin.keep': 'Keep profile',
+
+  'devices.title': 'Kid devices',
+  'devices.intro':
+    'Only paired devices show the profile picker, and each one only shows the profiles you pick for it.',
+  'devices.none': 'No kid devices yet.',
+  'devices.add': 'Add device',
+  'devices.newForm': 'New device',
+  'devices.editForm': 'Edit device',
+  'devices.name': 'Device name',
+  'devices.profiles': 'Profiles on this device',
+  'devices.noProfiles': 'Add a kid profile first.',
+  'devices.current': 'this device',
+  'devices.paired': 'Paired',
+  'devices.lastSeen': 'Last used {time}',
+  'devices.waiting': 'Waiting to be paired until {time}',
+  'devices.notPaired': 'Not paired',
+  'devices.profileList': 'Profiles: {names}',
+  'devices.noAssigned': 'No profiles',
+  'devices.edit': 'Edit {name}',
+  'devices.newCode': 'New pairing code for {name}',
+  'devices.revoke': 'Revoke {name}',
+  'devices.revokeDialog': 'Revoke {name}',
+  'devices.revokeQuestion':
+    'Revoke {name}? It stops working right away and anyone signed in on it is signed out.',
+  'devices.confirmRevoke': 'Confirm revoke',
+  'devices.keep': 'Keep device',
+  'devices.codeTitle': 'Pairing code for {name}',
+  'devices.codeIntro':
+    'Open Wishlistarr on the kid device, choose Parents and enter this code. It works once and expires at {time}.',
+  'devices.codeDone': 'Done',
 
   'plex.user': 'Plex user',
   'plex.none': 'None',
