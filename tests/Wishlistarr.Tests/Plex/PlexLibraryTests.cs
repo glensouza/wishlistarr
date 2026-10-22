@@ -64,7 +64,7 @@ public sealed class PlexLibraryTests
                 new MediaServerUser("5551002", "Sam", null, true, true, false),
                 new MediaServerUser("5551003", "Alex", "alexplays", true, false, false),
                 new MediaServerUser("7770002", "Grandma", "grandma", false, false, false),
-                new MediaServerUser("7770004", "cousin_kim", "cousin_kim", false, true, false),
+                new MediaServerUser("7770004", "Kim", null, true, true, false),
             ],
             users);
     }

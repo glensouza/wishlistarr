@@ -38,6 +38,18 @@ The addresses plex.tv lists for a server are controlled by whoever owns that ser
 
 Server addresses only come from plex.tv for the chosen server. They must be plain `http` or `https` base addresses with no credentials, path, query or fragment, redirects are not followed, and the generic `PUT /api/v1/settings/{key}` endpoint refuses every `plex.` key. There is no way to enter a server address by hand.
 
+## Notes from a live account
+
+The plex.tv endpoints are undocumented, so the client and the test fixtures follow what a real account returns.
+
+- A server can list many connections, mostly local HTTPS addresses on its other network interfaces. Only some answer from where Wishlistarr runs, which is why every candidate is probed and checked against the machine identifier.
+- Servers list HTTPS connections on `plex.direct` host names. Local ones are marked `local` and the relay is marked `relay`.
+- Managed users in `/api/users` have no `username` or `email` attribute, and are also marked `home="1"` and `restricted="1"`. Plex Home users in `/api/home/users` carry `admin`, `guest` and `restricted`; guests have an empty `username`.
+- Libraries that use the `com.plexapp.agents.none` agent have no external guids and never match a lookup.
+- Devices such as phones appear in the resources list without an access token and are skipped because they do not provide `server`.
+- The PIN flow was checked with one throwaway PIN that was never claimed. Creating it answers `201`, and reading it back answers `200` with the same shape and `authToken: null` until it is approved. Its location block also carries `in_privacy_restricted_region`.
+- Shared servers were not verified live, because the account used only owns its servers. The listed connections for a shared server follow the owner's settings, as described above.
+
 ## Settings and secrets
 
 The account token (`plex.token`) and the server access token (`plex.server_token`) are stored encrypted like other secret settings and are never returned by the API. HTTP client logging is disabled for the Plex clients, and tokens are sent in the `X-Plex-Token` header rather than the URL.

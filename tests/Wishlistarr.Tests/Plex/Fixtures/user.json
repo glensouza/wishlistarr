@@ -20,5 +20,42 @@
   "homeSize": 3,
   "homeAdmin": true,
   "restricted": false,
-  "anonymous": null
+  "anonymous": null,
+  "guest": false,
+  "maxHomeSize": 15,
+  "mailingListActive": false,
+  "pin": "",
+  "subscription": {
+    "active": true,
+    "subscribedAt": "2021-01-01 00:00:00 UTC",
+    "status": "Active",
+    "paymentService": "fixture",
+    "plan": "lifetime",
+    "features": ["download_certificates", "hardware_transcoding", "home"]
+  },
+  "subscriptionDescription": "Fixture Pass",
+  "entitlements": ["all"],
+  "roles": ["plexpass"],
+  "services": [
+    { "identifier": "metadata", "endpoint": "https://metadata.example.test", "token": null, "secret": null, "status": "online" }
+  ],
+  "profile": {
+    "autoSelectAudio": true,
+    "defaultAudioAccessibility": 0,
+    "defaultAudioLanguage": "en",
+    "defaultAudioLanguages": null,
+    "defaultSubtitleLanguage": "en",
+    "defaultSubtitleLanguages": null,
+    "autoSelectSubtitle": 1,
+    "defaultSubtitleAccessibility": 0,
+    "defaultSubtitleForced": 0,
+    "watchedIndicator": 1,
+    "mediaReviewsVisibility": 0,
+    "mediaReviewsLanguages": null,
+    "mediaPostsVisibility": true
+  },
+  "twoFactorEnabled": false,
+  "backupCodesCreated": false,
+  "adsConsent": null,
+  "experimentalFeatures": false
 }
