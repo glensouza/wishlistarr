@@ -391,7 +391,7 @@ public sealed class KidProfileTests
     }
 
     [Fact]
-    public async Task Keyword_and_language_lists_stop_at_one_hundred_and_fifty()
+    public async Task Keyword_list_stops_at_one_hundred_and_language_list_at_fifty()
     {
         using KidApiFactory factory = new();
         HttpClient parent = await factory.CreateSignedInClientAsync();
