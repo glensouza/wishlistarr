@@ -21,6 +21,7 @@ public static class PlexServiceCollectionExtensions
         services.AddSingleton<IMediaServer>(provider => provider.GetRequiredService<PlexMediaServer>());
         services.AddSingleton<IMediaServerAccount>(provider => provider.GetRequiredService<PlexMediaServer>());
         services.AddSingleton<ILibraryScanner>(provider => provider.GetRequiredService<PlexMediaServer>());
+        services.AddSingleton<IMediaServerRestrictions, PlexRestrictionReader>();
 
         services.AddHttpClient(PlexTvClient.HttpClientName, (provider, client) =>
             {

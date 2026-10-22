@@ -14,6 +14,19 @@ export type KidProfile = {
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
   allowedOriginalLanguages: string[]
+  plexRestrictions?: PlexRestrictions | null
+}
+
+export type RestrictionState = 'enforced' | 'notEnforced' | 'unknown'
+
+export type LabelRestriction = {
+  state: RestrictionState
+  mode: 'allowOnly' | null
+}
+
+export type PlexRestrictions = {
+  movies: LabelRestriction
+  television: LabelRestriction
 }
 
 export type KidProfileInput = {

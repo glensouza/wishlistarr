@@ -72,6 +72,10 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     public bool PinGone { get; set; }
 
+    public string? UsersXml { get; set; }
+
+    public int? UsersStatus { get; set; }
+
     public string? ServerTokenOverride { get; set; }
 
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
@@ -419,7 +423,7 @@ public sealed partial class FakePlexServer : IAsyncDisposable
                 await WriteAsync(context, this.ResourcesJson);
                 break;
             case "/api/users":
-                await WriteAsync(context, Fixture("users.xml"), "application/xml");
+                await WriteAsync(context, this.UsersXml ?? Fixture("users.xml"), "application/xml", this.UsersStatus ?? StatusCodes.Status200OK);
                 break;
             case "/api/v2/friends":
                 context.Response.StatusCode = StatusCodes.Status410Gone;

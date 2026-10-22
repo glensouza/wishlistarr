@@ -21,6 +21,8 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 
 ### Plex label
 
+Whether the mapped Plex user actually filters by the label is checked and reported; see [plex-restrictions.md](plex-restrictions.md).
+
 The label defaults to the profile name. Labels are 1 to 64 characters, cannot start or end with whitespace, and cannot contain commas, pipes or control characters, because Plex content filters use those to separate values. Each active profile owns a distinct label.
 
 ### PINs

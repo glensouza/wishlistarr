@@ -8,6 +8,7 @@ import {
   updateKidProfile,
   type KidProfile,
   type KidProfileInput,
+  type PlexRestrictions,
 } from './kidProfiles'
 import { useT } from './i18n'
 import PlexUserPicker from './PlexUserPicker'
@@ -141,6 +142,7 @@ export default function KidProfilesAdmin() {
           <li key={profile.id}>
             <strong>{profile.name}</strong> ({profile.avatar})
             {profile.isLocked && <span> {t('admin.locked')}</span>}
+            <RestrictionNotes restrictions={profile.plexRestrictions} />
             <button type="button" onClick={() => setEditing(profile)}>
               {t('admin.edit', { name: profile.name })}
             </button>
@@ -183,6 +185,33 @@ export default function KidProfilesAdmin() {
         />
       )}
     </section>
+  )
+}
+
+function RestrictionNotes({
+  restrictions,
+}: {
+  restrictions?: PlexRestrictions | null
+}) {
+  const t = useT()
+  if (!restrictions) return null
+  const kinds = [
+    ['admin.restriction.movies', restrictions.movies],
+    ['admin.restriction.television', restrictions.television],
+  ] as const
+  return (
+    <ul aria-label={t('admin.restriction.heading')}>
+      {kinds.map(([key, restriction]) => {
+        const type = t(key)
+        const message =
+          restriction.state === 'notEnforced'
+            ? t('admin.restriction.notEnforced', { type })
+            : restriction.state === 'unknown'
+              ? t('admin.restriction.unknown', { type })
+              : t('admin.restriction.enforced', { type })
+        return <li key={key}>{message}</li>
+      })}
+    </ul>
   )
 }
 
