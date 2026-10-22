@@ -18,7 +18,7 @@ export type RestrictionState = 'enforced' | 'notEnforced' | 'unknown'
 
 export type LabelRestriction = {
   state: RestrictionState
-  mode: 'allowOnly' | 'exclude' | null
+  mode: 'allowOnly' | null
 }
 
 export type PlexRestrictions = {

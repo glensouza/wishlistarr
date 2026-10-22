@@ -177,12 +177,7 @@ function RestrictionNotes({
             ? t('admin.restriction.notEnforced', { type })
             : restriction.state === 'unknown'
               ? t('admin.restriction.unknown', { type })
-              : t(
-                  restriction.mode === 'exclude'
-                    ? 'admin.restriction.enforcedExclude'
-                    : 'admin.restriction.enforcedAllow',
-                  { type },
-                )
+              : t('admin.restriction.enforced', { type })
         return <li key={key}>{message}</li>
       })}
     </ul>

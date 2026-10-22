@@ -118,12 +118,10 @@ export const en = {
   'admin.restriction.heading': 'Plex label enforcement',
   'admin.restriction.movies': 'movies',
   'admin.restriction.television': 'TV shows',
-  'admin.restriction.enforcedAllow':
+  'admin.restriction.enforced':
     'Plex enforces the label for {type} (allow only)',
-  'admin.restriction.enforcedExclude':
-    'Plex enforces the label for {type} (exclude)',
   'admin.restriction.notEnforced':
-    'Plex does not enforce the label for {type}. Add it to the mapped user in Plex under Restrictions.',
+    'Plex does not enforce the label for {type}. Add it as an allowed label for the mapped user in Plex.',
   'admin.restriction.unknown':
     'Could not tell whether Plex enforces the label for {type}',
   'admin.confirmDelete': 'Confirm delete',

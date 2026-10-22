@@ -251,7 +251,7 @@ it('shows what Plex enforces for a mapped profile and how to fix it', async () =
       name: 'Ben',
       plexUserId: '11',
       plexRestrictions: {
-        movies: { state: 'enforced', mode: 'exclude' },
+        movies: { state: 'notEnforced', mode: null },
         television: { state: 'unknown', mode: null },
       },
     },
@@ -266,7 +266,7 @@ it('shows what Plex enforces for a mapped profile and how to fix it', async () =
     screen.getByText(/Plex does not enforce the label for TV shows/),
   ).toBeTruthy()
   expect(
-    screen.getByText('Plex enforces the label for movies (exclude)'),
+    screen.getByText(/Plex does not enforce the label for movies/),
   ).toBeTruthy()
   expect(
     screen.getByText(
