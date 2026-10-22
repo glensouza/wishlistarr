@@ -95,8 +95,6 @@ public sealed class PlexHarness : IAsyncDisposable
 
     public IMediaServerAccount Account => this.Provider.GetRequiredService<IMediaServerAccount>();
 
-    public ManualTime Time => this.time ?? throw new InvalidOperationException("This harness has no clock.");
-
     public static async Task<PlexHarness> CreateAsync(Action<PlexOptions>? configure = null, ManualTime? time = null) =>
         new(await FakePlexServer.StartAsync(), configure, time);
 

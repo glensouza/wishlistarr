@@ -105,18 +105,17 @@ public sealed class SqlitePlexHarness : IAsyncDisposable
         await using SqliteConnection connection = new($"Data Source={this.DatabasePath}");
         await connection.OpenAsync();
         await using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """SELECT "Key", "Value" FROM "Settings" WHERE "Key" = $key""";
-        SqliteParameter parameter = command.CreateParameter();
-        parameter.ParameterName = "$key";
-        command.Parameters.Add(parameter);
-        foreach (string key in keys)
+        string[] names = [.. keys.Select((_, index) => $"$key{index}")];
+        command.CommandText = $"""SELECT "Key", "Value" FROM "Settings" WHERE "Key" IN ({string.Join(", ", names)})""";
+        for (int index = 0; index < keys.Length; index++)
         {
-            parameter.Value = key;
-            await using SqliteDataReader reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-            {
-                values[key] = reader.GetString(1);
-            }
+            command.Parameters.AddWithValue(names[index], keys[index]);
+        }
+
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            values[reader.GetString(0)] = reader.GetString(1);
         }
 
         return values;

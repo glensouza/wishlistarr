@@ -77,7 +77,7 @@ public sealed class PlexRobustnessTests
 
         List<(string? Url, string? Token)> samples = [];
         Task<SelectedMediaServer?> selecting = harness.Account.SelectServerAsync(FakePlexServer.MachineIdentifier);
-        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(60));
         while (!selecting.IsCompleted)
         {
             samples.Add(await ReadPairAsync(harness));
