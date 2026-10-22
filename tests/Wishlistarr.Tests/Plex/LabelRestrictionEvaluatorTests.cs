@@ -35,6 +35,18 @@ public sealed class LabelRestrictionEvaluatorTests
     }
 
     [Theory]
+    [InlineData("label=Ada|label!=Ada")]
+    [InlineData("label!=Ada|label=Ada")]
+    [InlineData("label=Ada%2CBen|label!=Ada")]
+    public void Filters_that_both_allow_and_exclude_the_label_do_not_enforce_it(string filter)
+    {
+        LabelRestriction result = LabelRestrictionEvaluator.Evaluate(filter, "Ada");
+
+        Assert.Equal(LabelEnforcement.NotEnforced, result.State);
+        Assert.Null(result.Mode);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("something unexpected")]
     [InlineData("<html>")]
