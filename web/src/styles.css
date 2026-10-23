@@ -401,3 +401,88 @@ fieldset label:has(input[type='checkbox']) {
 .badge-needsParent {
   color: var(--color-text-muted);
 }
+
+.wishlist {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-5);
+}
+
+.wishlist-remaining {
+  margin: 0;
+  font-weight: 700;
+}
+
+.wishlist-empty {
+  padding: var(--space-5);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+}
+
+.wishlist-items {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wish-card {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 3px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.wish-card h3,
+.wish-card p {
+  margin: 0;
+}
+
+.wish-note {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wish-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.wish-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap-size);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-radius: var(--radius-round);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.wish-link:hover {
+  background: var(--color-primary-hover);
+}
+
+.wish-link-app {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 3px solid var(--color-border);
+}
+
+.wish-link-app:hover {
+  background: var(--color-surface-raised);
+}
+
+.badge-waiting,
+.badge-onTheWay,
+.badge-ready,
+.badge-denied {
+  font-weight: 700;
+}

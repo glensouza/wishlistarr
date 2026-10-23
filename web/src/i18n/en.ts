@@ -33,8 +33,30 @@ export const en = {
   'pin.failed': 'We could not sign you in. Try again.',
 
   'home.welcome': 'Welcome, {name}!',
-  'home.intro': 'Your wishlist will show up here soon.',
+  'home.intro':
+    'Ask for a movie or a show, and it will show up on your wishlist.',
   'home.signOut': 'Switch profile',
+
+  'wishlist.title': 'Your wishlist',
+  'wishlist.empty':
+    'Nothing here yet. Find a movie or a show you would love, and ask for it.',
+  'wishlist.loading': 'Loading your wishlist',
+  'wishlist.failed': 'We could not load your wishlist.',
+  'wishlist.retry': 'Try again',
+  'wishlist.waiting': 'Waiting for a parent',
+  'wishlist.onTheWay': 'On its way',
+  'wishlist.ready': 'Ready to watch',
+  'wishlist.denied': 'Not this time',
+  'wishlist.remaining': '{count} wishes left this week',
+  'wishlist.remainingOne': '1 wish left this week',
+  'wishlist.noneLeft':
+    'You have used your wishes for this week. A new week brings more.',
+  'wishlist.noneLeftWhen':
+    'You have used your wishes for this week. More wishes start on {when}.',
+  'wishlist.unlimited': 'You can ask for as many as you like.',
+  'wishlist.watch': 'Watch {title} in Plex',
+  'wishlist.openApp': 'Open {title} in the Plex app',
+  'wishlist.untitled': 'Something you asked for',
 
   'search.title': 'Find something to watch',
   'search.label': 'Search movies and shows',
