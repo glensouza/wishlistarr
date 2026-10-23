@@ -102,6 +102,45 @@ a {
   outline: none;
 }
 
+.shell-footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 2px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.tmdb-logo {
+  display: block;
+  width: 7.5rem;
+  max-width: 100%;
+  height: auto;
+}
+
+.about-credits {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 42rem;
+}
+
+.about-credits p {
+  margin: 0;
+}
+
+.license-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.watch-providers {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.watch-providers ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
 button,
 select,
 input {

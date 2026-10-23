@@ -170,6 +170,30 @@ export const en = {
   'plex.loading': 'Loading Plex users',
   'plex.unavailable': 'Plex users are unavailable. Plex may not be connected.',
   'plex.empty': 'No Plex users found.',
+
+  'about.link': 'About',
+  'about.title': 'About',
+  'about.tmdbAlt': 'TMDB',
+  'about.tmdbNotice':
+    'This product uses the TMDB API but is not endorsed or certified by TMDB.',
+  'about.fanartBefore': 'Artwork data from ',
+  'about.fanartLink': 'fanart.tv',
+  'about.fanartAfter': '.',
+  'about.dogBefore': 'Powered by ',
+  'about.dogLink': 'DoesTheDogDie.com',
+  'about.plex':
+    'Wishlistarr is not affiliated with, endorsed, or sponsored by Plex, Inc. Plex is a trademark of Plex, Inc.',
+  'about.gplBefore': 'Wishlistarr is free software under the ',
+  'about.gplLink': 'GNU General Public License v3.0',
+  'about.gplAfter': '.',
+  'about.licenses': 'Open source packages',
+  'about.licensesLoading': 'Loading package licenses',
+  'about.licensesUnavailable': 'The package license list is unavailable.',
+  'about.package': '{name} {version} ({license})',
+
+  'providers.list': 'Watch providers',
+  'providers.creditBefore': 'Watch provider data from ',
+  'providers.justWatch': 'JustWatch',
 } as const
 
 export type MessageKey = keyof typeof en

@@ -1,6 +1,6 @@
 # TMDB
 
-Wishlistarr reads titles, ratings and artwork from [The Movie Database](https://www.themoviedb.org/). You need your own TMDB API key (v3 key or v4 read access token). A key containing a `.` is treated as a v4 read access token and sent as a bearer credential; anything else is sent as a v3 `api_key`.
+Wishlistarr reads titles, ratings and artwork from [The Movie Database](https://www.themoviedb.org/). You need your own TMDB API key (v3 key or v4 read access token). A key containing a `.` is treated as a v4 read access token and sent as a bearer credential; anything else is sent as a v3 `api_key`. How to attribute TMDB, and the other services Wishlistarr uses, is in [Attribution](attribution.md).
 
 ## Configuration
 
@@ -24,10 +24,10 @@ TMDB's terms do not allow keeping its data longer than six months, so everything
 
 What is stored:
 
-| Data | Where | Kept |
-| --- | --- | --- |
-| The TMDB id found for a Plex item that only has a TVDB or IMDb id | `LibraryExternalIds`, rows with origin `TmdbLookup` | Until the retention is reached, then deleted. The item is looked up again by the next library refresh. |
-| The title text of a kid request | `MediaRequests.Title` with `TitleFetchedAt` | Until the retention is reached, then cleared. The request keeps its kind, TMDB id and status, and the title is fetched again from TMDB the next time it is needed. |
+| Data                                                              | Where                                               | Kept                                                                                                                                                               |
+| ----------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The TMDB id found for a Plex item that only has a TVDB or IMDb id | `LibraryExternalIds`, rows with origin `TmdbLookup` | Until the retention is reached, then deleted. The item is looked up again by the next library refresh.                                                             |
+| The title text of a kid request                                   | `MediaRequests.Title` with `TitleFetchedAt`         | Until the retention is reached, then cleared. The request keeps its kind, TMDB id and status, and the title is fetched again from TMDB the next time it is needed. |
 
 Ids that Plex reports, request ids and states, and library titles (a kind plus a TMDB id, nothing else) are not TMDB metadata and are not subject to the retention. Posters and other images are proxied from TMDB per request and are never written to disk. Keyword ids read for a content decision are not written to the database either; they stay in the response cache. The in-memory response cache holds entries for at most 7 days and is emptied when stored TMDB data is cleared.
 

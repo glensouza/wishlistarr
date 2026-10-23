@@ -15,12 +15,19 @@ function sources(dir: string): string[] {
   })
 }
 
+const allowedHref =
+  /^https:\/\/(?:www\.themoviedb\.org\/|www\.justwatch\.com\/|fanart\.tv\/|www\.doesthedogdie\.com\/?|www\.gnu\.org\/licenses\/gpl-3\.0\.html)$/
+
 it('loads nothing from third-party hosts', () => {
   const files = [join(web, 'index.html'), ...sources(join(web, 'src'))]
   for (const file of files) {
-    expect(readFileSync(file, 'utf8'), file).not.toMatch(
-      /(?:src|href)=["']https?:|url\(\s*["']?(?:https?:)?\/\/|@import\s+(?:url\()?["']?https?:|fonts\.(?:googleapis|gstatic)/,
+    const text = readFileSync(file, 'utf8')
+    expect(text, file).not.toMatch(
+      /src=["']https?:|url\(\s*["']?(?:https?:)?\/\/|@import\s+(?:url\()?["']?https?:|fonts\.(?:googleapis|gstatic)/,
     )
+    for (const match of text.matchAll(/href=["'](https?:[^"']+)["']/g)) {
+      expect(match[1], file).toMatch(allowedHref)
+    }
   }
 })
 

@@ -21,6 +21,9 @@ export default function Shell() {
       <main id="main" tabIndex={-1} className="shell-main">
         <Outlet />
       </main>
+      <footer className="shell-footer">
+        <Link to="/about">{t('about.link')}</Link>
+      </footer>
     </div>
   )
 }
