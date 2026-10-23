@@ -72,6 +72,7 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         }
 
         Assert.Empty(unprotected);
+        Assert.Contains(("GET", "/api/v1/kid/requests"), this.GetRoutes(IsKidOnly));
     }
 
     [Fact]

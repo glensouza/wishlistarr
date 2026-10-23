@@ -25,6 +25,8 @@ public enum KidRequestOutcome
 
 public sealed record KidRequestResult(KidRequestOutcome Outcome, MediaRequest? Request = null, DateTimeOffset? AllowanceResetsAt = null);
 
+public sealed record KidAllowanceSnapshot(int? Remaining, DateTimeOffset? ResetsAt);
+
 public sealed partial class KidRequestFlow(
     WishlistarrDbContext db,
     MediaRequests requests,
@@ -174,6 +176,19 @@ public sealed partial class KidRequestFlow(
             this.LogLookupFailed(ex, title.Kind, title.TmdbId);
             return [];
         }
+    }
+
+    public async Task<KidAllowanceSnapshot> AllowanceAsync(KidProfile profile, CancellationToken ct = default)
+    {
+        if (profile.WeeklyAllowance is not int allowance)
+        {
+            return new KidAllowanceSnapshot(null, null);
+        }
+
+        TimeZoneInfo zone = await this.GetTimeZoneAsync(ct);
+        DateTimeOffset now = time.GetUtcNow();
+        int used = await this.CountThisWeekAsync(profile.Id, allowance, AllowanceWeek.StartOf(now, zone), ct);
+        return new KidAllowanceSnapshot(Math.Max(0, allowance - used), AllowanceWeek.NextStart(now, zone));
     }
 
     private async Task<TimeZoneInfo> GetTimeZoneAsync(CancellationToken ct) =>
