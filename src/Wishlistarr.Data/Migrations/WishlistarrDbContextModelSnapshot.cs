@@ -181,6 +181,17 @@ namespace Wishlistarr.Data.Migrations
                     b.Property<DateTimeOffset?>("ArchivedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("AutoApprove")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AutoApproveMovieRating")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AutoApproveTvRating")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Avatar")
                         .IsRequired()
                         .HasMaxLength(32)
