@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useT, type MessageKey } from '../i18n'
-import { listKidRequests, type KidRequest } from './kidApi'
+import {
+  listKidHistory,
+  listKidRequests,
+  type KidHistoryAction,
+  type KidHistoryEntry,
+  type KidRequest,
+} from './kidApi'
 
 const stateKey = (state: string): MessageKey => {
   switch (state) {
@@ -18,20 +24,46 @@ const stateKey = (state: string): MessageKey => {
       return 'kidRequests.labeled'
     case 'failed':
       return 'kidRequests.failed'
+    case 'revoked':
+      return 'kidRequests.revoked'
     default:
       return 'kidRequests.unknown'
+  }
+}
+
+const historyKey = (action: KidHistoryAction): MessageKey => {
+  switch (action) {
+    case 'granted':
+      return 'kidRequests.granted'
+    case 'asked':
+      return 'kidRequests.asked'
+    case 'approved':
+      return 'kidRequests.historyApproved'
+    case 'denied':
+      return 'kidRequests.historyDenied'
+    case 'ready':
+      return 'kidRequests.ready'
+    case 'revoked':
+      return 'kidRequests.historyRevoked'
+    case 'failed':
+      return 'kidRequests.historyFailed'
   }
 }
 
 export default function KidRequests() {
   const t = useT()
   const [rows, setRows] = useState<KidRequest[] | null>(null)
+  const [history, setHistory] = useState<KidHistoryEntry[] | null>(null)
   const [error, setError] = useState(false)
 
   useEffect(() => {
     let current = true
-    listKidRequests().then(
-      (loaded) => current && setRows(loaded),
+    Promise.all([listKidRequests(), listKidHistory()]).then(
+      ([loaded, events]) => {
+        if (!current) return
+        setRows(loaded)
+        setHistory(events)
+      },
       () => current && setError(true),
     )
     return () => {
@@ -54,6 +86,21 @@ export default function KidRequests() {
               {row.state === 'denied' && row.denialReason && (
                 <p>{row.denialReason}</p>
               )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3>{t('kidRequests.history')}</h3>
+      {history !== null && history.length === 0 && (
+        <p>{t('kidRequests.historyEmpty')}</p>
+      )}
+      {history !== null && history.length > 0 && (
+        <ul>
+          {history.map((entry) => (
+            <li key={entry.id}>
+              <strong>{entry.title}</strong>
+              <span>{t(historyKey(entry.action))}</span>
+              {entry.action === 'denied' && entry.note && <p>{entry.note}</p>}
             </li>
           ))}
         </ul>

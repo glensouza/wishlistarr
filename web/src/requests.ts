@@ -8,6 +8,7 @@ export type RequestState =
   | 'available'
   | 'labeled'
   | 'failed'
+  | 'revoked'
 
 export type ParentRequest = {
   id: number
@@ -44,3 +45,20 @@ export const approveRequests = (ids: number[], reason: string | null) =>
 
 export const denyRequests = (ids: number[], reason: string | null) =>
   request<{ results: DecisionItem[] }>('POST', `${base}/deny`, { ids, reason })
+
+export const grantRequest = (
+  kidProfileId: number,
+  kind: 'movie' | 'show',
+  tmdbId: number,
+) =>
+  request<{ id: number; state: RequestState }>(
+    'POST',
+    `${base}/grant`,
+    { kidProfileId, kind, tmdbId },
+  )
+
+export const revokeRequests = (ids: number[]) =>
+  request<{ results: DecisionItem[] }>('POST', `${base}/revoke`, {
+    ids,
+    reason: null,
+  })

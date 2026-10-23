@@ -79,4 +79,27 @@ export type KidRequest = {
 export const listKidRequests = () =>
   request<KidRequest[]>('GET', '/api/v1/kid/requests')
 
+export type KidHistoryAction =
+  | 'granted'
+  | 'asked'
+  | 'approved'
+  | 'denied'
+  | 'ready'
+  | 'revoked'
+  | 'failed'
+
+export type KidHistoryEntry = {
+  id: number
+  requestId: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  action: KidHistoryAction
+  at: string
+  note: string | null
+}
+
+export const listKidHistory = () =>
+  request<KidHistoryEntry[]>('GET', '/api/v1/kid/requests/history')
+
 export const pinLength = { min: 4, max: 8 }
