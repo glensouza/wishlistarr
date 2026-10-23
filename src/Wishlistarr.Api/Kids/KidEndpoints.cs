@@ -232,6 +232,8 @@ public static class KidEndpoints
             .WithSummary("Unlocks a locked kid profile and clears its failed PIN counts.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        profiles.MapRequestHistory();
     }
 
     public static async Task ValidateKidSessionAsync(CookieValidatePrincipalContext context)
