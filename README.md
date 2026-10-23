@@ -17,7 +17,7 @@ Wishlistarr is a free and open source request app for families that share a Plex
 - **Content policy:** rules per profile decide whether a title is allowed, needs approval or is blocked.
 - **Parent approval:** requests that need a decision wait for a parent before anything is downloaded.
 - **Plex labels:** approved titles are labeled for the profile so Plex restrictions keep each child to their own library.
-- **Private by design:** no telemetry or analytics, and metadata comes from TMDB.
+- **Private by design:** nothing is sent as telemetry. An optional local metrics endpoint stays off unless you enable it. Metadata comes from TMDB.
 
 Wishlistarr is under active development and not yet released.
 
@@ -75,7 +75,7 @@ dotnet run --project src/Wishlistarr.AppHost
 
 The AppHost is a contributor tool only. It is not needed to run or build Wishlistarr, and it is not part of any release. Vite reads the API address from `WISHLISTARR_API_URL`, which the AppHost sets; it defaults to `http://localhost:5082`.
 
-On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in, and [docs/kid-devices.md](docs/kid-devices.md) for pairing kid devices. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server. See [docs/requests.md](docs/requests.md) for how requests move from pending to labeled. See [docs/kid-search.md](docs/kid-search.md) for kid search and its latency budget. See [docs/webhooks.md](docs/webhooks.md) for inbound Plex, Sonarr, Radarr and Seerr webhooks. See [docs/library.md](docs/library.md) for the local Plex library index.
+On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in, and [docs/kid-devices.md](docs/kid-devices.md) for pairing kid devices. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server. See [docs/requests.md](docs/requests.md) for how requests move from pending to labeled. See [docs/kid-search.md](docs/kid-search.md) for kid search and its latency budget. See [docs/webhooks.md](docs/webhooks.md) for inbound Plex, Sonarr, Radarr and Seerr webhooks. See [docs/library.md](docs/library.md) for the local Plex library index. See [docs/health.md](docs/health.md) for health checks, the log viewer, request history and the optional metrics endpoint.
 
 ## Test
 
@@ -95,7 +95,7 @@ C# style is defined in `.editorconfig` and enforced as warnings (errors in the b
 
 ## Privacy
 
-Wishlistarr does not collect any telemetry or analytics.
+Wishlistarr does not send telemetry or analytics. `GET /metrics` is a local Prometheus scrape and it stays off unless `Metrics:Enabled` is true. See [docs/health.md](docs/health.md).
 
 ## Acknowledgements
 
