@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
+      - "**.md"
       - docs/**
       - site/**
       - .github/ISSUE_TEMPLATE/**
@@ -21,6 +21,9 @@ on:
 jobs:
   dotnet:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -28,10 +31,18 @@ jobs:
           global-json-file: global.json
       - run: dotnet restore
       - run: dotnet build --no-restore --configuration Release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuget-licenses
+          path: web/public/licenses/nuget.json
+          if-no-files-found: error
       - run: dotnet test --no-build --configuration Release
 
   web:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         working-directory: web
@@ -46,4 +57,9 @@ jobs:
       - run: npm run lint
       - run: npm run format:check
       - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-licenses
+          path: web/public/licenses/npm.json
+          if-no-files-found: error
       - run: npm test

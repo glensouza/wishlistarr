@@ -11,6 +11,7 @@ coverage/
 node_modules/
 dist/
 src/Wishlistarr.Api/wwwroot/
+web/public/licenses/
 *.db
 *.db-shm
 *.db-wal

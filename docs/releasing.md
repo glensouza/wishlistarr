@@ -25,14 +25,14 @@ Tags must be cut from commits on `main`; the workflow fails otherwise.
    git push origin v1.2.3
    ```
 
-3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create` with generated notes. The release title is the tag name.
+3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create` with generated notes. The release title is the tag name. Before the image build it writes the third-party license notices, uploads them as artifacts, and attaches `npm-licenses.json` and `nuget-licenses.json` to the GitHub release. The image serves the same notices at `/licenses/npm.json` and `/licenses/nuget.json`. See [Attribution](attribution.md).
 
 ## Image tags
 
-| Release | Tags published |
-| --- | --- |
-| Stable, `v1.2.3` | `1.2.3`, `1.2`, `1`, `latest` |
-| Pre-release, `v1.0.0-rc.1` | `1.0.0-rc.1` only |
+| Release                    | Tags published                |
+| -------------------------- | ----------------------------- |
+| Stable, `v1.2.3`           | `1.2.3`, `1.2`, `1`, `latest` |
+| Pre-release, `v1.0.0-rc.1` | `1.0.0-rc.1` only             |
 
 Publishing a stable patch on an older line, such as `v1.1.5` after `v1.2.0`, would still move `latest` and `1`, so avoid it. Pre-releases never move `latest`, `1` or `1.2`, and the GitHub release is marked as a pre-release. Stable releases are marked as the latest release.
 
@@ -58,7 +58,7 @@ The tags are multi-arch manifests, so Docker selects the matching architecture a
 ## If a release fails
 
 - If the workflow fails before the image is pushed, fix the cause and re-run the failed workflow from the Actions page.
-- If the image was pushed but the GitHub release step failed, re-run the failed job; or create the release manually with `gh release create v1.2.3 --title v1.2.3 --generate-notes`.
+- If the image was pushed but the GitHub release step failed, re-run the failed job; or create the release manually with `gh release create v1.2.3 --title v1.2.3 --generate-notes` and attach `npm-licenses.json` and `nuget-licenses.json`.
 - If the tag itself is wrong and nothing was published, delete it with `git push --delete origin v1.2.3` and `git tag -d v1.2.3`, then tag again.
 
 ## Withdraw a release
