@@ -32,6 +32,7 @@ public sealed partial class KidRequestFlow(
     ITmdbClient tmdb,
     LibraryLookup library,
     LabelWriter labels,
+    RequestApproval approval,
     SettingsStore settings,
     TimeProvider time,
     ILogger<KidRequestFlow> logger)
@@ -40,6 +41,8 @@ public sealed partial class KidRequestFlow(
     public const string LabelSource = "request";
 
     public static readonly RequestActor InstantLabelActor = RequestActor.System("instant-label");
+
+    public static readonly RequestActor AutoApproveActor = RequestActor.System("auto-approve");
 
     public static bool TryFindTimeZone(string? id, [NotNullWhen(true)] out TimeZoneInfo? zone)
     {
@@ -98,22 +101,33 @@ public sealed partial class KidRequestFlow(
             details.Genres is null ? null : [.. details.Genres.Select(genre => genre.Id)],
             keywordIds,
             details.OriginalLanguage);
-        ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
-            content,
-            ContentPolicy.ForProfile(
-                profile.MovieAgeLimit,
-                profile.TvAgeLimit,
-                profile.BlockedGenreIds,
-                profile.BlockedKeywordIds,
-                profile.AllowedOriginalLanguages));
+        ContentPolicy policy = ContentPolicy.ForProfile(
+            profile.MovieAgeLimit,
+            profile.TvAgeLimit,
+            profile.BlockedGenreIds,
+            profile.BlockedKeywordIds,
+            profile.AllowedOriginalLanguages);
+        ContentDecision decision = ContentPolicyEngine.Default.Evaluate(content, policy);
         if (decision.Outcome == ContentOutcome.Blocked)
         {
             this.LogBlocked(profile.Id, title.Kind, title.TmdbId, decision.Reason.Code);
             return new KidRequestResult(KidRequestOutcome.NotAllowed);
         }
 
-        IReadOnlyList<MediaItem> matches = decision.Outcome == ContentOutcome.Allowed ? await this.FindInLibraryAsync(title, ct) : [];
-        bool instant = matches.Count > 0;
+        RatingLevel? rating = new RatingRule().Evaluate(content, policy).Reason.Level;
+        bool genresUnknown = profile.BlockedGenreIds.Count > 0 && content.GenreIds is not { Count: > 0 };
+        bool auto = new AutoApproveRule(
+            profile.AutoApprove,
+            profile.AutoApproveMovieRating,
+            profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
+        bool inspectLibrary = decision.Outcome == ContentOutcome.Allowed || auto;
+        (IReadOnlyList<MediaItem> matches, bool libraryKnown) = inspectLibrary
+            ? await this.FindInLibraryAsync(title, ct)
+            : ([], false);
+        bool inLibrary = libraryKnown && matches.Count > 0;
+        bool instant = decision.Outcome == ContentOutcome.Allowed && inLibrary;
+        bool autoNow = auto && libraryKnown && !instant;
+        bool counts = !instant && !(autoNow && inLibrary);
 
         RequestResult result;
         await using (IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct))
@@ -124,7 +138,7 @@ public sealed partial class KidRequestFlow(
                     && request.TmdbId == title.TmdbId
                     && request.State != RequestState.Denied,
                 ct);
-            if (!open && !instant && profile.WeeklyAllowance is int allowance)
+            if (!open && counts && profile.WeeklyAllowance is int allowance)
             {
                 TimeZoneInfo zone = await this.GetTimeZoneAsync(ct);
                 DateTimeOffset now = time.GetUtcNow();
@@ -139,7 +153,7 @@ public sealed partial class KidRequestFlow(
                 title,
                 name,
                 RequestActor.Kid(profile.Id, profile.Name),
-                countsTowardAllowance: !instant,
+                countsTowardAllowance: counts,
                 ct);
             if (result.Outcome == RequestOutcome.Created && instant)
             {
@@ -160,19 +174,30 @@ public sealed partial class KidRequestFlow(
             return new KidRequestResult(KidRequestOutcome.Merged, request);
         }
 
-        return new KidRequestResult(KidRequestOutcome.Created, instant ? await this.LabelAsync(request, matches, profile) : request);
+        if (instant)
+        {
+            return new KidRequestResult(KidRequestOutcome.Created, await this.LabelAsync(request, matches, profile));
+        }
+
+        if (!autoNow)
+        {
+            return new KidRequestResult(KidRequestOutcome.Created, request);
+        }
+
+        await approval.ApproveAsync(request.Id, AutoApproveActor, RequestApproval.AutoApproveReason, ct);
+        return new KidRequestResult(KidRequestOutcome.Created, await requests.GetAsync(request.Id, ct) ?? request);
     }
 
-    private async Task<IReadOnlyList<MediaItem>> FindInLibraryAsync(TitleKey title, CancellationToken ct)
+    private async Task<(IReadOnlyList<MediaItem> Items, bool Known)> FindInLibraryAsync(TitleKey title, CancellationToken ct)
     {
         try
         {
-            return await library.FindAsync(title, ct);
+            return (await library.FindAsync(title, ct), true);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && ex is MediaServerException or HttpRequestException or TaskCanceledException)
         {
             this.LogLookupFailed(ex, title.Kind, title.TmdbId);
-            return [];
+            return ([], false);
         }
     }
 

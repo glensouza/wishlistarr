@@ -75,6 +75,7 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
+builder.Services.AddScoped<RequestApproval>();
 builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();
 builder.Services.AddScoped<PlexEnforcement>();

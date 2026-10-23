@@ -101,12 +101,28 @@ public sealed class KidRequestApiFactory : AuthApiFactory
         int? weeklyAllowance = null,
         int[]? blockedGenreIds = null,
         int[]? blockedKeywordIds = null,
-        string[]? allowedOriginalLanguages = null)
+        string[]? allowedOriginalLanguages = null,
+        bool autoApprove = false,
+        string? autoApproveMovieRating = null,
+        string? autoApproveTvRating = null)
     {
         HttpClient parent = await this.CreateAuthorizedClientAsync();
         HttpResponseMessage created = await parent.PostAsJsonAsync(
             "/api/v1/kid-profiles",
-            new { name, avatar = "fox", movieAgeLimit, tvAgeLimit, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages });
+            new
+            {
+                name,
+                avatar = "fox",
+                movieAgeLimit,
+                tvAgeLimit,
+                weeklyAllowance,
+                blockedGenreIds,
+                blockedKeywordIds,
+                allowedOriginalLanguages,
+                autoApprove,
+                autoApproveMovieRating,
+                autoApproveTvRating,
+            });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         int profileId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 

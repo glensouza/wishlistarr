@@ -201,6 +201,9 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         return await this.TransitionAsync(requestId, target, actor, reason, ct);
     }
 
+    public Task<MediaRequest?> GetAsync(int requestId, CancellationToken ct = default) =>
+        this.LoadFreshAsync(requestId, ct);
+
     public async Task<IReadOnlyList<MediaRequestEvent>> GetHistoryAsync(int requestId, CancellationToken ct = default) =>
         await db.MediaRequestEvents.AsNoTracking()
             .Where(item => item.MediaRequestId == requestId)
