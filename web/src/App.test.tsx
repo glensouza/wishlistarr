@@ -126,6 +126,9 @@ it('asks for the parent sign-in when nobody is signed in', async () => {
   stubFetch(() => ({ setupRequired: false, principalType: null }))
   const { container } = renderAt('/parent')
   expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy()
+  expect(
+    screen.queryByRole('checkbox', { name: 'Let kids play YouTube trailers' }),
+  ).toBeNull()
   expect(await axe(container)).toHaveNoViolations()
 })
 
@@ -225,6 +228,10 @@ it('shows the kid profiles and devices to a signed-in parent', async () => {
   ).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Kid devices' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
+  const trailers = (await screen.findByRole('checkbox', {
+    name: 'Let kids play YouTube trailers',
+  })) as HTMLInputElement
+  expect(trailers.checked).toBe(false)
 })
 
 it('sends signed-out visitors from the kid home back to the picker', async () => {

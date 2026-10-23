@@ -9,6 +9,7 @@ import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
+import TrailerSetting from './TrailerSetting'
 
 export default function ParentArea() {
   const t = useT()
@@ -41,6 +42,7 @@ export default function ParentArea() {
         <>
           <KidProfilesAdmin />
           <KidDevicesAdmin />
+          <TrailerSetting />
           {error && <p role="alert">{error}</p>}
           <button type="button" onClick={() => void signOut()}>
             {kidDevice ? t('parent.returnToKidMode') : t('parent.signOut')}
