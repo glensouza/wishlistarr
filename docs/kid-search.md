@@ -1,6 +1,6 @@
 # Kid search
 
-Kids look for movies and shows with search as you type. `GET /api/v1/kid/search?q=<text>&page=<n>` needs a Kid session and always answers for the signed-in profile; there is no way to ask for another profile. Posters are served to kids from `GET /api/v1/kid/images/tmdb/{size}/{file}`, which uses the same proxy as the parent one (see [TMDB](tmdb.md#image-proxy)) but only for the search poster size (`w342`); any other size answers `400`.
+Kids look for movies and shows with search as you type. `GET /api/v1/kid/search?q=<text>&page=<n>` needs a Kid session and always answers for the signed-in profile; there is no way to ask for another profile. A result links to the title screen (see [Title details](title-details.md)). Posters are served to kids from `GET /api/v1/kid/images/tmdb/{size}/{file}`, which uses the same proxy as the parent one (see [TMDB](tmdb.md#image-proxy)). Kids can request `w342` (search and title posters), `w185` (people and season posters) and `w1280` (backdrops). Any other size answers `400`.
 
 ## Query rules
 
