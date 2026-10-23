@@ -212,6 +212,10 @@ public sealed class ApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
         DataDirectory directory = DataDirectory.Resolve(configuration, contentRoot);
 
         Assert.Equal(Path.Combine(contentRoot, "data"), directory.Root);
+        Assert.Equal(Path.Combine(contentRoot, "data", "wishlistarr.db"), directory.DatabasePath);
+        Assert.Equal(Path.Combine(contentRoot, "data", "keys"), directory.KeysPath);
+        Assert.Equal(Path.Combine(contentRoot, "data", "backups"), directory.BackupsPath);
+        Assert.Equal(Path.Combine(contentRoot, "data", "restore-pending"), directory.RestorePendingPath);
     }
 
     private static async Task<string?> Pragma(WishlistarrDbContext db, string name)

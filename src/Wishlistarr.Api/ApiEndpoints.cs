@@ -1,3 +1,4 @@
+using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
@@ -34,6 +35,7 @@ public static class ApiEndpoints
         v1.MapArr();
         v1.MapSeerr();
         v1.MapJobs();
+        v1.MapBackups();
         v1.MapWebhookSettings();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))

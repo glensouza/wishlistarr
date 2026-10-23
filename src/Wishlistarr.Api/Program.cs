@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
+using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
@@ -65,6 +66,7 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddBackgroundJobs(builder.Configuration);
+builder.Services.AddBackups(builder.Configuration);
 builder.Services.AddWebhooks(builder.Configuration);
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
@@ -88,9 +90,14 @@ builder.Services.AddOpenApi(options => options.AddSecuritySchemes());
 
 WebApplication app = builder.Build();
 
+BackupService backups = app.Services.GetRequiredService<BackupService>();
+await backups.ApplyPendingRestoreAsync();
+
 using (IServiceScope scope = app.Services.CreateScope())
 {
-    await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Database.MigrateAsync();
+    WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+    await backups.BackupIfMigrationsPendingAsync(db);
+    await db.Database.MigrateAsync();
     await app.Services.GetRequiredService<ApiKeyService>()
         .EnsureAsync(scope.ServiceProvider.GetRequiredService<SettingsStore>());
     await scope.ServiceProvider.GetRequiredService<ParentAccounts>().LoadSetupStateAsync();

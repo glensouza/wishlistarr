@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Integrations.Plex;
@@ -14,7 +15,18 @@ public class ApiFactory : WebApplicationFactory<Program>
     public const string ParentUsername = "parent";
     public const string ParentPassword = "correct horse battery";
 
-    public ApiFactory() => this.DataPath = Directory.CreateTempSubdirectory("wishlistarr-data").FullName;
+    private readonly bool deleteData;
+
+    public ApiFactory()
+        : this(Directory.CreateTempSubdirectory("wishlistarr-data").FullName, deleteData: true)
+    {
+    }
+
+    protected ApiFactory(string dataPath, bool deleteData)
+    {
+        this.DataPath = dataPath;
+        this.deleteData = deleteData;
+    }
 
     public string DataPath { get; }
 
@@ -42,6 +54,7 @@ public class ApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("WISHLISTARR_DATA_DIR", this.DataPath);
+        builder.UseSetting($"Jobs:Schedules:{DatabaseBackupJob.JobName}:Enabled", "false");
         builder.ConfigureTestServices(services => services.Configure<PlexOptions>(options =>
             options.PlexTvBaseAddress = new Uri("http://127.0.0.1:9/")));
     }
@@ -55,6 +68,11 @@ public class ApiFactory : WebApplicationFactory<Program>
         }
 
         SqliteConnection.ClearAllPools();
+        if (!this.deleteData)
+        {
+            return;
+        }
+
         for (int attempt = 0; attempt < 5 && Directory.Exists(this.DataPath); attempt++)
         {
             try
