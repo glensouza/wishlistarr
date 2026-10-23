@@ -133,7 +133,8 @@ public sealed class KidRequestFlowTests
         string text = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
-        Assert.DoesNotContain("28", text, StringComparison.Ordinal);
+        string traceId = JsonDocument.Parse(text).RootElement.GetProperty("traceId").GetString()!;
+        Assert.DoesNotContain("28", text.Replace(traceId, "", StringComparison.Ordinal), StringComparison.Ordinal);
         Assert.Empty(await factory.GetRequestsAsync());
     }
 
