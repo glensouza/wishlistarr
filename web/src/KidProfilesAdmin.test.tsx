@@ -25,6 +25,7 @@ const ada: KidProfile = {
   blockedGenreIds: [],
   blockedKeywordIds: [],
   allowedOriginalLanguages: [],
+  homeRows: ['popular', 'library', 'genre'],
 }
 
 let calls: Call[]
@@ -119,6 +120,28 @@ it('creates a profile and leaves the label empty so it defaults to the name', as
     movieAgeLimit: 8,
     tvAgeLimit: null,
     plexLabel: '',
+    homeRows: ['popular', 'library', 'genre'],
+  })
+})
+
+it('sends home rows in the chosen order and keeps an extra genre row', async () => {
+  profiles = [{ ...ada, homeRows: ['genre:35', 'library', 'popular'] }]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    (screen.getByRole('checkbox', { name: 'Genre 35' }) as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Move Popular for my age up' }),
+  )
+  fireEvent.click(screen.getByRole('checkbox', { name: 'New in our library' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    homeRows: ['genre:35', 'popular'],
   })
 })
 

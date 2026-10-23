@@ -26,6 +26,19 @@ type FormState = {
   blockedGenres: string
   blockedKeywords: string
   allowedLanguages: string
+  homeRows: HomeChoice[]
+}
+
+type HomeChoice = { id: string; enabled: boolean }
+
+const standardHomeRows = ['popular', 'library', 'genre']
+
+function homeChoices(configured: string[]): HomeChoice[] {
+  const choices = configured.map((id) => ({ id, enabled: true }))
+  for (const id of standardHomeRows) {
+    if (!configured.includes(id)) choices.push({ id, enabled: false })
+  }
+  return choices
 }
 
 const emptyForm: FormState = {
@@ -41,6 +54,7 @@ const emptyForm: FormState = {
   blockedGenres: '',
   blockedKeywords: '',
   allowedLanguages: '',
+  homeRows: homeChoices(standardHomeRows),
 }
 
 function toForm(profile: KidProfile): FormState {
@@ -57,6 +71,7 @@ function toForm(profile: KidProfile): FormState {
     blockedGenres: profile.blockedGenreIds.join(', '),
     blockedKeywords: profile.blockedKeywordIds.join(', '),
     allowedLanguages: profile.allowedOriginalLanguages.join(', '),
+    homeRows: homeChoices(profile.homeRows),
   }
 }
 
@@ -95,6 +110,9 @@ function toInput(form: FormState): KidProfileInput | null {
     blockedGenreIds,
     blockedKeywordIds,
     allowedOriginalLanguages: parseTokens(form.allowedLanguages),
+    homeRows: form.homeRows
+      .filter((choice) => choice.enabled)
+      .map((choice) => choice.id),
   }
 }
 
@@ -231,6 +249,25 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
 
+  function moveHomeRow(index: number, delta: number) {
+    setForm((current) => {
+      const next = current.homeRows.slice()
+      const target = index + delta
+      if (target < 0 || target >= next.length) return current
+      const [moved] = next.splice(index, 1)
+      next.splice(target, 0, moved)
+      return { ...current, homeRows: next }
+    })
+  }
+
+  function homeRowName(id: string, translate: typeof t) {
+    if (id === 'popular') return translate('admin.rowPopular')
+    if (id === 'library') return translate('admin.rowLibrary')
+    if (id === 'genre') return translate('admin.rowGenre')
+    const genre = /^genre:(\d+)$/.exec(id)
+    return genre ? translate('admin.genreRow', { id: genre[1] }) : id
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError(null)
@@ -355,6 +392,50 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
           onChange={(event) => set('allowedLanguages', event.target.value)}
         />
       </label>
+      <fieldset>
+        <legend>{t('admin.homeRows')}</legend>
+        <p className="muted">{t('admin.homeRowsHint')}</p>
+        {form.homeRows.map((choice, index) => {
+          const name = homeRowName(choice.id, t)
+          return (
+            <div key={choice.id} className="home-row-choice">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={choice.enabled}
+                  onChange={() =>
+                    set(
+                      'homeRows',
+                      form.homeRows.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, enabled: !item.enabled }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+                {name}
+              </label>
+              <button
+                type="button"
+                aria-label={t('admin.moveUp', { name })}
+                disabled={index === 0}
+                onClick={() => moveHomeRow(index, -1)}
+              >
+                {t('admin.up')}
+              </button>
+              <button
+                type="button"
+                aria-label={t('admin.moveDown', { name })}
+                disabled={index === form.homeRows.length - 1}
+                onClick={() => moveHomeRow(index, 1)}
+              >
+                {t('admin.down')}
+              </button>
+            </div>
+          )
+        })}
+      </fieldset>
       <label>
         {t('admin.weekly')}
         <input
