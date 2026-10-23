@@ -25,7 +25,26 @@ Tags must be cut from commits on `main`; the workflow fails otherwise.
    git push origin v1.2.3
    ```
 
-3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create` with generated notes. The release title is the tag name.
+3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create --generate-notes`. The release title is the tag name. The notes are the merged pull requests since the previous release, grouped by `.github/release.yml`.
+
+## Release notes
+
+GitHub writes the release notes. The workflow does not install changelog software and does not need a token other than the `GITHUB_TOKEN` it already uses to publish the image and the release.
+
+`gh release create --generate-notes` asks GitHub to list pull requests merged since the previous release. GitHub reads `.github/release.yml` (or `.github/release.yaml`) from the repository. If that file is missing, GitHub uses its default notes instead, so the workflow fails the release step when the tagged commit does not contain `.github/release.yml`. Creating the release by hand uses the same file: `gh release create v1.2.3 --title v1.2.3 --generate-notes`.
+
+A pull request is listed under the first category that has one of its labels. The categories follow the branch prefixes in [CONTRIBUTING.md](../CONTRIBUTING.md) (`feat/`, `fix/`, `docs/`, `chore/`) and the `area:` labels already used on the repository:
+
+| Category | Labels |
+| --- | --- |
+| Security | `area:security` |
+| Features | `feat` |
+| Fixes | `fix` |
+| Documentation | `docs`, `area:docs` |
+| Maintenance | `chore`, `area:devops`, `area:testing` |
+| Other changes | anything else |
+
+Add `feat`, `fix`, `docs` or `chore` to match the branch prefix. `area:backend`, `area:frontend` and `area:integration` do not pick a category on their own, so a pull request that only has one of those labels is listed under Other changes. `area:security` wins over `fix` when a pull request has both.
 
 ## Image tags
 
@@ -58,7 +77,7 @@ The tags are multi-arch manifests, so Docker selects the matching architecture a
 ## If a release fails
 
 - If the workflow fails before the image is pushed, fix the cause and re-run the failed workflow from the Actions page.
-- If the image was pushed but the GitHub release step failed, re-run the failed job; or create the release manually with `gh release create v1.2.3 --title v1.2.3 --generate-notes`.
+- If the image was pushed but the GitHub release step failed, re-run the failed job; or create the release manually with `gh release create v1.2.3 --title v1.2.3 --generate-notes`. That command uses `.github/release.yml` the same way the workflow does.
 - If the tag itself is wrong and nothing was published, delete it with `git push --delete origin v1.2.3` and `git tag -d v1.2.3`, then tag again.
 
 ## Withdraw a release

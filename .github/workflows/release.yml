@@ -70,6 +70,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
+          if [ ! -f .github/release.yml ]; then
+            echo "Missing .github/release.yml" >&2
+            exit 1
+          fi
           if [ "$PRERELEASE" = "true" ]; then
             flags="--prerelease"
           else

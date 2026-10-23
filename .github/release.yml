@@ -1,0 +1,23 @@
+changelog:
+  categories:
+    - title: Security
+      labels:
+        - "area:security"
+    - title: Features
+      labels:
+        - feat
+    - title: Fixes
+      labels:
+        - fix
+    - title: Documentation
+      labels:
+        - docs
+        - "area:docs"
+    - title: Maintenance
+      labels:
+        - chore
+        - "area:devops"
+        - "area:testing"
+    - title: Other changes
+      labels:
+        - "*"
