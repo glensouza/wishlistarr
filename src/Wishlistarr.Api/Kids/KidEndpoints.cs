@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
+using Wishlistarr.Api.Titles;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 
@@ -158,6 +159,7 @@ public static class KidEndpoints
 
         signedIn.MapKidRequests();
         signedIn.MapKidSearch();
+        signedIn.MapKidTitles();
     }
 
     public static void MapParentKidProfiles(this RouteGroupBuilder parent)

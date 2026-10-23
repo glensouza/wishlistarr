@@ -39,7 +39,11 @@ public sealed partial class KidSearch(
     public const int MaxPage = 10;
     public const int MaxParallelLookups = 8;
     public const string PosterSize = "w342";
+    public const string ProfileSize = "w185";
+    public const string BackdropSize = "w1280";
     public const string PosterRoute = "/api/v1/kid/images/tmdb";
+
+    public static bool IsImageSize(string size) => size is PosterSize or ProfileSize or BackdropSize;
 
     public static readonly TimeSpan LookupBudget = TimeSpan.FromSeconds(3);
 
