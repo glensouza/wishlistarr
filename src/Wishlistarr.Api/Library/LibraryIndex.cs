@@ -51,6 +51,47 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         return [.. items.Select(ToMediaItem)];
     }
 
+    public async Task<IReadOnlyList<LibraryCatalogEntry>?> ListRecentAsync(int limit, CancellationToken ct = default)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        if (await this.GetReadyServerAsync(ct) is not string serverId)
+        {
+            return null;
+        }
+
+        int capped = Math.Clamp(limit, 1, 100);
+        List<RecentRow> rows = await db.LibraryItems
+            .AsNoTracking()
+            .Where(item => item.ServerId == serverId && item.TitleId != null && item.CanonicalTitle!.TmdbId > 0)
+            .Select(item => new RecentRow(item.Kind, item.CanonicalTitle!.TmdbId, item.Title, item.Year, item.PlexUpdatedAt, item.Id))
+            .ToListAsync(ct);
+        rows.Sort(static (left, right) =>
+        {
+            int byTime = Nullable.Compare(right.UpdatedAt, left.UpdatedAt);
+            return byTime != 0 ? byTime : right.Id.CompareTo(left.Id);
+        });
+
+        List<LibraryCatalogEntry> distinct = [];
+        HashSet<(MediaKind Kind, int TmdbId)> seen = [];
+        foreach (RecentRow row in rows)
+        {
+            if (seen.Add((row.Kind, row.TmdbId)))
+            {
+                distinct.Add(new LibraryCatalogEntry(row.Kind, row.TmdbId, row.Title, row.Year));
+                if (distinct.Count == capped)
+                {
+                    break;
+                }
+            }
+        }
+
+        return distinct;
+    }
+
     public async Task<LibraryStatus> GetStatusAsync(CancellationToken ct = default)
     {
         LibraryRefreshState? state = await db.LibraryRefreshStates.AsNoTracking().SingleOrDefaultAsync(ct);
@@ -92,6 +133,8 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         LibraryIdSource.Imdb => new ExternalId(ExternalIdSource.Imdb, id.Value),
         _ => null,
     };
+
+    private sealed record RecentRow(MediaKind Kind, int TmdbId, string Title, int? Year, DateTimeOffset? UpdatedAt, int Id);
 }
 
 public sealed record LibraryStatus(

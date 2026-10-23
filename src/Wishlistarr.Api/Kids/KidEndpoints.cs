@@ -158,6 +158,7 @@ public static class KidEndpoints
 
         signedIn.MapKidRequests();
         signedIn.MapKidSearch();
+        signedIn.MapKidHome();
     }
 
     public static void MapParentKidProfiles(this RouteGroupBuilder parent)

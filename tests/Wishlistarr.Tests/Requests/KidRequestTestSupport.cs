@@ -23,6 +23,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
     public bool Ready { get; set; } = true;
 
+    public IReadOnlyList<LibraryCatalogEntry>? Recent { get; set; }
+
     public int Calls { get; private set; }
 
     public void Add(MediaKind kind, int tmdbId, MediaItem item)
@@ -45,6 +47,22 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         }
 
         return Task.FromResult<IReadOnlyList<MediaItem>?>(this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : []);
+    }
+
+    public Task<IReadOnlyList<LibraryCatalogEntry>?> ListRecentAsync(int limit, CancellationToken ct = default)
+    {
+        if (!this.Ready)
+        {
+            return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>(null);
+        }
+
+        if (limit <= 0)
+        {
+            return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>([]);
+        }
+
+        IReadOnlyList<LibraryCatalogEntry> recent = this.Recent ?? [];
+        return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>(recent.Take(limit).ToList());
     }
 }
 
@@ -101,12 +119,13 @@ public sealed class KidRequestApiFactory : AuthApiFactory
         int? weeklyAllowance = null,
         int[]? blockedGenreIds = null,
         int[]? blockedKeywordIds = null,
-        string[]? allowedOriginalLanguages = null)
+        string[]? allowedOriginalLanguages = null,
+        string[]? homeRows = null)
     {
         HttpClient parent = await this.CreateAuthorizedClientAsync();
         HttpResponseMessage created = await parent.PostAsJsonAsync(
             "/api/v1/kid-profiles",
-            new { name, avatar = "fox", movieAgeLimit, tvAgeLimit, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages });
+            new { name, avatar = "fox", movieAgeLimit, tvAgeLimit, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages, homeRows });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         int profileId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 

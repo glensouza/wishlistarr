@@ -558,6 +558,52 @@ public sealed class LibraryIndexTests
         });
     }
 
+    [Fact]
+    public async Task Recent_titles_are_the_newest_distinct_tmdb_items_on_the_ready_server()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        DateTimeOffset newest = Early.AddDays(3);
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "Old Copy", [Tmdb("603")], updatedAt: Early));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "New Copy", [Tmdb("603")], updatedAt: newest));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("103", MediaKind.Movie, "Middle", [Tmdb("700")], updatedAt: Early.AddDays(2)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("104", MediaKind.Show, "Bluey", [Tmdb("82728")], updatedAt: Early.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("105", MediaKind.Movie, "No Tmdb", [Imdb("tt0000001")], updatedAt: newest.AddDays(1)));
+
+        Assert.Null(await harness.RecentAsync(10));
+
+        await harness.FullAsync();
+
+        Assert.Equal(
+            [("New Copy", 603), ("Middle", 700)],
+            (await harness.RecentAsync(2) ?? []).Select(entry => (entry.Title, entry.TmdbId)));
+        Assert.Equal(
+            ["New Copy", "Middle", "Bluey"],
+            (await harness.RecentAsync(10) ?? []).Select(entry => entry.Title));
+
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            LibraryTitle title = await db.LibraryTitles.SingleAsync(item => item.TmdbId == 603);
+            db.LibraryItems.Add(new LibraryItem
+            {
+                ServerId = "other-server",
+                RatingKey = "999",
+                Guid = "plex://movie/999",
+                Kind = MediaKind.Movie,
+                LibraryId = "1",
+                Title = "Foreign Server",
+                Year = 2001,
+                PlexUpdatedAt = newest.AddDays(5),
+                IndexedAt = newest,
+                TitleId = title.Id,
+            });
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        Assert.DoesNotContain(await harness.RecentAsync(10) ?? [], entry => entry.Title == "Foreign Server");
+    }
+
     private static async Task<string> QueryPlanAsync(LibraryHarness harness, string sql)
     {
         await using SqliteConnection connection = new($"Data Source={harness.DatabasePath}");

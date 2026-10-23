@@ -267,6 +267,9 @@ public sealed class LibraryHarness : IAsyncDisposable
     public Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalIdSource source, string value) =>
         this.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindAsync(kind, new ExternalId(source, value)));
 
+    public Task<IReadOnlyList<LibraryCatalogEntry>?> RecentAsync(int limit) =>
+        this.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().ListRecentAsync(limit));
+
     public Task<List<LibraryItem>> GetItemsAsync() => this.InScopeAsync(services =>
         services.GetRequiredService<WishlistarrDbContext>().LibraryItems
             .AsNoTracking()

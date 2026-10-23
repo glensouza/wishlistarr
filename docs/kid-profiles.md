@@ -1,13 +1,13 @@
 # Kid profiles
 
-A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
+A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, the home rows that profile sees, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
 
 ## Managing profiles
 
 All of these require the Parent role.
 
 - `GET /api/v1/kid-profiles` lists active profiles. PIN hashes are never returned, only `hasPin`.
-- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind.
+- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages, homeRows }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind. Omit `homeRows` and the profile goes back to the default rows; send `[]` to show none.
 - `DELETE /api/v1/kid-profiles/{id}?removeOwnedLabels=true|false` archives the profile.
 - `POST /api/v1/kid-profiles/{id}/unlock` unlocks a locked profile and clears its failed PIN counts.
 
@@ -18,6 +18,10 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 ### Content rules
 
 `blockedGenreIds` and `blockedKeywordIds` are TMDB ids. `allowedOriginalLanguages` are ISO 639-1 codes such as `en`. Codes are stored lowercase. Duplicate ids are stored once, in the order given. At most 40 genres, 100 keywords and 50 languages are accepted; an id must be positive and a language must be two letters. How a missing language, a missing genre list or a missing keyword list is decided is described in [content policy](content-policy.md).
+
+### Home rows
+
+`homeRows` is the order of shelves on [home](kid-home.md). The default, used when the field is omitted, is `["popular", "library", "genre"]`. `popular` is popular for the profile's ages, `library` is new in the Plex library, and `genre` expands to Animation, Family and Comedy. `genre:<id>` adds one shelf for that TMDB genre id (`genre:016` is stored as `genre:16`). Blank entries are skipped, duplicates are stored once, and anything else is rejected. At most 10 entries are accepted. The picker and `GET /api/v1/kid/me` do not include this list.
 
 ### Plex label
 
