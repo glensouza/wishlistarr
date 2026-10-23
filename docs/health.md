@@ -26,7 +26,7 @@ The parent page loads this list and shows a banner when any check is `warning` o
 
 Wishlistarr keeps a bounded in-memory ring of recent log lines and also writes the daily files under the data directory's `logs` folder. The viewer reads the ring, not the files. The ring holds 1000 lines unless `Logs:Capacity` (or `Logs__Capacity`) sets another size from 1 to 5000. Older lines are dropped. The process forgets the ring when it stops.
 
-The logging pipeline writes into the ring before the console and file sinks. String properties whose names are secrets (`password`, `pin`, `token`, `secret`, `apiKey`, `api_key`, `accessToken`, `access_token`, `authorization`, `X-Api-Key`, `X-Plex-Token`) are replaced with `***`, and the message text is redacted, before the line is stored. The same replacement is applied to the property values later sinks render. An exception's message is redacted in the ring. The redaction covers:
+The logging pipeline writes into the ring before the console and file sinks. String properties whose names are secrets (`password`, `pin`, `token`, `secret`, `apiKey`, `api_key`, `accessToken`, `access_token`, `authorization`, `X-Api-Key`, `X-Plex-Token`) are replaced with `***`, and the message text is redacted, before the line is stored. The same replacement is applied to the property values later sinks render. An exception's message is redacted in the ring. The daily log file still stores the exception object Serilog captured, so that text can remain in the file. The redaction covers:
 
 - JSON fields `password`, `pin`, `apiKey`, `api_key`, `apikey`, `token`, `access_token`, `accessToken`, `authorization`, `X-Plex-Token` and `X-Api-Key`
 - `Authorization`, `X-Plex-Token` and `X-Api-Key` header values, including `Bearer` and `Basic`
