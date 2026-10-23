@@ -33,7 +33,7 @@ export const en = {
   'pin.failed': 'We could not sign you in. Try again.',
 
   'home.welcome': 'Welcome, {name}!',
-  'home.intro': 'Your wishlist will show up here soon.',
+  'home.intro': 'Ask for something to watch. A parent can say yes.',
   'home.signOut': 'Switch profile',
 
   'search.title': 'Find something to watch',
@@ -116,6 +116,12 @@ export const en = {
   'admin.rulesInvalid':
     'Genres and keywords must be TMDB ids separated by commas.',
   'admin.plexLabel': 'Plex label',
+  'admin.autoApprove': 'Auto-approve requests',
+  'admin.autoApproveHint':
+    'Say yes without a parent, or only up to a rating. Leave a rating blank for no ceiling.',
+  'admin.movieCeiling': 'Movie rating ceiling',
+  'admin.tvCeiling': 'TV rating ceiling',
+  'admin.ratingNone': 'No ceiling',
   'admin.weekly': 'Weekly requests',
   'admin.save': 'Save',
   'admin.cancel': 'Cancel',
@@ -170,6 +176,47 @@ export const en = {
   'plex.loading': 'Loading Plex users',
   'plex.unavailable': 'Plex users are unavailable. Plex may not be connected.',
   'plex.empty': 'No Plex users found.',
+
+  'rating.preschool': 'Preschool',
+  'rating.general': 'General',
+  'rating.children': 'Children',
+  'rating.parentalGuidance': 'Parental guidance',
+  'rating.teen': 'Teen',
+  'rating.mature': 'Mature',
+  'rating.adult': 'Adult',
+
+  'requests.title': 'Requests',
+  'requests.none': 'Nothing is waiting.',
+  'requests.movie': 'Movie',
+  'requests.show': 'Show',
+  'requests.select': 'Select {title}',
+  'requests.forKid': '{kind} for {name}',
+  'requests.approveTitle': 'Approve {title}',
+  'requests.denyTitle': 'Deny {title}',
+  'requests.approveSelected': 'Approve selected',
+  'requests.denySelected': 'Deny selected',
+  'requests.reason': 'Note for the kid',
+  'requests.reasonHint':
+    'Optional. The kid sees this only if you deny the request.',
+  'requests.notApplied': 'One or more requests could not be decided.',
+  'requests.pending': 'Waiting',
+  'requests.approved': 'Approved',
+  'requests.denied': 'Denied',
+  'requests.fulfilling': 'Downloading',
+  'requests.available': 'In the library',
+  'requests.labeled': 'Labeled',
+  'requests.failed': 'Failed',
+
+  'kidRequests.title': 'Your requests',
+  'kidRequests.none': 'You have not asked for anything yet.',
+  'kidRequests.pending': 'Waiting for a parent',
+  'kidRequests.approved': 'A parent said yes',
+  'kidRequests.denied': 'Not this time',
+  'kidRequests.fulfilling': 'On the way',
+  'kidRequests.available': 'Almost ready',
+  'kidRequests.labeled': 'Ready to watch',
+  'kidRequests.failed': 'Something went wrong',
+  'kidRequests.unknown': 'Waiting for a parent',
 } as const
 
 export type MessageKey = keyof typeof en

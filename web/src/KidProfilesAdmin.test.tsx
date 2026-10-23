@@ -21,6 +21,9 @@ const ada: KidProfile = {
   plexLabel: 'Ada',
   plexUserId: null,
   weeklyAllowance: 3,
+  autoApprove: false,
+  autoApproveMovieRating: null,
+  autoApproveTvRating: null,
   isLocked: false,
   blockedGenreIds: [],
   blockedKeywordIds: [],
@@ -119,6 +122,9 @@ it('creates a profile and leaves the label empty so it defaults to the name', as
     movieAgeLimit: 8,
     tvAgeLimit: null,
     plexLabel: '',
+    autoApprove: false,
+    autoApproveMovieRating: null,
+    autoApproveTvRating: null,
   })
 })
 
@@ -326,4 +332,37 @@ it('shows what Plex enforces for a mapped profile and how to fix it', async () =
     ),
   ).toBeTruthy()
   expect(screen.getAllByLabelText('Plex label enforcement')).toHaveLength(2)
+})
+
+it('round-trips auto-approve rules when a profile is saved', async () => {
+  profiles = [
+    {
+      ...ada,
+      autoApprove: true,
+      autoApproveMovieRating: 'teen',
+      autoApproveTvRating: null,
+    },
+  ]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    (screen.getByLabelText('Auto-approve requests') as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  expect(
+    (screen.getByLabelText('Movie rating ceiling') as HTMLSelectElement).value,
+  ).toBe('teen')
+  fireEvent.change(screen.getByLabelText('TV rating ceiling'), {
+    target: { value: 'children' },
+  })
+  fireEvent.click(screen.getByLabelText('Auto-approve requests'))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    autoApprove: false,
+    autoApproveMovieRating: 'teen',
+    autoApproveTvRating: 'children',
+  })
 })
