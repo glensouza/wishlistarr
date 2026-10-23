@@ -16,6 +16,19 @@ public static class KidRequestEndpoints
 
     public static void MapKidRequests(this RouteGroupBuilder kid)
     {
+        kid.MapGet("/requests/history", async (HttpContext context, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
+        {
+            if (!TryProfile(context, out int profileId))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
+            }
+
+            return Results.Ok(await RequestViews.KidHistoryAsync(db, profileId, titles, ct));
+        })
+            .WithName("ListKidRequestHistory")
+            .WithSummary("Lists what happened to the signed-in profile's requests, in kid-friendly terms. Parent account details are not included.")
+            .Produces<IReadOnlyList<KidHistoryEntry>>();
+
         kid.MapGet("/requests", async (HttpContext context, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
         {
             if (!TryProfile(context, out int profileId))

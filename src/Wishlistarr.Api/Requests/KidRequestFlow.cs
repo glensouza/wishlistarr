@@ -108,7 +108,13 @@ public sealed partial class KidRequestFlow(
             profile.BlockedKeywordIds,
             profile.AllowedOriginalLanguages);
         ContentDecision decision = ContentPolicyEngine.Default.Evaluate(content, policy);
-        if (decision.Outcome == ContentOutcome.Blocked)
+        bool revokedBefore = await db.MediaRequests.AnyAsync(
+            request => request.KidProfileId == profile.Id
+                && request.Kind == title.Kind
+                && request.TmdbId == title.TmdbId
+                && request.State == RequestState.Revoked,
+            ct);
+        if (decision.Outcome == ContentOutcome.Blocked && !revokedBefore)
         {
             this.LogBlocked(profile.Id, title.Kind, title.TmdbId, decision.Reason.Code);
             return new KidRequestResult(KidRequestOutcome.NotAllowed);
@@ -116,11 +122,11 @@ public sealed partial class KidRequestFlow(
 
         RatingLevel? rating = new RatingRule().Evaluate(content, policy).Reason.Level;
         bool genresUnknown = profile.BlockedGenreIds.Count > 0 && content.GenreIds is not { Count: > 0 };
-        bool auto = new AutoApproveRule(
+        bool auto = !revokedBefore && new AutoApproveRule(
             profile.AutoApprove,
             profile.AutoApproveMovieRating,
             profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
-        bool inspectLibrary = decision.Outcome == ContentOutcome.Allowed || auto;
+        bool inspectLibrary = !revokedBefore && (decision.Outcome == ContentOutcome.Allowed || auto);
         (IReadOnlyList<MediaItem> matches, bool libraryKnown) = inspectLibrary
             ? await this.FindInLibraryAsync(title, ct)
             : ([], false);
@@ -136,7 +142,8 @@ public sealed partial class KidRequestFlow(
                 request => request.KidProfileId == profile.Id
                     && request.Kind == title.Kind
                     && request.TmdbId == title.TmdbId
-                    && request.State != RequestState.Denied,
+                    && request.State != RequestState.Denied
+                    && request.State != RequestState.Revoked,
                 ct);
             if (!open && counts && profile.WeeklyAllowance is int allowance)
             {

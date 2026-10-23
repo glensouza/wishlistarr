@@ -16,11 +16,13 @@ stateDiagram-v2
     Fulfilling --> Failed
     Available --> Labeled: label written
     Available --> Failed
+    Available --> Revoked: parent
+    Labeled --> Revoked: parent
     Failed --> Fulfilling: retry
     Failed --> Available: retry
     Failed --> Denied: parent gives up
     Denied --> [*]
-    Labeled --> [*]
+    Revoked --> [*]
 ```
 
 | State | Meaning |
@@ -32,8 +34,9 @@ stateDiagram-v2
 | `Available` | On the media server. |
 | `Labeled` | The kid's Plex label is on the item. |
 | `Failed` | Dispatch, arrival or labeling went wrong. |
+| `Revoked` | A parent took the app's label back. The title stays in the history. |
 
-`Denied` and `Labeled` are final.
+`Denied` and `Revoked` are final. `Labeled` is not: a parent can revoke it.
 
 ## Actors
 
@@ -45,6 +48,8 @@ Every change is made by an actor: a `Kid` (with the kid profile id), a `Parent` 
 | `Approved` | `Fulfilling`, `Available`, `Failed` | System |
 | `Fulfilling` | `Available`, `Failed` | System |
 | `Available` | `Labeled`, `Failed` | System |
+| `Available` | `Revoked` | Parent |
+| `Labeled` | `Revoked` | Parent |
 | `Failed` | `Fulfilling`, `Available` | Parent, System |
 | `Failed` | `Denied` | Parent |
 
@@ -67,7 +72,7 @@ The state change and its event are saved together. Each request has a `Version` 
 
 A kid can only have one open request per title. Titles are identified by kind (`Movie` or `Show`) and TMDB id, like the content policy's `TitleKey`. `CreateAsync` for a title the profile already has a request for, in any state but `Denied`, returns `Merged` with the existing request instead of creating another, and bumps its `RequestCount` and `LastRequestedAt`. A merge is not a transition and stores no event.
 
-Once a request is denied, asking again starts a new `Pending` request; the denied one stays in the history. A unique index on profile, kind and TMDB id (ignoring denied requests) keeps this true when two requests arrive at once.
+Once a request is denied or revoked, asking again starts a new `Pending` request; the closed one stays in the history. A unique index on profile, kind and TMDB id (ignoring denied and revoked requests) keeps this true when two requests arrive at once. A title that has been revoked is not decided by the content policy or an auto-approve rule the next time the kid asks: it waits for a parent. See [Granting and revoking](#granting-and-revoking).
 
 ## History
 
@@ -141,3 +146,21 @@ Each profile has a switch, `autoApprove`, and an optional movie ceiling and TV c
 The switch auto-approves every request the policy did not block. A ceiling auto-approves a title whose rating level is at or below the ceiling for its kind. Unrated titles have no level, so a ceiling does not approve them. Neither rule approves a blocked title, and neither approves a title whose genres could not be checked: unknown does not count as allowed, even when the title is also unrated and the combined decision names the rating. When the library lookup fails, the rule does not approve either. The request stays pending for a parent.
 
 An auto-approved title that is already in the library does not count toward the weekly allowance and is not blocked by it, for the same reason an instant label does not: nothing is downloaded. One that is not in the library counts like any other new request. Asking again for a title that already has a request does not approve it a second time.
+
+## Granting and revoking
+
+A parent can give a kid a title that is already in the library, and can take that access back. Both need the Parent role. A session cookie or the trusted-network bypass also needs the antiforgery token. An API key does not. A kid session is rejected.
+
+`POST /api/v1/requests/grant` takes `{ kidProfileId, kind, tmdbId }`. `kind` is `movie` or `show`. The title's name is read from TMDB. It has to be in the library (the same lookup requests already use). The profile's Plex label is then applied with the label writer, source `grant`, and recorded in the ownership ledger. A copy Plex will not edit is skipped. If no copy takes the label, nothing is stored. Otherwise a request is stored with the parent as the actor and the reason `Parent grant`, and moved to `Labeled`. It does not count toward the weekly allowance and it never downloads anything.
+
+Granting does not ask the content policy for permission. A title the policy would block is still granted, and the history records that parent grant rather than a block. If the title is missing, not in the library, or Plex or TMDB cannot be reached, nothing is granted: no request is stored and no label is written. Granting a title the profile already has a labeled request for returns that request and does not write the label again. Any other open request for the same title is left alone.
+
+`POST /api/v1/requests/revoke` takes `{ ids, reason }`, the same shape as deny. For each id that is `Labeled` or `Available`, Wishlistarr loads the ownership ledger for that profile and removes only those labels from the copies of that title. A label the app did not apply is left where it is, including a label another profile owns and a label someone added by hand in Plex. The request then moves to `Revoked` and the parent is recorded on that event. `reason` is optional, trimmed, stored as plain text up to 500 characters, and is not shown to the kid.
+
+If the title is not in the library, Plex cannot be reached, or a label the ledger owns cannot be removed, that id comes back as `failed` and the request is not marked revoked. Revoking a request that is already revoked is `alreadyDecided`. Revoking a request in any other state is `conflict`. Calling revoke again does not remove the label a second time.
+
+A kid can ask again for a revoked title. The new request is `Pending` and waits for a parent, whatever the content policy or an auto-approve rule would normally do, including a title the policy would block and a title that is already in the library. It counts toward the weekly allowance. The revoked request stays in the history. A keyword lookup that fails still refuses the request, because an unknown title is not queued.
+
+## Kid history
+
+`GET /api/v1/kid/requests/history` needs a Kid session. It lists the signed-in profile's own request events, newest first. Each entry is `{ id, requestId, kind, tmdbId, title, action, at, note }`. `action` is one of `granted`, `asked`, `approved`, `denied`, `ready`, `revoked` or `failed`. A parent grant is `granted` ("a parent added this") and a revocation is `revoked`. `note` is the denial reason, and only on a denial. The parent's account id, username and the stored actor name are not included. Another profile's events are not included.
