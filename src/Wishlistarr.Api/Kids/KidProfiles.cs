@@ -21,6 +21,7 @@ public sealed class KidProfiles(
     public const int MaxBlockedGenres = 40;
     public const int MaxBlockedKeywords = 100;
     public const int MaxAllowedLanguages = 50;
+    public const int MaxHomeRows = 10;
 
     public async Task<IReadOnlyList<KidProfile>> ListAsync(CancellationToken ct = default) =>
         await db.KidProfiles.AsNoTracking().Where(profile => profile.ArchivedAt == null).OrderBy(profile => profile.Id).ToListAsync(ct);
@@ -128,6 +129,7 @@ public sealed class KidProfiles(
         profile.BlockedGenreIds = [.. input.BlockedGenreIds];
         profile.BlockedKeywordIds = [.. input.BlockedKeywordIds];
         profile.AllowedOriginalLanguages = [.. input.AllowedOriginalLanguages];
+        profile.HomeRows = [.. input.HomeRows];
     }
 
     private static ValidatedProfile? Validate(KidProfileRequest request, out string? error)
@@ -140,6 +142,7 @@ public sealed class KidProfiles(
         IReadOnlyList<int> genres = [];
         IReadOnlyList<int> keywords = [];
         IReadOnlyList<string> languages = [];
+        IReadOnlyList<string> homeRows = [];
 
         if (name.Length is 0 or > MaxNameLength)
         {
@@ -186,6 +189,11 @@ public sealed class KidProfiles(
             TryNormalizeLanguages(request.AllowedOriginalLanguages, out languages, out error);
         }
 
+        if (error is null)
+        {
+            TryNormalizeHomeRows(request.HomeRows, out homeRows, out error);
+        }
+
         return error is null
             ? new ValidatedProfile(
                 name,
@@ -198,7 +206,8 @@ public sealed class KidProfiles(
                 request.WeeklyAllowance,
                 genres,
                 keywords,
-                languages)
+                languages,
+                homeRows)
             : null;
     }
 
@@ -260,7 +269,8 @@ public sealed class KidProfiles(
         int? WeeklyAllowance,
         IReadOnlyList<int> BlockedGenreIds,
         IReadOnlyList<int> BlockedKeywordIds,
-        IReadOnlyList<string> AllowedOriginalLanguages);
+        IReadOnlyList<string> AllowedOriginalLanguages,
+        IReadOnlyList<string> HomeRows);
 
     private static void TryNormalizeIds(
         IReadOnlyList<int>? ids,
@@ -336,6 +346,50 @@ public sealed class KidProfiles(
 
         normalized = distinct;
     }
+
+    private static void TryNormalizeHomeRows(
+        IReadOnlyList<string>? rows,
+        out IReadOnlyList<string> normalized,
+        out string? error)
+    {
+        error = null;
+        if (rows is null)
+        {
+            normalized = [.. HomeRowTypes.Defaults];
+            return;
+        }
+
+        if (rows.Count > MaxHomeRows)
+        {
+            normalized = [];
+            error = $"Home rows are limited to {MaxHomeRows}.";
+            return;
+        }
+
+        List<string> distinct = [];
+        foreach (string? row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row))
+            {
+                continue;
+            }
+
+            if (!HomeRowTypes.IsValid(row))
+            {
+                normalized = [];
+                error = "Home rows must be valid row types: popular, library, genre, or genre:<id>.";
+                return;
+            }
+
+            string clean = HomeRowTypes.Normalize(row);
+            if (!distinct.Contains(clean))
+            {
+                distinct.Add(clean);
+            }
+        }
+
+        normalized = distinct;
+    }
 }
 
 public sealed record KidProfileRequest(
@@ -350,7 +404,8 @@ public sealed record KidProfileRequest(
     int? WeeklyAllowance,
     IReadOnlyList<int>? BlockedGenreIds = null,
     IReadOnlyList<int>? BlockedKeywordIds = null,
-    IReadOnlyList<string>? AllowedOriginalLanguages = null);
+    IReadOnlyList<string>? AllowedOriginalLanguages = null,
+    IReadOnlyList<string>? HomeRows = null);
 
 public sealed record ProfileOutcome(KidProfile? Profile, int Status, string? Error)
 {

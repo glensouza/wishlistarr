@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
@@ -229,7 +230,10 @@ public sealed class KidSearchTests
         (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 20);
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
@@ -246,7 +250,10 @@ public sealed class KidSearchTests
         (_, int profileId) = await factory.SignInKidAsync(blockedKeywordIds: [99]);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 20);
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
@@ -263,7 +270,10 @@ public sealed class KidSearchTests
         (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 5) { TimeoutId = 2 };
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "flaky", 1);
 
@@ -279,7 +289,10 @@ public sealed class KidSearchTests
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 4) { HangKeywords = true };
         ManualTimeProvider time = new();
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], time, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance));
 
         Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
         using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
@@ -305,7 +318,10 @@ public sealed class KidSearchTests
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 4) { Hang = true };
         ManualTimeProvider time = new();
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], time, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance));
 
         Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
         using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));

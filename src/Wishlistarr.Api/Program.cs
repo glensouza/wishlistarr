@@ -79,6 +79,7 @@ builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();
 builder.Services.AddScoped<PlexEnforcement>();
 builder.Services.AddLibraryIndex();
+builder.Services.AddScoped<KidContentPipeline>();
 builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.AddScoped<KidSearch>();
 builder.Services.ConfigureHttpJsonOptions(options =>

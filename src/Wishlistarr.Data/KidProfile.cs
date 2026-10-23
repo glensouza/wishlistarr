@@ -26,6 +26,8 @@ public sealed class KidProfile
 
     public List<string> AllowedOriginalLanguages { get; set; } = [];
 
+    public List<string> HomeRows { get; set; } = ["popular", "library", "genre"];
+
     public int FailedPinCount { get; set; }
 
     public DateTimeOffset? LastFailedPinAt { get; set; }

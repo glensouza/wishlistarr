@@ -316,6 +316,7 @@ public sealed record KidProfileSummary(
     IReadOnlyList<int> BlockedGenreIds,
     IReadOnlyList<int> BlockedKeywordIds,
     IReadOnlyList<string> AllowedOriginalLanguages,
+    IReadOnlyList<string> HomeRows,
     ProfileRestrictions? PlexRestrictions = null)
 {
     public static KidProfileSummary From(KidProfile profile) => From(profile, null, null);
@@ -336,5 +337,6 @@ public sealed record KidProfileSummary(
         profile.BlockedGenreIds,
         profile.BlockedKeywordIds,
         profile.AllowedOriginalLanguages,
+        profile.HomeRows,
         restrictions);
 }
