@@ -5,6 +5,7 @@ import { useAuthStatus } from './authStatus'
 import { useT } from './i18n'
 import { useKidSession } from './kid/KidSession'
 import { parentSignOut } from './kidDevices'
+import BackupsAdmin from './BackupsAdmin'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
 import PairDevice from './PairDevice'
@@ -41,6 +42,7 @@ export default function ParentArea() {
         <>
           <KidProfilesAdmin />
           <KidDevicesAdmin />
+          <BackupsAdmin />
           {error && <p role="alert">{error}</p>}
           <button type="button" onClick={() => void signOut()}>
             {kidDevice ? t('parent.returnToKidMode') : t('parent.signOut')}

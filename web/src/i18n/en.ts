@@ -170,6 +170,21 @@ export const en = {
   'plex.loading': 'Loading Plex users',
   'plex.unavailable': 'Plex users are unavailable. Plex may not be connected.',
   'plex.empty': 'No Plex users found.',
+
+  'backups.title': 'Backups',
+  'backups.warning':
+    'A backup file contains the database and the keys that unlock saved secrets. Store it like a password and do not share it.',
+  'backups.retention': 'The newest {count} backups are kept.',
+  'backups.none': 'No backups yet.',
+  'backups.now': 'Back up now',
+  'backups.working': 'Working',
+  'backups.failed': 'The backup did not finish.',
+  'backups.download': 'Download',
+  'backups.restore': 'Restore on next restart',
+  'backups.file': 'Backup file',
+  'backups.pending':
+    'This backup replaces the current data the next time Wishlistarr starts. The current data is kept as a backup.',
+  'backups.restoreFailed': 'That backup could not be used.',
 } as const
 
 export type MessageKey = keyof typeof en

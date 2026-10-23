@@ -153,6 +153,20 @@ label {
   color: var(--color-text-muted);
 }
 
+.notice {
+  max-width: 40rem;
+  padding: var(--space-3);
+  background: var(--color-surface-raised);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.backup-list {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: 0;
+}
+
 fieldset {
   display: grid;
   gap: var(--space-2);
