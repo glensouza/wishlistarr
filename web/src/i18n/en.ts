@@ -76,6 +76,14 @@ export const en = {
   'parent.signOut': 'Sign out',
   'parent.returnToKidMode': 'Return to kid mode',
 
+  'updates.title': 'Updates',
+  'updates.available': 'Version {version} is available.',
+  'updates.releaseNotes': 'Release notes',
+  'updates.upgradeNotes': 'Upgrade notes',
+  'updates.check': 'Check for new versions',
+  'updates.hint': 'Looks for a new version once a day.',
+  'updates.saveFailed': 'The update check could not be saved.',
+
   'pair.title': 'Use this device for kids',
   'pair.intro':
     'Enter the pairing code a parent created under Kid devices. Only paired devices show the profile picker.',

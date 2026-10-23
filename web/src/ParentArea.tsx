@@ -9,6 +9,7 @@ import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
+import UpdateNotice from './UpdateNotice'
 
 export default function ParentArea() {
   const t = useT()
@@ -39,6 +40,7 @@ export default function ParentArea() {
       <h1>{t('parent.title')}</h1>
       {isParent && (
         <>
+          <UpdateNotice />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
           {error && <p role="alert">{error}</p>}
