@@ -17,6 +17,7 @@ using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core;
 using Wishlistarr.Data;
@@ -65,6 +66,7 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddBackgroundJobs(builder.Configuration);
+builder.Services.AddUpdateCheck();
 builder.Services.AddWebhooks(builder.Configuration);
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();

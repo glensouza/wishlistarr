@@ -42,3 +42,5 @@ Implement `IBackgroundJob` and register it with `AddBackgroundJob<TJob>(name, de
 The built-in `job-history-cleanup` job deletes finished runs older than `Jobs:HistoryRetention`.
 
 The `tmdb-data-purge` job enforces the TMDB data retention described in [tmdb.md](tmdb.md).
+
+The `update-check` job asks GitHub whether a newer release exists. It runs once a day. See [upgrading.md](upgrading.md). It is the only call Wishlistarr makes to GitHub by itself.
