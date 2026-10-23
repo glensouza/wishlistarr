@@ -32,9 +32,11 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         string titleName,
         RequestActor actor,
         bool countsTowardAllowance = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? reason = null)
     {
         ValidateActor(actor);
+        ValidateReason(reason);
         if (title.TmdbId <= 0)
         {
             throw new ArgumentException("TMDB ids are positive.", nameof(title));
@@ -62,12 +64,15 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                 request => request.KidProfileId == kidProfileId
                     && request.Kind == title.Kind
                     && request.TmdbId == title.TmdbId
-                    && request.State != RequestState.Denied,
+                    && request.State != RequestState.Denied
+                    && request.State != RequestState.Revoked,
                 ct);
             if (existing is not null)
             {
                 int merged = await db.MediaRequests
-                    .Where(request => request.Id == existing.Id && request.State != RequestState.Denied)
+                    .Where(request => request.Id == existing.Id
+                        && request.State != RequestState.Denied
+                        && request.State != RequestState.Revoked)
                     .ExecuteUpdateAsync(
                         setters => setters
                             .SetProperty(request => request.RequestCount, request => request.RequestCount + 1)
@@ -98,7 +103,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                 LastRequestedAt = now,
                 StateChangedAt = now,
             };
-            MediaRequestEvent item = NewEvent(null, RequestState.Pending, actor, null, now);
+            MediaRequestEvent item = NewEvent(null, RequestState.Pending, actor, reason, now);
             created.Events.Add(item);
             db.MediaRequests.Add(created);
             try

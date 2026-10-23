@@ -277,6 +277,29 @@ public sealed class MediaRequestTests
     }
 
     [Fact]
+    public async Task Asking_again_after_a_revocation_starts_a_new_request()
+    {
+        using RequestApiFactory factory = new();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int revoked = (await factory.CreateAsync(ada)).Request!.Id;
+        await factory.MoveAsync(revoked, RequestState.Approved, RequestApiFactory.Parent);
+        await factory.MoveAsync(revoked, RequestState.Available, RequestApiFactory.Dispatch);
+        await factory.MoveAsync(revoked, RequestState.Labeled, RequestApiFactory.Dispatch);
+        await factory.MoveAsync(revoked, RequestState.Revoked, RequestApiFactory.Parent);
+
+        RequestResult again = await factory.CreateAsync(ada);
+        RequestResult merged = await factory.CreateAsync(ada);
+        RequestResult back = await factory.MoveAsync(revoked, RequestState.Labeled, RequestApiFactory.Dispatch);
+
+        Assert.Equal(RequestOutcome.Created, again.Outcome);
+        Assert.NotEqual(revoked, again.Request!.Id);
+        Assert.Equal(RequestOutcome.Merged, merged.Outcome);
+        Assert.Equal(again.Request.Id, merged.Request!.Id);
+        Assert.Equal(RequestOutcome.Rejected, back.Outcome);
+        Assert.Equal([RequestState.Revoked, RequestState.Pending], (await factory.GetRequestsAsync()).Select(request => request.State));
+    }
+
+    [Fact]
     public async Task Kids_can_only_request_for_their_own_active_profile()
     {
         using RequestApiFactory factory = new();

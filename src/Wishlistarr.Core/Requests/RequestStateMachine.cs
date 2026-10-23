@@ -9,6 +9,7 @@ public enum RequestState
     Available,
     Labeled,
     Failed,
+    Revoked,
 }
 
 public sealed record RequestTransition(RequestState From, RequestState To, IReadOnlySet<RequestActorKind> Actors);
@@ -30,6 +31,8 @@ public static class RequestStateMachine
         new(RequestState.Fulfilling, RequestState.Failed, SystemOnly),
         new(RequestState.Available, RequestState.Labeled, SystemOnly),
         new(RequestState.Available, RequestState.Failed, SystemOnly),
+        new(RequestState.Available, RequestState.Revoked, ParentOnly),
+        new(RequestState.Labeled, RequestState.Revoked, ParentOnly),
         new(RequestState.Failed, RequestState.Fulfilling, ParentOrSystem),
         new(RequestState.Failed, RequestState.Available, ParentOrSystem),
         new(RequestState.Failed, RequestState.Denied, ParentOnly),
@@ -42,6 +45,8 @@ public static class RequestStateMachine
         Find(from, to)?.Actors.Contains(actor) == true;
 
     public static bool IsTerminal(RequestState state) => Transitions.All(transition => transition.From != state);
+
+    public static bool AllowsAnotherRequest(RequestState state) => state is RequestState.Denied or RequestState.Revoked;
 
     public static RequestState RetryTargetFor(RequestState failedFrom) =>
         failedFrom == RequestState.Available ? RequestState.Available : RequestState.Fulfilling;
