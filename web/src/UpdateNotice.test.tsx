@@ -223,16 +223,69 @@ it('hides a newer version when the check is off', async () => {
   expect(screen.queryByText('Version 9.9.9 is available.')).toBeNull()
 })
 
-it('stays quiet when the update response is missing', async () => {
+it('shows an unknown state with a retry when the first load fails', async () => {
+  const user = userEvent.setup()
+  let fail = true
+  const calls = stubFetch((path) => {
+    if (path === '/api/v1/auth/status') return parent
+    if (path === '/api/v1/updates') return fail ? null : notice
+    return []
+  })
+  renderAt('/parent')
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'The update check setting could not be loaded.',
+  )
+  const checkbox = screen.getByRole('checkbox', {
+    name: 'Check for new versions',
+  }) as HTMLInputElement
+  expect(checkbox.disabled).toBe(true)
+  expect(checkbox.checked).toBe(false)
+  expect(screen.queryByRole('link', { name: 'Release notes' })).toBeNull()
+
+  fail = false
+  await user.click(screen.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => expect(checkbox.disabled).toBe(false))
+  expect(checkbox.checked).toBe(true)
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.getByRole('link', { name: 'Release notes' })).toBeTruthy()
+  expect(calls.filter((call) => call.path === '/api/v1/updates')).toHaveLength(
+    2,
+  )
+})
+
+it('treats an unreadable update response as a failed load', async () => {
   stubFetch((path) => (path === '/api/v1/auth/status' ? parent : []))
   renderAt('/parent')
+  expect(await screen.findByRole('button', { name: 'Try again' })).toBeTruthy()
   expect(
-    await screen.findByRole('heading', { name: 'Kid profiles' }),
-  ).toBeTruthy()
-  expect(
-    screen.getByRole('checkbox', { name: 'Check for new versions' }),
-  ).toBeTruthy()
+    (
+      screen.getByRole('checkbox', {
+        name: 'Check for new versions',
+      }) as HTMLInputElement
+    ).disabled,
+  ).toBe(true)
   expect(screen.queryByRole('link', { name: 'Release notes' })).toBeNull()
+})
+
+it('links the upgrade notes at the tag the server names', async () => {
+  const tagged =
+    'https://github.com/glensouza/wishlistarr/blob/v9.9.9/docs/upgrading.md'
+  stubFetch((path) =>
+    path === '/api/v1/auth/status'
+      ? parent
+      : path === '/api/v1/updates'
+        ? {
+            checkEnabled: true,
+            available: { ...notice.available, upgradeNotesUrl: tagged },
+          }
+        : [],
+  )
+  renderAt('/parent')
+  expect(
+    (await screen.findByRole('link', { name: 'Upgrade notes' })).getAttribute(
+      'href',
+    ),
+  ).toBe(tagged)
 })
 
 it('does not ask for updates on kid screens', async () => {

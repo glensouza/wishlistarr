@@ -13,9 +13,6 @@ type Notice = {
   available: Available | null
 }
 
-const upgradeNotesUrl =
-  'https://github.com/glensouza/wishlistarr/blob/main/docs/upgrading.md'
-
 function isNotice(value: unknown): value is Notice {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const notice = value as { checkEnabled?: unknown; available?: unknown }
@@ -55,38 +52,43 @@ function githubUrl(
   return url
 }
 
-function releaseNotesHref(url: string): string | null {
-  return githubUrl(
-    url,
-    (pathname) =>
-      pathname.startsWith('/glensouza/wishlistarr/releases/tag/') &&
-      pathname.length > '/glensouza/wishlistarr/releases/tag/'.length,
-  )
-}
+const repoPath = '/glensouza/wishlistarr'
+const releasePrefix = `${repoPath}/releases/tag/`
+const upgradePath = new RegExp(`^${repoPath}/blob/[^/]+/docs/upgrading[.]md$`)
 
-function upgradeNotesHref(url: string): string | null {
-  return githubUrl(
-    url,
-    (pathname) =>
-      pathname === '/glensouza/wishlistarr/blob/main/docs/upgrading.md',
-  )
+type State =
+  | { status: 'loading' }
+  | { status: 'failed' }
+  | { status: 'ready'; notice: Notice }
+
+async function loadNotice(): Promise<State> {
+  try {
+    const body = await request<unknown>('GET', '/api/v1/updates')
+    return isNotice(body)
+      ? { status: 'ready', notice: body }
+      : { status: 'failed' }
+  } catch {
+    return { status: 'failed' }
+  }
 }
 
 export default function UpdateNotice() {
   const t = useT()
-  const [notice, setNotice] = useState<Notice | null>(null)
+  const [state, setState] = useState<State>({ status: 'loading' })
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let current = true
-    request<unknown>('GET', '/api/v1/updates').then(
-      (body) => current && setNotice(isNotice(body) ? body : null),
-      () => current && setNotice(null),
-    )
+    void loadNotice().then((next) => current && setState(next))
     return () => {
       current = false
     }
   }, [])
+
+  async function retry() {
+    setState({ status: 'loading' })
+    setState(await loadNotice())
+  }
 
   async function toggle(checkEnabled: boolean) {
     setError(null)
@@ -95,26 +97,26 @@ export default function UpdateNotice() {
     } catch {
       setError(t('updates.saveFailed'))
     }
-    try {
-      const body = await request<unknown>('GET', '/api/v1/updates')
-      setNotice(isNotice(body) ? body : null)
-    } catch {
-      setNotice(null)
-    }
+    setState(await loadNotice())
   }
 
+  const notice = state.status === 'ready' ? state.notice : null
   const available = notice?.checkEnabled ? notice.available : null
   const releaseHref = available
-    ? releaseNotesHref(available.releaseNotesUrl)
+    ? githubUrl(
+        available.releaseNotesUrl,
+        (pathname) =>
+          pathname.startsWith(releasePrefix) &&
+          pathname.length > releasePrefix.length,
+      )
     : null
   const upgradeHref = available
-    ? upgradeNotesHref(available.upgradeNotesUrl)
+    ? githubUrl(available.upgradeNotesUrl, (pathname) =>
+        upgradePath.test(pathname),
+      )
     : null
   const showLinks =
-    available !== null &&
-    releaseHref !== null &&
-    upgradeHref !== null &&
-    upgradeHref === upgradeNotesUrl
+    available !== null && releaseHref !== null && upgradeHref !== null
 
   return (
     <section className="update-notice">
@@ -130,10 +132,19 @@ export default function UpdateNotice() {
         <input
           type="checkbox"
           checked={notice?.checkEnabled === true}
+          disabled={notice === null}
           onChange={(event) => void toggle(event.target.checked)}
         />
         {t('updates.check')}
       </label>
+      {state.status === 'failed' && (
+        <p role="alert" className="error">
+          {t('updates.loadFailed')}{' '}
+          <button type="button" onClick={() => void retry()}>
+            {t('updates.retry')}
+          </button>
+        </p>
+      )}
       <p className="muted">{t('updates.hint')}</p>
       {error && (
         <p role="alert" className="error">

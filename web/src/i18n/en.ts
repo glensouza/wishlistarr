@@ -83,6 +83,8 @@ export const en = {
   'updates.check': 'Check for new versions',
   'updates.hint': 'Looks for a new version once a day.',
   'updates.saveFailed': 'The update check could not be saved.',
+  'updates.loadFailed': 'The update check setting could not be loaded.',
+  'updates.retry': 'Try again',
 
   'pair.title': 'Use this device for kids',
   'pair.intro':
