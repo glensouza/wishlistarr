@@ -121,3 +121,23 @@ it('puts the checkbox back when saving fails', async () => {
   )
   expect(box.checked).toBe(true)
 })
+
+it('shows an error with retry and no checkbox when the settings cannot be loaded', async () => {
+  const user = userEvent.setup()
+  rows = [{ key: trailerSettingKey, isSecret: false, value: 'true' }]
+  settingsReply = async () => new Response(null, { status: 500 })
+  render(<TrailerSetting />)
+
+  expect((await screen.findByRole('alert')).textContent).toBe(
+    'We could not load this setting.',
+  )
+  expect(
+    screen.queryByRole('checkbox', { name: 'Let kids play YouTube trailers' }),
+  ).toBeNull()
+
+  settingsReply = async () => Response.json(rows)
+  await user.click(screen.getByRole('button', { name: 'Try again' }))
+
+  expect(((await checkbox()) as HTMLInputElement).checked).toBe(true)
+  expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(0)
+})

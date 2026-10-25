@@ -5,11 +5,13 @@ import { useT } from './i18n'
 export const trailerSettingKey = 'kids.youtube_trailers'
 
 type SettingRow = { key: string; isSecret: boolean; value: string | null }
+type Load = 'loading' | 'loaded' | 'failed'
 
 export default function TrailerSetting() {
   const t = useT()
   const [enabled, setEnabled] = useState(false)
-  const [loaded, setLoaded] = useState(false)
+  const [load, setLoad] = useState<Load>('loading')
+  const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
 
@@ -20,21 +22,19 @@ export default function TrailerSetting() {
         if (!current) return
         const row = rows.find((item) => item.key === trailerSettingKey)
         setEnabled(row?.value === 'true')
-        setLoaded(true)
+        setLoad('loaded')
       },
       () => {
-        if (!current) return
-        setEnabled(false)
-        setLoaded(true)
+        if (current) setLoad('failed')
       },
     )
     return () => {
       current = false
     }
-  }, [])
+  }, [attempt])
 
   async function change(next: boolean) {
-    if (saving) return
+    if (saving || load !== 'loaded') return
     const previous = enabled
     setSaving(true)
     setFailed(false)
@@ -52,8 +52,28 @@ export default function TrailerSetting() {
     }
   }
 
-  if (!loaded) {
+  if (load === 'loading') {
     return <p role="status">{t('app.loading')}</p>
+  }
+
+  if (load === 'failed') {
+    return (
+      <section className="trailer-setting">
+        <h2>{t('parent.trailers')}</h2>
+        <p role="alert" className="error">
+          {t('parent.trailersLoadFailed')}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setLoad('loading')
+            setAttempt((count) => count + 1)
+          }}
+        >
+          {t('parent.trailersRetry')}
+        </button>
+      </section>
+    )
   }
 
   return (
