@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import {
   mkdirSync,
   readFileSync,
@@ -7,12 +8,13 @@ import {
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { init } from 'license-checker-rseidelsohn'
 import { licenseAllowed } from './license-policy.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const webRoot = resolve(scriptDir, '..')
 const repoRoot = resolve(webRoot, '..')
+
+export const repoInputs = ['build/allowed-licenses.json']
 
 function option(flag) {
   const index = process.argv.indexOf(flag)
@@ -37,7 +39,7 @@ function readAllowed() {
   let data
   try {
     data = JSON.parse(
-      readFileSync(join(repoRoot, 'build', 'allowed-licenses.json'), 'utf8'),
+      readFileSync(join(repoRoot, ...repoInputs[0].split('/')), 'utf8'),
     )
   } catch {
     console.error('Allowed license list is missing or invalid.')
@@ -54,20 +56,21 @@ function readAllowed() {
   return data
 }
 
-function splitPackage(key) {
-  const at = key.lastIndexOf('@')
-  if (at <= 0) return null
-  const name = key.slice(0, at)
-  const version = key.slice(at + 1)
-  if (!name || !version) return null
-  return { name, version }
-}
-
-function licenseExpression(licenses) {
-  if (typeof licenses === 'string') return licenses.trim()
+function licenseExpression(manifest) {
+  const { license, licenses } = manifest
+  if (typeof license === 'string') return license.trim()
+  if (
+    license &&
+    typeof license === 'object' &&
+    typeof license.type === 'string'
+  )
+    return license.type.trim()
   if (!Array.isArray(licenses) || licenses.length === 0) return ''
   return licenses
-    .map((entry) => (typeof entry === 'string' ? `(${entry.trim()})` : ''))
+    .map((entry) => {
+      const id = typeof entry === 'string' ? entry : entry?.type
+      return typeof id === 'string' ? `(${id.trim()})` : ''
+    })
     .join(' AND ')
 }
 
@@ -75,6 +78,37 @@ function fail(out, lines) {
   remove(out)
   for (const line of lines) console.error(line)
   process.exit(1)
+}
+
+function listTree(start) {
+  const result = spawnSync('npm ls --omit=dev --all --json --long', {
+    cwd: start,
+    encoding: 'utf8',
+    shell: true,
+    maxBuffer: 256 * 1024 * 1024,
+  })
+  let tree
+  try {
+    tree = JSON.parse(result.stdout)
+  } catch {
+    return {
+      error: result.stderr?.trim() || 'npm ls produced no usable output.',
+    }
+  }
+  if (result.status !== 0) {
+    return { error: result.stderr?.trim() || 'npm ls reported problems.' }
+  }
+  return { tree }
+}
+
+function collect(node, found) {
+  for (const child of Object.values(node.dependencies ?? {})) {
+    if (child.path && !found.has(child.path)) {
+      found.set(child.path, child)
+      collect(child, found)
+    }
+  }
+  return found
 }
 
 function main() {
@@ -85,49 +119,43 @@ function main() {
   const allowed = readAllowed()
   remove(out)
 
-  init(
-    {
-      start,
-      production: true,
-      excludePrivatePackages: true,
-      unknown: true,
-    },
-    (err, ret) => {
-      if (err) fail(out, [err.message ?? String(err)])
-      const packages = []
-      const bad = []
-      for (const [key, info] of Object.entries(ret ?? {})) {
-        const parsed = splitPackage(key)
-        const license = licenseExpression(info?.licenses)
-        if (!parsed) {
-          bad.push(`${key} unreadable package name`)
-          continue
-        }
-        if (!license || !licenseAllowed(license, allowed)) {
-          bad.push(`${parsed.name}@${parsed.version} ${license || 'UNKNOWN'}`)
-          continue
-        }
-        packages.push({
-          name: parsed.name,
-          version: parsed.version,
-          license,
-        })
-      }
-      if (bad.length > 0) {
-        fail(out, ['Incompatible or unknown licenses:', ...bad])
-      }
-      if (packages.length === 0) {
-        fail(out, ['No production packages were found.'])
-      }
-      packages.sort(
-        (left, right) =>
-          left.name.localeCompare(right.name) ||
-          left.version.localeCompare(right.version) ||
-          left.license.localeCompare(right.license),
-      )
-      mkdirSync(dirname(out), { recursive: true })
-      writeFileSync(out, `${JSON.stringify({ packages }, null, 2)}\n`)
-    },
+  const { tree, error } = listTree(start)
+  if (error) fail(out, [error])
+
+  const packages = new Map()
+  const bad = []
+  for (const info of collect(tree, new Map()).values()) {
+    if (info.private === true) continue
+    const name = typeof info.name === 'string' ? info.name : ''
+    const version = typeof info.version === 'string' ? info.version : ''
+    if (!name || !version) {
+      bad.push(`${info.path} unreadable package name`)
+      continue
+    }
+    const license = licenseExpression(info)
+    if (!license || !licenseAllowed(license, allowed)) {
+      bad.push(`${name}@${version} ${license || 'UNKNOWN'}`)
+      continue
+    }
+    packages.set(`${name}@${version}`, { name, version, license })
+  }
+  if (bad.length > 0) {
+    fail(out, ['Incompatible or unknown licenses:', ...bad])
+  }
+  if (packages.size === 0) {
+    fail(out, ['No production packages were found.'])
+  }
+  const sorted = [...packages.values()].sort(
+    (left, right) =>
+      left.name.localeCompare(right.name) ||
+      left.version.localeCompare(right.version) ||
+      left.license.localeCompare(right.license),
+  )
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(
+    out,
+    `${JSON.stringify({ packages: sorted }, null, 2)}
+`,
   )
 }
 

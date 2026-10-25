@@ -9,7 +9,10 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { repoInputs } from './npm-notices.mjs'
+
+vi.setConfig({ testTimeout: 30_000 })
 
 const web = join(__dirname, '..')
 const repo = join(web, '..')
@@ -134,4 +137,21 @@ it('keeps generated notices out of git and runs the check before the build', () 
   }
   expect(pkg.scripts.prebuild).toContain('scripts/npm-notices.mjs')
   expect(pkg.scripts.predev).toContain('scripts/npm-notices.mjs')
+})
+
+it('copies every repository file the build reads into the Docker web stage', () => {
+  const dockerfile = readFileSync(join(repo, 'Dockerfile'), 'utf8')
+  const stage = dockerfile
+    .split(/^FROM /m)
+    .find((part) => /\bAS web\b/.test(part))
+  expect(stage).toBeDefined()
+  const copies = [...(stage ?? '').matchAll(/^COPY (\S+) (\S+)$/gm)].map(
+    (match) => ({ source: match[1], target: match[2] }),
+  )
+  for (const input of repoInputs) {
+    expect(copies, input).toContainEqual({
+      source: input,
+      target: `/src/${input}`,
+    })
+  }
 })
