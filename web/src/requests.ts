@@ -34,8 +34,18 @@ export type DecisionItem = {
 
 const base = '/api/v1/requests'
 
-export const listRequests = (state: RequestState) =>
-  request<ParentRequest[]>('GET', `${base}?state=${state}`)
+export type RequestPage = {
+  items: ParentRequest[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export const pageSize = 100
+export const maxBatch = 50
+
+export const listRequests = (state: RequestState, limit = pageSize) =>
+  request<RequestPage>('GET', `${base}?state=${state}&limit=${limit}`)
 
 export const approveRequests = (ids: number[], reason: string | null) =>
   request<{ results: DecisionItem[] }>('POST', `${base}/approve`, {

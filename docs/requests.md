@@ -86,7 +86,7 @@ Each `MediaRequestEvents` row holds the request id, the state before (empty for 
 2. A `Blocked` title is turned away with `422` and a message meant for a kid (`"That one isn't available."`, `code: "notAllowed"`). The rating, genre, keyword, language and the reason are not shown to the kid; the reason code is written to the log. No request is stored.
 3. An `Allowed` title is looked for in the library by its TMDB id. If it is there, the request is created and moved by the System (`instant-label`) through `Approved` to `Available`, then the profile's Plex label is added to every matching item with the label writer (source `request`) and the request becomes `Labeled`. It never goes to `Fulfilling`, so nothing is downloaded. If Plex will not take the label, or the item has gone, the request becomes `Failed` and can be retried.
 4. An auto-approve rule can decide the rest without a parent. It uses the same approval path as a parent, and the actor is the system (`auto-approve`). See [Auto-approve](#auto-approve).
-5. Anything the rule does not approve stays `Pending`: titles that need approval, even when they are already in the library (they are not labeled until a parent approves), and allowed titles that are not in the library.
+5. Anything the rule does not approve stays `Pending`: titles that need approval, including every unrated title, even when they are already in the library (they are not labeled until a parent approves), and allowed titles that are not in the library and that the rule does not approve.
 
 A new request answers `201` and asking again for a title that already has a request answers `200`; both return `{ id, kind, tmdbId, title, state, requestCount }`. Unknown titles answer `404`, and when TMDB cannot be reached the answer is `502` (or `503` without an API key) with a message that is safe to show a kid.
 
@@ -114,8 +114,8 @@ Each request stores whether it counts in `CountsTowardAllowance`, so the rule th
 
 Parents decide pending requests. A kid session cannot.
 
-- `GET /api/v1/requests` lists requests. `?state=pending` (or any other state name) limits the list. A number is not a state name.
-- `POST /api/v1/requests/approve` and `POST /api/v1/requests/deny` take `{ ids, reason }`. `ids` is required, from 1 to 50 positive ids. `reason` is optional.
+- `GET /api/v1/requests` lists requests in id order, one page at a time, as `{ items, total, limit, offset }`. `?state=pending` (or any other state name) limits the list. A number is not a state name. `limit` is 1 to 200 (default 50) and `offset` is 0 or more; anything else is rejected with `400`. `total` counts every request that matches the state, so a client can tell when more remain. Titles are resolved once per page, not once per row.
+- `POST /api/v1/requests/approve` and `POST /api/v1/requests/deny` take `{ ids, reason }`. `ids` is required, from 1 to 50 positive ids. `reason` is optional. The web app sends a longer selection as several calls of at most 50 and lists every item that did not succeed.
 
 Both writes need the Parent role and, for a session cookie or the trusted-network bypass, the antiforgery token. An API key does not send one. Each id comes back on its own in `{ results: [{ id, status, state }] }`. `status` is one of:
 
@@ -124,12 +124,12 @@ Both writes need the Parent role and, for a session cookie or the trusted-networ
 | `succeeded` | This call applied the decision. |
 | `alreadyDecided` | The request was already approved (or further along) for an approve call, or already denied for a deny call. Nothing was written. |
 | `notFound` | There is no such request. |
-| `failed` | The decision could not be applied. The request is left as it was, except when labeling an in-library title fails: that request moves to `Failed`. |
-| `conflict` | The request was no longer pending because someone chose the other outcome. |
+| `failed` | The decision could not be applied. The request is left as it was, except when labeling an in-library title fails for any reason: that request moves to `Failed`. |
+| `conflict` | The request was no longer pending because someone chose the other outcome, or it had already failed. A deny only applies to a request that is still pending, so it cannot take a failed approval. |
 
 A batch that is empty, too long, or contains an id that is not positive is rejected with `400` and nothing is changed. The same is true of a reason that is longer than 500 characters after trimming. Calling either endpoint again is safe: a request that was already given that decision is `alreadyDecided`, and a label is not written a second time.
 
-Approving a title the library lookup does not find moves it from `Pending` to `Approved` and stops. Sending it to Sonarr, Radarr or Seerr is a later step. Approving a title the lookup finds moves it to `Approved`, then `Available`, writes the profile's Plex label through the label writer and the ownership ledger (source `request`), and then moves it to `Labeled`. If the label cannot be written, or the item has gone, the request moves to `Failed` instead of `Labeled`. It never goes to `Fulfilling`.
+Approving a title the library lookup does not find moves it from `Pending` to `Approved` and stops. Sending it to Sonarr, Radarr or Seerr is a later step. Approving a title the lookup finds moves it to `Approved`, then `Available`, writes the profile's Plex label through the label writer and the ownership ledger (source `request`), and then moves it to `Labeled`. If the label cannot be written, or the item has gone, or the label writer fails in any other way, the request moves to `Failed` instead of `Labeled`; it is never left at `Available`. The moves after `Approved` are not tied to the caller's connection, so a caller that disconnects cannot leave an in-library title at `Approved`. Instant labels use the same labeling code. It never goes to `Fulfilling`.
 
 The library lookup is the same one requests already use. A ready library index answers, and an empty answer means the title is not in the library even if a live Plex scan would find it. An index that cannot answer yet falls back to Plex. If the lookup throws, the approval fails and the request stays `Pending`: nothing is labeled and nothing is marked approved.
 
@@ -143,9 +143,9 @@ The `Pending` to `Approved` or `Denied` event records who acted. A signed-in par
 
 Each profile has a switch, `autoApprove`, and an optional movie ceiling and TV ceiling (`autoApproveMovieRating`, `autoApproveTvRating`). The ceilings are rating levels (`preschool`, `general`, `children`, `parentalGuidance`, `teen`, `mature`, `adult`). A missing ceiling is no ceiling. Anything else is rejected. See [kid profiles](kid-profiles.md) for how they are saved, and [content policy](content-policy.md) for how a level relates to a certification.
 
-The switch auto-approves every request the policy did not block. A ceiling auto-approves a title whose rating level is at or below the ceiling for its kind. Unrated titles have no level, so a ceiling does not approve them. Neither rule approves a blocked title, and neither approves a title whose genres could not be checked: unknown does not count as allowed, even when the title is also unrated and the combined decision names the rating. When the library lookup fails, the rule does not approve either. The request stays pending for a parent.
+Auto-approve never approves a title without a known rating. An unrated title always stays `Pending` for a parent, whatever the switch or the ceilings say and whether or not the title is already in the library. The switch approves every title the content policy allows and that has a known rating. A ceiling approves such a title only when its rating level is at or below the ceiling for its kind. A title the policy blocked or that needs approval for any other reason (such as a missing genre list when the profile blocks genres, or a language that is not listed) is not approved either: unknown does not count as allowed. When the library lookup fails, the rule does not approve and the request stays pending for a parent.
 
-An auto-approved title that is already in the library does not count toward the weekly allowance and is not blocked by it, for the same reason an instant label does not: nothing is downloaded. One that is not in the library counts like any other new request. Asking again for a title that already has a request does not approve it a second time.
+A title that is already in the library and allowed is labeled at once, as in [Asking for a title](#asking-for-a-title), so it does not count toward the weekly allowance. An auto-approved title that is not in the library counts like any other new request. Asking again for a title that already has a request does not approve it a second time.
 
 ## Granting and revoking
 

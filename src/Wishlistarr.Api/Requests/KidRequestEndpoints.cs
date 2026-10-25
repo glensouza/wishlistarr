@@ -41,13 +41,14 @@ public static class KidRequestEndpoints
                 .OrderByDescending(request => request.Id)
                 .ToListAsync(ct);
             Dictionary<int, string> reasons = await RequestViews.DenialReasonsAsync(db, [.. rows.Select(request => request.Id)], ct);
+            IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(rows, ct);
             List<KidRequestResponse> body = [];
             foreach (MediaRequest request in rows)
             {
                 string? denial = request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason)
                     ? reason
                     : null;
-                body.Add(KidRequestResponse.From(request, await titles.GetAsync(request, ct), denial));
+                body.Add(KidRequestResponse.From(request, names[request.Id], denial));
             }
 
             return Results.Ok(body);

@@ -55,12 +55,16 @@ let calls: Call[]
 let rows: ParentRequest[]
 let labeled: ParentRequest[]
 let profiles: KidProfile[]
+let total: number | undefined
+let failing: number[]
 
 beforeEach(() => {
   calls = []
   rows = [waiting, second]
   labeled = []
   profiles = []
+  total = undefined
+  failing = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
@@ -73,18 +77,30 @@ beforeEach(() => {
         path,
         body: init?.body ? JSON.parse(init.body as string) : undefined,
       })
-      if (method === 'GET' && path.includes('state=labeled')) {
-        return Response.json(labeled)
-      }
       if (method === 'GET' && path.includes('/kid-profiles')) {
         return Response.json(profiles)
       }
-      if (method === 'GET') return Response.json(rows)
+      if (method === 'GET') {
+        const items = path.includes('state=labeled') ? labeled : rows
+        return Response.json({
+          items,
+          total: path.includes('state=labeled')
+            ? items.length
+            : (total ?? items.length),
+          limit: 100,
+          offset: 0,
+        })
+      }
       if (path.endsWith('/grant')) {
         return Response.json({ id: 9, state: 'labeled' })
       }
+      const ids = (JSON.parse(init?.body as string) as { ids: number[] }).ids
       return Response.json({
-        results: [{ id: 4, status: 'succeeded', state: 'approved' }],
+        results: ids.map((id) => ({
+          id,
+          status: failing.includes(id) ? 'failed' : 'succeeded',
+          state: failing.includes(id) ? null : 'approved',
+        })),
       })
     }),
   )
@@ -167,4 +183,28 @@ it('gives an in-library title to a profile', async () => {
   await waitFor(() => expect(writes()).toHaveLength(1))
   expect(writes()[0].path).toBe('/api/v1/requests/grant')
   expect(writes()[0].body).toEqual({ kidProfileId: 1, kind: 'movie', tmdbId: 603 })
+})
+
+it('splits a large selection into batches and lists what failed', async () => {
+  rows = Array.from({ length: 120 }, (_, index) => ({
+    ...waiting,
+    id: index + 1,
+    title: `Movie ${index + 1}`,
+  }))
+  total = 130
+  failing = [60]
+  render(<RequestsAdmin />)
+  await screen.findByText('Movie 1')
+  expect(screen.getByText(/Showing 120 of 130 waiting/)).toBeTruthy()
+  fireEvent.click(screen.getByLabelText('Select all shown'))
+  fireEvent.click(screen.getByRole('button', { name: 'Approve selected' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(3))
+  const sizes = writes().map(
+    (call) => (call.body as { ids: number[] }).ids.length,
+  )
+  expect(sizes).toEqual([50, 50, 20])
+  expect(
+    await screen.findByText(/Movie 60: Could not be completed/),
+  ).toBeTruthy()
 })

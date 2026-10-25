@@ -126,7 +126,8 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         RequestState to,
         RequestActor actor,
         string? reason = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        RequestState? expectedFrom = null)
     {
         ValidateActor(actor);
         ValidateReason(reason);
@@ -142,6 +143,11 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
             if (request.State == to)
             {
                 return new RequestResult(RequestOutcome.Unchanged, request);
+            }
+
+            if (expectedFrom is RequestState expected && request.State != expected)
+            {
+                return new RequestResult(RequestOutcome.Rejected, request, $"The request is {request.State}, not {expected}.");
             }
 
             if (RequestStateMachine.Find(request.State, to) is not RequestTransition transition)

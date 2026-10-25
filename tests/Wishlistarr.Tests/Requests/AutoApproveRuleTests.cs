@@ -7,12 +7,14 @@ namespace Wishlistarr.Tests.Requests;
 public sealed class AutoApproveRuleTests
 {
     [Fact]
-    public void A_switch_approves_allowed_and_unrated_titles_and_stops_at_blocks_and_unknown_genres()
+    public void A_switch_approves_allowed_rated_titles_and_never_unrated_ones()
     {
         AutoApproveRule rule = new(true, null, null);
 
         Assert.True(rule.AppliesTo(Decision(ContentOutcome.Allowed, ContentReasonCode.NoRatingLimit, RatingLevel.Teen), MediaKind.Movie, RatingLevel.Teen));
-        Assert.True(rule.AppliesTo(Decision(ContentOutcome.NeedsApproval, ContentReasonCode.Unrated, null), MediaKind.Show, null));
+        Assert.False(rule.AppliesTo(Decision(ContentOutcome.NeedsApproval, ContentReasonCode.Unrated, null), MediaKind.Show, null));
+        Assert.False(rule.AppliesTo(Decision(ContentOutcome.Allowed, ContentReasonCode.Unrated, null), MediaKind.Movie, null));
+        Assert.False(rule.AppliesTo(Decision(ContentOutcome.NeedsApproval, ContentReasonCode.LanguageNotAllowed, null), MediaKind.Movie, RatingLevel.General));
         Assert.False(rule.AppliesTo(Decision(ContentOutcome.Blocked, ContentReasonCode.AboveRatingLimit, RatingLevel.Mature), MediaKind.Movie, RatingLevel.Mature));
         Assert.False(rule.AppliesTo(Decision(ContentOutcome.NeedsApproval, ContentReasonCode.UnknownGenres, null), MediaKind.Movie, RatingLevel.General));
         Assert.False(rule.AppliesTo(Decision(ContentOutcome.NeedsApproval, ContentReasonCode.Unrated, null), MediaKind.Movie, null, genresUnknown: true));

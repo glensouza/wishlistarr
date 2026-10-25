@@ -10,23 +10,40 @@ namespace Wishlistarr.Api.Requests;
 
 public static class RequestEndpoints
 {
+    public const int DefaultPage = 50;
+    public const int MaxPage = 200;
+
     public static void MapRequests(this RouteGroupBuilder parent)
     {
         RouteGroupBuilder requests = parent.MapGroup("/requests").WithTags("Requests");
 
-        requests.MapGet("/", async (string? state, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
+        requests.MapGet("/", async (string? state, int? limit, int? offset, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
         {
             if (!TryState(state, out RequestState? parsed))
             {
                 return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The state is not a request state.");
             }
 
-            List<MediaRequest> rows = await db.MediaRequests.AsNoTracking()
-                .Where(request => parsed == null || request.State == parsed)
+            int take = limit ?? DefaultPage;
+            int skip = offset ?? 0;
+            if (take is < 1 or > MaxPage || skip < 0)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: $"The limit is 1 to {MaxPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.");
+            }
+
+            IQueryable<MediaRequest> matching = db.MediaRequests.AsNoTracking()
+                .Where(request => parsed == null || request.State == parsed);
+            int total = await matching.CountAsync(ct);
+            List<MediaRequest> rows = await matching
                 .OrderBy(request => request.Id)
+                .Skip(skip)
+                .Take(take)
                 .ToListAsync(ct);
+            IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(rows, ct);
             int[] profileIds = [.. rows.Select(request => request.KidProfileId).Distinct()];
-            Dictionary<int, string> names = profileIds.Length == 0
+            Dictionary<int, string> kids = profileIds.Length == 0
                 ? []
                 : await db.KidProfiles.AsNoTracking()
                     .Where(profile => profileIds.Contains(profile.Id))
@@ -35,7 +52,7 @@ public static class RequestEndpoints
             List<ParentRequestResponse> body = [];
             foreach (MediaRequest request in rows)
             {
-                if (!names.TryGetValue(request.KidProfileId, out string? kid))
+                if (!kids.TryGetValue(request.KidProfileId, out string? kid))
                 {
                     continue;
                 }
@@ -46,18 +63,18 @@ public static class RequestEndpoints
                     kid,
                     request.Kind,
                     request.TmdbId,
-                    await titles.GetAsync(request, ct),
+                    names[request.Id],
                     request.State,
                     request.RequestCount,
                     request.CreatedAt,
                     request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason) ? reason : null));
             }
 
-            return Results.Ok(body);
+            return Results.Ok(new ParentRequestPage(body, total, take, skip));
         })
             .WithName("ListRequests")
-            .WithSummary("Lists requests. An optional state query limits the list. Denial reasons are plain text.")
-            .Produces<IReadOnlyList<ParentRequestResponse>>()
+            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text.")
+            .Produces<ParentRequestPage>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
         requests.MapPost("/approve", (DecisionBody? body, HttpContext context, RequestApproval approval, CancellationToken ct) =>
@@ -214,6 +231,8 @@ public static class RequestEndpoints
 }
 
 public sealed record DecisionBody(IReadOnlyList<int>? Ids, string? Reason);
+
+public sealed record ParentRequestPage(IReadOnlyList<ParentRequestResponse> Items, int Total, int Limit, int Offset);
 
 public sealed record DecisionBodyResponse(IReadOnlyList<DecisionItem> Results);
 

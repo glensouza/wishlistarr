@@ -402,6 +402,33 @@ public sealed class MediaRequestTests
     }
 
     [Fact]
+    public async Task A_move_that_names_the_wrong_starting_state_changes_nothing()
+    {
+        using RequestApiFactory factory = new();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int id = (await factory.CreateAsync(ada)).Request!.Id;
+        await factory.MoveAsync(id, RequestState.Approved, RequestApiFactory.Parent);
+        await factory.MoveAsync(id, RequestState.Available, RequestApiFactory.Dispatch);
+        await factory.MoveAsync(id, RequestState.Failed, RequestApiFactory.Dispatch, "No label");
+
+        RequestResult denied = await factory.WithRequestsAsync(requests => requests.TransitionAsync(
+            id,
+            RequestState.Denied,
+            RequestApiFactory.Parent,
+            expectedFrom: RequestState.Pending));
+        RequestResult matching = await factory.WithRequestsAsync(requests => requests.TransitionAsync(
+            id,
+            RequestState.Available,
+            RequestApiFactory.Dispatch,
+            expectedFrom: RequestState.Failed));
+
+        Assert.Equal(RequestOutcome.Rejected, denied.Outcome);
+        Assert.Equal(RequestState.Failed, denied.Request!.State);
+        Assert.Equal(RequestOutcome.Changed, matching.Outcome);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Denied);
+    }
+
+    [Fact]
     public async Task Simultaneous_duplicate_requests_end_up_as_one()
     {
         using RequestApiFactory factory = new();

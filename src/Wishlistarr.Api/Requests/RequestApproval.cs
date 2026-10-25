@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
-using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
@@ -25,7 +24,7 @@ public sealed partial class RequestApproval(
     WishlistarrDbContext db,
     MediaRequests requests,
     LibraryLookup library,
-    LabelWriter labels,
+    RequestLabeling labeling,
     ILogger<RequestApproval> logger)
 {
     public const int MaxBatch = 50;
@@ -106,7 +105,7 @@ public sealed partial class RequestApproval(
             return Settled(id, request.State, approving: false);
         }
 
-        RequestResult result = await requests.TransitionAsync(id, RequestState.Denied, actor, reason, ct);
+        RequestResult result = await requests.TransitionAsync(id, RequestState.Denied, actor, reason, ct, RequestState.Pending);
         return result.Outcome == RequestOutcome.Changed
             ? new DecisionItem(id, DecisionStatus.Succeeded, RequestState.Denied)
             : FromResult(id, result, approving: false);
@@ -142,7 +141,7 @@ public sealed partial class RequestApproval(
             }
         }
 
-        RequestResult approved = await requests.TransitionAsync(id, RequestState.Approved, actor, reason, ct);
+        RequestResult approved = await requests.TransitionAsync(id, RequestState.Approved, actor, reason, ct, RequestState.Pending);
         if (approved.Outcome != RequestOutcome.Changed)
         {
             return FromResult(id, approved, approving: true);
@@ -153,54 +152,35 @@ public sealed partial class RequestApproval(
             return new DecisionItem(id, DecisionStatus.Succeeded, RequestState.Approved);
         }
 
-        return await this.LabelAsync(approved.Request!, libraryCheck.Items, profile, actor, ct);
+        return await this.LabelAsync(approved.Request!, libraryCheck.Items, profile, actor);
     }
 
     private async Task<DecisionItem> LabelAsync(
         MediaRequest request,
         IReadOnlyList<MediaItem> matches,
         KidProfile profile,
-        RequestActor actor,
-        CancellationToken ct)
+        RequestActor actor)
     {
         RequestActor system = actor.Kind == RequestActorKind.System ? actor : RequestActor.System(ApprovalComponent);
-        RequestResult available = await requests.TransitionAsync(request.Id, RequestState.Available, system, ct: ct);
-        if (available.Outcome is not (RequestOutcome.Changed or RequestOutcome.Unchanged) || available.Request is null)
+
+        // The approval is already stored, so the move to available and the label finish even if the caller goes away.
+        RequestResult available = await requests.TransitionAsync(
+            request.Id,
+            RequestState.Available,
+            system,
+            ct: CancellationToken.None,
+            expectedFrom: RequestState.Approved);
+        if (available.Outcome != RequestOutcome.Changed)
         {
             return FromResult(request.Id, available, approving: true);
         }
 
-        // The request is already stored as available, so labeling finishes even if the caller disconnects.
-        CancellationToken labelCt = CancellationToken.None;
-        string? failure = null;
-        try
-        {
-            int labeled = 0;
-            foreach (MediaItem match in matches)
-            {
-                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, KidRequestFlow.LabelSource, labelCt);
-                if (written.Outcome is LabelWriteOutcome.Added or LabelWriteOutcome.AlreadyPresent)
-                {
-                    labeled++;
-                }
-            }
-
-            if (labeled == 0)
-            {
-                failure = "The title is no longer in the library.";
-            }
-        }
-        catch (Exception ex) when (ex is MediaServerException or HttpRequestException or TaskCanceledException)
-        {
-            this.LogLabelFailed(ex, request.Id);
-            failure = "The Plex label could not be written.";
-        }
-
-        RequestState target = failure is null ? RequestState.Labeled : RequestState.Failed;
-        RequestResult moved = await requests.TransitionAsync(request.Id, target, system, failure, labelCt);
-        return failure is null
-            ? new DecisionItem(request.Id, DecisionStatus.Succeeded, moved.Request?.State ?? RequestState.Labeled)
-            : new DecisionItem(request.Id, DecisionStatus.Failed, moved.Request?.State ?? RequestState.Failed);
+        RequestResult moved = await labeling.LabelAsync(request.Id, matches, profile, system);
+        RequestState state = moved.Request?.State ?? RequestState.Failed;
+        return new DecisionItem(
+            request.Id,
+            state == RequestState.Labeled ? DecisionStatus.Succeeded : DecisionStatus.Failed,
+            state);
     }
 
     private async Task<LibraryCheck> FindAsync(MediaRequest request, CancellationToken ct)
@@ -242,9 +222,6 @@ public sealed partial class RequestApproval(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for request {RequestId} failed; the decision was not applied")]
     private partial void LogLookupFailed(Exception ex, int requestId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Label for request {RequestId} failed")]
-    private partial void LogLabelFailed(Exception ex, int requestId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Decision for request {RequestId} failed")]
     private partial void LogDecideFailed(Exception ex, int requestId);

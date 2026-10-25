@@ -229,15 +229,15 @@ public sealed class RequestAccessTests
         await automatic.LinkPlexAsync();
         (HttpClient autoKid, _) = await automatic.SignInKidAsync("Dee", autoApprove: true);
         HttpClient autoParent = await automatic.CreateSignedInClientAsync();
-        int autoLabeled = await AskAsync(autoKid, 129);
+        int autoLabeled = await AskAsync(autoKid, 603);
         Assert.Equal(RequestState.Labeled, (await automatic.GetRequestsAsync()).Single().State);
         await RevokeAsync(autoParent, new { ids = new[] { autoLabeled } });
 
-        HttpResponseMessage autoAgain = await KidRequestApiFactory.RequestAsync(autoKid, "movie", 129);
+        HttpResponseMessage autoAgain = await KidRequestApiFactory.RequestAsync(autoKid, "movie", 603);
 
         Assert.Equal(HttpStatusCode.Created, autoAgain.StatusCode);
         Assert.Equal("pending", (await autoAgain.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
-        Assert.Empty(automatic.Plex.Item("102").Labels);
+        Assert.Empty(automatic.Plex.Item("101").Labels);
     }
 
     [Fact]

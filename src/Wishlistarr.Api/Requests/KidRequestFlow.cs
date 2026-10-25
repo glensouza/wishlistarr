@@ -2,7 +2,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Core.Content;
@@ -31,14 +30,13 @@ public sealed partial class KidRequestFlow(
     RequestTitles titles,
     ITmdbClient tmdb,
     LibraryLookup library,
-    LabelWriter labels,
+    RequestLabeling labeling,
     RequestApproval approval,
     SettingsStore settings,
     TimeProvider time,
     ILogger<KidRequestFlow> logger)
 {
     public const string TimeZoneSetting = "parent.time_zone";
-    public const string LabelSource = "request";
 
     public static readonly RequestActor InstantLabelActor = RequestActor.System("instant-label");
 
@@ -126,14 +124,14 @@ public sealed partial class KidRequestFlow(
             profile.AutoApprove,
             profile.AutoApproveMovieRating,
             profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
-        bool inspectLibrary = !revokedBefore && (decision.Outcome == ContentOutcome.Allowed || auto);
+        bool inspectLibrary = !revokedBefore && decision.Outcome == ContentOutcome.Allowed;
         (IReadOnlyList<MediaItem> matches, bool libraryKnown) = inspectLibrary
             ? await this.FindInLibraryAsync(title, ct)
             : ([], false);
         bool inLibrary = libraryKnown && matches.Count > 0;
         bool instant = decision.Outcome == ContentOutcome.Allowed && inLibrary;
         bool autoNow = auto && libraryKnown && !instant;
-        bool counts = !instant && !(autoNow && inLibrary);
+        bool counts = !instant;
 
         RequestResult result;
         await using (IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct))
@@ -183,7 +181,8 @@ public sealed partial class KidRequestFlow(
 
         if (instant)
         {
-            return new KidRequestResult(KidRequestOutcome.Created, await this.LabelAsync(request, matches, profile));
+            RequestResult labeled = await labeling.LabelAsync(request.Id, matches, profile, InstantLabelActor);
+            return new KidRequestResult(KidRequestOutcome.Created, labeled.Request ?? request);
         }
 
         if (!autoNow)
@@ -223,43 +222,6 @@ public sealed partial class KidRequestFlow(
         return latest.Count(createdAt => createdAt >= weekStart);
     }
 
-    private async Task<MediaRequest> LabelAsync(MediaRequest request, IReadOnlyList<MediaItem> matches, KidProfile profile)
-    {
-        // The request is already stored as available, so labeling finishes even if the kid leaves before it is done.
-        CancellationToken ct = CancellationToken.None;
-        string? failure = null;
-        try
-        {
-            int labeled = 0;
-            foreach (MediaItem match in matches)
-            {
-                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, LabelSource, ct);
-                if (written.Outcome is LabelWriteOutcome.Added or LabelWriteOutcome.AlreadyPresent)
-                {
-                    labeled++;
-                }
-            }
-
-            if (labeled == 0)
-            {
-                failure = "The title is no longer in the library.";
-            }
-        }
-        catch (Exception ex) when (ex is MediaServerException or HttpRequestException or TaskCanceledException)
-        {
-            this.LogLabelFailed(ex, request.Id);
-            failure = "The Plex label could not be written.";
-        }
-
-        RequestResult moved = await requests.TransitionAsync(
-            request.Id,
-            failure is null ? RequestState.Labeled : RequestState.Failed,
-            InstantLabelActor,
-            failure,
-            ct);
-        return moved.Request ?? request;
-    }
-
     [LoggerMessage(Level = LogLevel.Information, Message = "Request by profile {ProfileId} for {Kind} {TmdbId} was blocked by content policy ({Reason})")]
     private partial void LogBlocked(int profileId, MediaKind kind, int tmdbId, ContentReasonCode reason);
 
@@ -268,7 +230,4 @@ public sealed partial class KidRequestFlow(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for {Kind} {TmdbId} failed; treating it as not in the library")]
     private partial void LogLookupFailed(Exception ex, MediaKind kind, int tmdbId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Instant label for request {RequestId} failed")]
-    private partial void LogLabelFailed(Exception ex, int requestId);
 }

@@ -75,6 +75,7 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
+builder.Services.AddScoped<RequestLabeling>();
 builder.Services.AddScoped<RequestApproval>();
 builder.Services.AddScoped<RequestAccess>();
 builder.Services.AddTmdbDataRetention();
