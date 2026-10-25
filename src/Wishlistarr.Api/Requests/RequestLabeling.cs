@@ -5,28 +5,38 @@ using Wishlistarr.Data;
 
 namespace Wishlistarr.Api.Requests;
 
+public sealed record RequestLabelResult(RequestResult Result, bool LabelNotOwned);
+
 public sealed partial class RequestLabeling(MediaRequests requests, LabelWriter labels, ILogger<RequestLabeling> logger)
 {
     public const string LabelSource = "request";
 
-    public async Task<RequestResult> LabelAsync(
+    public async Task<RequestLabelResult> LabelAsync(
         int requestId,
         IReadOnlyList<MediaItem> matches,
         KidProfile profile,
-        RequestActor actor)
+        RequestActor actor,
+        string source = LabelSource)
     {
         // The request is already stored as available, so labeling finishes even if the caller goes away.
         CancellationToken ct = CancellationToken.None;
         string? failure = null;
+        bool notOwned = false;
         try
         {
             int labeled = 0;
             foreach (MediaItem match in matches)
             {
-                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, LabelSource, ct);
+                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct);
                 if (written.Outcome is LabelWriteOutcome.Added or LabelWriteOutcome.AlreadyPresent)
                 {
                     labeled++;
+                }
+
+                if (written is { Outcome: LabelWriteOutcome.AlreadyPresent, Item: MediaItemLabels item }
+                    && !await labels.OwnsAsync(item, profile.PlexLabel, ct))
+                {
+                    notOwned = true;
                 }
             }
 
@@ -41,13 +51,14 @@ public sealed partial class RequestLabeling(MediaRequests requests, LabelWriter 
             failure = "The Plex label could not be written.";
         }
 
-        return await requests.TransitionAsync(
+        RequestResult moved = await requests.TransitionAsync(
             requestId,
             failure is null ? RequestState.Labeled : RequestState.Failed,
             actor,
             failure,
             ct,
             RequestState.Available);
+        return new RequestLabelResult(moved, failure is null && notOwned);
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Label for request {RequestId} failed")]

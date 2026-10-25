@@ -15,7 +15,6 @@ public sealed class RequestStateMachineTests
         (RequestState.Fulfilling, RequestState.Failed, [RequestActorKind.System]),
         (RequestState.Available, RequestState.Labeled, [RequestActorKind.System]),
         (RequestState.Available, RequestState.Failed, [RequestActorKind.System]),
-        (RequestState.Available, RequestState.Revoked, [RequestActorKind.Parent]),
         (RequestState.Labeled, RequestState.Revoked, [RequestActorKind.Parent]),
         (RequestState.Failed, RequestState.Fulfilling, [RequestActorKind.Parent, RequestActorKind.System]),
         (RequestState.Failed, RequestState.Available, [RequestActorKind.Parent, RequestActorKind.System]),

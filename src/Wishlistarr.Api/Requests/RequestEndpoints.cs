@@ -103,11 +103,20 @@ public static class RequestEndpoints
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status502BadGateway);
 
+        requests.MapGet("/grant/preview", (string? kind, int? tmdbId, RequestAccess access, CancellationToken ct) =>
+            PreviewAsync(kind, tmdbId, access, ct))
+            .WithName("PreviewGrant")
+            .WithSummary("Looks up a title by kind and TMDB id before it is given, so the parent can check the name. inLibrary is null when the library could not be checked.")
+            .Produces<GrantPreviewResponse>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
+
         requests.MapPost("/revoke", (DecisionBody? body, HttpContext context, RequestAccess access, CancellationToken ct) =>
             RevokeAsync(body, context, access, ct))
             .WithName("RevokeRequests")
-            .WithSummary("Removes the app-owned Plex label for each request and marks it revoked. A label the app did not apply is left in place. If Plex cannot be reached, the request stays as it was.")
-            .Produces<DecisionBodyResponse>()
+            .WithSummary("Removes the app-owned Plex label for each labeled request and marks it revoked. A label the app did not apply is left in place and reported with labelNotOwned. If Plex cannot be reached, the request stays as it was.")
+            .Produces<RevokeBodyResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
     }
 
@@ -171,8 +180,8 @@ public static class RequestEndpoints
 
         return result.Status switch
         {
-            GrantStatus.Granted => Results.Json(await GrantResponse.FromAsync(result.Request!, titleStore, ct), statusCode: StatusCodes.Status201Created),
-            GrantStatus.AlreadyGranted => Results.Ok(await GrantResponse.FromAsync(result.Request!, titleStore, ct)),
+            GrantStatus.Granted => Results.Json(await GrantResponse.FromAsync(result, titleStore, ct), statusCode: StatusCodes.Status201Created),
+            GrantStatus.AlreadyGranted => Results.Ok(await GrantResponse.FromAsync(result, titleStore, ct)),
             GrantStatus.ProfileNotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "The kid profile does not exist."),
             GrantStatus.TitleNotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "That title could not be found."),
             GrantStatus.NotInLibrary => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "That title is not in the library."),
@@ -205,8 +214,36 @@ public static class RequestEndpoints
             return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: error);
         }
 
-        IReadOnlyList<DecisionItem> results = await access.RevokeManyAsync(ids, RequestApproval.ParentFrom(context.User), reason, ct);
-        return Results.Ok(new DecisionBodyResponse(results));
+        IReadOnlyList<RevokeItem> results = await access.RevokeManyAsync(ids, RequestApproval.ParentFrom(context.User), reason, ct);
+        return Results.Ok(new RevokeBodyResponse(results));
+    }
+
+    private static async Task<IResult> PreviewAsync(string? kind, int? tmdbId, RequestAccess access, CancellationToken ct)
+    {
+        MediaKind? parsed = kind?.Trim().ToLowerInvariant() switch
+        {
+            "movie" => MediaKind.Movie,
+            "show" => MediaKind.Show,
+            _ => null,
+        };
+        if (parsed is not MediaKind mediaKind || tmdbId is not (> 0 and int id))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A kind (movie or show) and a positive TMDB id are required.");
+        }
+
+        GrantPreview preview;
+        try
+        {
+            preview = await access.PreviewAsync(new TitleKey(mediaKind, id), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
+        {
+            return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The title could not be looked up.");
+        }
+
+        return preview.Status == GrantPreviewStatus.Found
+            ? Results.Ok(new GrantPreviewResponse(mediaKind, id, preview.Title!, preview.InLibrary))
+            : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "That title could not be found.");
     }
 
     private static bool TryState(string? state, out RequestState? parsed)
@@ -238,10 +275,17 @@ public sealed record DecisionBodyResponse(IReadOnlyList<DecisionItem> Results);
 
 public sealed record GrantRequest(int? KidProfileId, MediaKind? Kind, int? TmdbId);
 
-public sealed record GrantResponse(int Id, int KidProfileId, MediaKind Kind, int TmdbId, string Title, RequestState State)
+public sealed record RevokeBodyResponse(IReadOnlyList<RevokeItem> Results);
+
+public sealed record GrantPreviewResponse(MediaKind Kind, int TmdbId, string Title, bool? InLibrary);
+
+public sealed record GrantResponse(int Id, int KidProfileId, MediaKind Kind, int TmdbId, string Title, RequestState State, bool LabelNotOwned)
 {
-    public static async Task<GrantResponse> FromAsync(MediaRequest request, RequestTitles titles, CancellationToken ct) =>
-        new(request.Id, request.KidProfileId, request.Kind, request.TmdbId, await titles.GetAsync(request, ct), request.State);
+    public static async Task<GrantResponse> FromAsync(GrantItem item, RequestTitles titles, CancellationToken ct)
+    {
+        MediaRequest request = item.Request!;
+        return new(request.Id, request.KidProfileId, request.Kind, request.TmdbId, await titles.GetAsync(request, ct), request.State, item.LabelNotOwned);
+    }
 }
 
 public sealed record ParentRequestResponse(

@@ -16,7 +16,6 @@ stateDiagram-v2
     Fulfilling --> Failed
     Available --> Labeled: label written
     Available --> Failed
-    Available --> Revoked: parent
     Labeled --> Revoked: parent
     Failed --> Fulfilling: retry
     Failed --> Available: retry
@@ -36,7 +35,7 @@ stateDiagram-v2
 | `Failed` | Dispatch, arrival or labeling went wrong. |
 | `Revoked` | A parent took the app's label back. The title stays in the history. |
 
-`Denied` and `Revoked` are final. `Labeled` is not: a parent can revoke it.
+`Denied` and `Revoked` are final. `Labeled` is not: a parent can revoke it. Only `Labeled` can be revoked, because an `Available` request may still have its label being written.
 
 ## Actors
 
@@ -48,7 +47,6 @@ Every change is made by an actor: a `Kid` (with the kid profile id), a `Parent` 
 | `Approved` | `Fulfilling`, `Available`, `Failed` | System |
 | `Fulfilling` | `Available`, `Failed` | System |
 | `Available` | `Labeled`, `Failed` | System |
-| `Available` | `Revoked` | Parent |
 | `Labeled` | `Revoked` | Parent |
 | `Failed` | `Fulfilling`, `Available` | Parent, System |
 | `Failed` | `Denied` | Parent |
@@ -151,15 +149,19 @@ A title that is already in the library and allowed is labeled at once, as in [As
 
 A parent can give a kid a title that is already in the library, and can take that access back. Both need the Parent role. A session cookie or the trusted-network bypass also needs the antiforgery token. An API key does not. A kid session is rejected.
 
-`POST /api/v1/requests/grant` takes `{ kidProfileId, kind, tmdbId }`. `kind` is `movie` or `show`. The title's name is read from TMDB. It has to be in the library (the same lookup requests already use). The profile's Plex label is then applied with the label writer, source `grant`, and recorded in the ownership ledger. A copy Plex will not edit is skipped. If no copy takes the label, nothing is stored. Otherwise a request is stored with the parent as the actor and the reason `Parent grant`, and moved to `Labeled`. It does not count toward the weekly allowance and it never downloads anything.
+`POST /api/v1/requests/grant` takes `{ kidProfileId, kind, tmdbId }`. `kind` is `movie` or `show`. The title's name is read from TMDB. It has to be in the library (the same lookup requests already use). A request is stored first, with the parent as the actor and the reason `Parent grant`, and the parent approves it. The profile's Plex label is then applied the same way an approval applies it, with source `grant` in the ownership ledger, and the request moves to `Labeled`. A copy Plex will not edit is skipped. It does not count toward the weekly allowance and it never downloads anything.
 
-Granting does not ask the content policy for permission. A title the policy would block is still granted, and the history records that parent grant rather than a block. If the title is missing, not in the library, or Plex or TMDB cannot be reached, nothing is granted: no request is stored and no label is written. Granting a title the profile already has a labeled request for returns that request and does not write the label again. Any other open request for the same title is left alone.
+The response is `{ id, kidProfileId, kind, tmdbId, title, state, labelNotOwned }`. `labelNotOwned` is true when the profile's label was already on a copy and Wishlistarr did not put it there (for example, it was added by hand in Plex). That label is left alone: a later revoke does not remove it.
 
-`POST /api/v1/requests/revoke` takes `{ ids, reason }`, the same shape as deny. For each id that is `Labeled` or `Available`, Wishlistarr loads the ownership ledger for that profile and removes only those labels from the copies of that title. A label the app did not apply is left where it is, including a label another profile owns and a label someone added by hand in Plex. The request then moves to `Revoked` and the parent is recorded on that event. `reason` is optional, trimmed, stored as plain text up to 500 characters, and is not shown to the kid.
+Granting does not ask the content policy for permission. A title the policy would block is still granted, and the history records that parent grant rather than a block. If the profile or title is missing (`404`), the title is not in the library (`422`), or TMDB or Plex cannot be reached before anything is stored (`502`), nothing is stored and no label is written. If the profile already has another open request for the title, such as a kid's pending request, the grant is `409` and that request is left alone with no label written. If the label cannot be written after the request was stored, the response is `502` and the request is `Failed` with no label and no ledger row. Granting the same title again picks that request up and finishes it. Granting a title the profile already has a labeled request for returns that request (`200`) and does not write the label again.
 
-If the title is not in the library, Plex cannot be reached, or a label the ledger owns cannot be removed, that id comes back as `failed` and the request is not marked revoked. Revoking a request that is already revoked is `alreadyDecided`. Revoking a request in any other state is `conflict`. Calling revoke again does not remove the label a second time.
+`GET /api/v1/requests/grant/preview?kind=movie&tmdbId=603` looks a title up without changing anything, so the parent page can show its name before the parent confirms. It returns `{ kind, tmdbId, title, inLibrary }`. `inLibrary` is null when the library could not be checked. An unknown title is `404`.
 
-A kid can ask again for a revoked title. The new request is `Pending` and waits for a parent, whatever the content policy or an auto-approve rule would normally do, including a title the policy would block and a title that is already in the library. It counts toward the weekly allowance. The revoked request stays in the history. A keyword lookup that fails still refuses the request, because an unknown title is not queued.
+`POST /api/v1/requests/revoke` takes `{ ids, reason }`, the same shape as deny, and returns `{ results: [{ id, status, state, labelNotOwned }] }`. Only a `Labeled` request can be revoked. For each one, Wishlistarr reads the ownership ledger rows for that profile and each copy of the title, matched by server, Plex guid and label (the same match the label writer uses), and removes only those labels. A label the app did not apply is left where it is, including a label another profile owns and a label someone added by hand in Plex. When the profile's label is still on a copy because the app did not apply it, `labelNotOwned` is true and the parent page says the label was left in place. The request then moves from `Labeled` to `Revoked` and the parent is recorded on that event. `reason` is optional, trimmed, stored as plain text up to 500 characters, and is not shown to the kid.
+
+If the title is not in the library, Plex cannot be reached, or a label the ledger owns cannot be removed, that id comes back as `failed`. Any label already removed for it is put back and the request stays `Labeled`. If the request stops being `Labeled` while its labels are being removed, the labels are put back and the id is `conflict`. If a label cannot be put back, the id is `failed`, the request stays `Labeled` and the error is logged; revoking it again finishes the job. Revoking a request that is already revoked is `alreadyDecided`. Revoking a request in any other state, including `Available` and `Pending`, is `conflict` and removes nothing. Calling revoke again does not remove the label a second time. A request for an archived profile can still be revoked: its app-owned labels are removed the same way.
+
+A kid can ask again for a revoked title. The new request is `Pending` and waits for a parent, whatever the content policy or an auto-approve rule would normally do, including a title the policy would block and a title that is already in the library. It counts toward the weekly allowance. The revoked request stays in the history. This is checked again inside the transaction that stores the request, so a revoke that lands while the kid is asking still leaves the new request waiting. A keyword lookup that fails still refuses the request, because an unknown title is not queued.
 
 ## Kid history
 

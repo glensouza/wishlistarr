@@ -31,7 +31,6 @@ public static class RequestStateMachine
         new(RequestState.Fulfilling, RequestState.Failed, SystemOnly),
         new(RequestState.Available, RequestState.Labeled, SystemOnly),
         new(RequestState.Available, RequestState.Failed, SystemOnly),
-        new(RequestState.Available, RequestState.Revoked, ParentOnly),
         new(RequestState.Labeled, RequestState.Revoked, ParentOnly),
         new(RequestState.Failed, RequestState.Fulfilling, ParentOrSystem),
         new(RequestState.Failed, RequestState.Available, ParentOrSystem),

@@ -99,22 +99,129 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
-    public async Task A_failed_label_write_does_not_grant_the_title()
+    public async Task A_failed_label_write_leaves_a_failed_grant_that_granting_again_finishes()
     {
-        FakeLibraryIndex index = new();
-        index.Add(MediaKind.Movie, 603, new MediaItem("101", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1999, MediaKind.Movie, "1", []));
-        using KidRequestApiFactory factory = new(index);
+        using KidRequestApiFactory factory = new(MatrixIndex());
         await factory.LinkPlexAsync();
         (_, int ada) = await factory.SignInKidAsync();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         factory.Plex.ServerTokenOverride = "not-the-token";
 
         HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = ada, kind = "movie", tmdbId = 603 });
+        MediaRequest failed = Assert.Single(await factory.GetRequestsAsync());
 
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
-        Assert.Empty(await factory.GetRequestsAsync());
+        Assert.Equal(RequestState.Failed, failed.State);
         Assert.Empty(await factory.GetLedgerAsync());
         Assert.Empty(factory.Plex.Item("101").Labels);
+
+        factory.Plex.ServerTokenOverride = null;
+        JsonElement again = await GrantAsync(parent, ada, 603);
+
+        Assert.Equal(failed.Id, again.GetProperty("id").GetInt32());
+        Assert.Equal("labeled", again.GetProperty("state").GetString());
+        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+        Assert.Equal(RequestAccess.GrantSource, Assert.Single(await factory.GetLedgerAsync()).Source);
+    }
+
+    [Fact]
+    public async Task Grant_does_not_label_a_title_another_request_already_holds()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient kid, int ada) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int pending = await AskAsync(kid, 129);
+
+        HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = ada, kind = "movie", tmdbId = 129 });
+        MediaRequest request = Assert.Single(await factory.GetRequestsAsync());
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(pending, request.Id);
+        Assert.Equal(RequestState.Pending, request.State);
+        Assert.Equal(0, factory.LabelWrites);
+        Assert.Empty(await factory.GetLedgerAsync());
+        Assert.Empty(factory.Plex.Item("102").Labels);
+    }
+
+    [Fact]
+    public async Task Granting_again_returns_the_labeled_request_without_writing()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        int writes = factory.LabelWrites;
+
+        HttpResponseMessage again = await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = ada, kind = "movie", tmdbId = 603 });
+        JsonElement body = await again.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        Assert.Equal(id, body.GetProperty("id").GetInt32());
+        Assert.Equal("labeled", body.GetProperty("state").GetString());
+        Assert.Equal(writes, factory.LabelWrites);
+        Assert.Single(await factory.GetRequestsAsync());
+        Assert.Single(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Grant_returns_not_found_for_a_missing_profile_or_title()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        HttpResponseMessage noProfile = await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = ada + 100, kind = "movie", tmdbId = 603 });
+        HttpResponseMessage noTitle = await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = ada, kind = "movie", tmdbId = 999999 });
+
+        Assert.Equal(HttpStatusCode.NotFound, noProfile.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, noTitle.StatusCode);
+        Assert.Empty(await factory.GetRequestsAsync());
+        Assert.Equal(0, factory.LabelWrites);
+    }
+
+    [Fact]
+    public async Task A_hand_added_label_is_reported_on_grant_and_left_on_revoke()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        factory.Plex.Item("101").SetLabels("Ada");
+
+        JsonElement granted = await GrantAsync(parent, ada, 603);
+        int id = granted.GetProperty("id").GetInt32();
+        JsonElement revoked = await RevokeAsync(parent, new { ids = new[] { id } });
+
+        Assert.True(granted.GetProperty("labelNotOwned").GetBoolean());
+        Assert.Equal("succeeded", Item(revoked, id).GetProperty("status").GetString());
+        Assert.True(Item(revoked, id).GetProperty("labelNotOwned").GetBoolean());
+        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Preview_names_the_title_and_says_whether_it_is_in_the_library()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        JsonElement inLibrary = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests/grant/preview?kind=movie&tmdbId=603");
+        JsonElement missing = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests/grant/preview?kind=movie&tmdbId=700");
+        HttpResponseMessage unknown = await parent.GetAsync("/api/v1/requests/grant/preview?kind=movie&tmdbId=999999");
+        HttpResponseMessage invalid = await parent.GetAsync("/api/v1/requests/grant/preview?kind=book&tmdbId=603");
+
+        Assert.Equal("The Matrix", inLibrary.GetProperty("title").GetString());
+        Assert.True(inLibrary.GetProperty("inLibrary").GetBoolean());
+        Assert.Equal("Movie 700", missing.GetProperty("title").GetString());
+        Assert.False(missing.GetProperty("inLibrary").GetBoolean());
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Empty(await factory.GetRequestsAsync());
+        Assert.Equal(0, factory.LabelWrites);
     }
 
     [Fact]
@@ -138,6 +245,7 @@ public sealed class RequestAccessTests
 
         Assert.Equal("succeeded", Item(body, adaRequest).GetProperty("status").GetString());
         Assert.Equal("revoked", Item(body, adaRequest).GetProperty("state").GetString());
+        Assert.False(Item(body, adaRequest).GetProperty("labelNotOwned").GetBoolean());
         Assert.Equal(RequestState.Revoked, revoked.State);
         Assert.Equal(RequestState.Labeled, kept.State);
         Assert.Equal(["Ben", "Favorites"], factory.Plex.Item("101").Labels);
@@ -162,6 +270,7 @@ public sealed class RequestAccessTests
         JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } });
 
         Assert.Equal("succeeded", Item(body, id).GetProperty("status").GetString());
+        Assert.True(Item(body, id).GetProperty("labelNotOwned").GetBoolean());
         Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
         Assert.Equal(["Ada", "Favorites"], factory.Plex.Item("101").Labels);
         Assert.Empty(await factory.GetLedgerAsync());
@@ -169,25 +278,214 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
-    public async Task A_failed_label_removal_does_not_mark_the_request_revoked()
+    public async Task A_label_removal_that_Plex_refuses_does_not_mark_the_request_revoked()
+    {
+        using KidRequestApiFactory factory = new(MatrixIndex());
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        factory.Plex.Delay = request => request.Method == "PUT" ? throw new InvalidOperationException("refused") : Task.CompletedTask;
+
+        JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } });
+
+        AssertNotRevoked(body, id, await factory.GetRequestsAsync(), await factory.GetHistoryAsync(id));
+        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+        Assert.Single(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task A_label_removal_that_finds_the_label_no_longer_owned_does_not_mark_the_request_revoked()
+    {
+        using KidRequestApiFactory factory = new(MatrixIndex());
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        int metadataReads = 0;
+        factory.Plex.Delay = async request =>
+        {
+            // The first read finds the ledger row; the second starts the removal, which then finds the row gone.
+            if (request.Method == "GET" && request.Path == "/library/metadata/101" && Interlocked.Increment(ref metadataReads) == 2)
+            {
+                await ClearLedgerAsync(factory);
+            }
+        };
+        int writes = factory.LabelWrites;
+
+        JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } });
+
+        AssertNotRevoked(body, id, await factory.GetRequestsAsync(), await factory.GetHistoryAsync(id));
+        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+        Assert.Equal(writes, factory.LabelWrites);
+    }
+
+    [Fact]
+    public async Task Revoking_an_available_request_is_a_conflict_while_its_label_is_being_written()
+    {
+        using KidRequestApiFactory factory = new(SpiritedAwayIndex());
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskAsync(kid, 129);
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Plex.Delay = async request =>
+        {
+            if (request.Method == "PUT")
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        };
+
+        Task<HttpResponseMessage> approve = parent.PostAsJsonAsync("/api/v1/requests/approve", new { ids = new[] { id } });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        int writes = factory.LabelWrites;
+        JsonElement early = await RevokeAsync(parent, new { ids = new[] { id } });
+        int writesDuringRevoke = factory.LabelWrites - writes;
+        release.SetResult();
+        Assert.Equal(HttpStatusCode.OK, (await approve).StatusCode);
+        factory.Plex.Delay = null;
+
+        Assert.Equal("conflict", Item(early, id).GetProperty("status").GetString());
+        Assert.Equal("available", Item(early, id).GetProperty("state").GetString());
+        Assert.Equal(0, writesDuringRevoke);
+        Assert.Equal(RequestState.Labeled, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("102").Labels);
+        Assert.Single(await factory.GetLedgerAsync());
+
+        JsonElement later = await RevokeAsync(parent, new { ids = new[] { id } });
+
+        Assert.Equal("succeeded", Item(later, id).GetProperty("status").GetString());
+        Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Empty(factory.Plex.Item("102").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task A_revoke_that_loses_the_request_to_another_change_puts_the_label_back()
+    {
+        using KidRequestApiFactory factory = new(MatrixIndex());
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        int puts = 0;
+        factory.Plex.Delay = async request =>
+        {
+            if (request.Method == "PUT" && Interlocked.Increment(ref puts) == 1)
+            {
+                await SetStateAsync(factory, id, RequestState.Failed);
+            }
+        };
+
+        JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } });
+
+        Assert.Equal("conflict", Item(body, id).GetProperty("status").GetString());
+        Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+        Assert.Equal(RequestAccess.GrantSource, Assert.Single(await factory.GetLedgerAsync()).Source);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Revoked);
+    }
+
+    [Fact]
+    public async Task Two_revokes_at_once_remove_the_label_and_revoke_once()
+    {
+        FakeLibraryIndex index = MatrixIndex();
+        using KidRequestApiFactory factory = new(index);
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient first = await factory.CreateSignedInClientAsync();
+        HttpClient second = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(first, ada, 603)).GetProperty("id").GetInt32();
+        Rendezvous both = new(2);
+        index.Gate = both.ArriveAsync;
+
+        JsonElement[] results = await Task.WhenAll(
+            RevokeAsync(first, new { ids = new[] { id } }),
+            RevokeAsync(second, new { ids = new[] { id } }));
+
+        Assert.Equal(
+            ["alreadyDecided", "succeeded"],
+            results.Select(body => Item(body, id).GetProperty("status").GetString()).Order());
+        Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Revoked);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Revoke_matches_the_ledger_by_server_guid_and_label()
+    {
+        using KidRequestApiFactory moved = new();
+        await moved.LinkPlexAsync();
+        (_, int ada) = await moved.SignInKidAsync();
+        HttpClient parent = await moved.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        await UpdateLedgerAsync(moved, row => row.RatingKey = "999");
+
+        JsonElement removed = await RevokeAsync(parent, new { ids = new[] { id } });
+
+        Assert.Equal("succeeded", Item(removed, id).GetProperty("status").GetString());
+        Assert.False(Item(removed, id).GetProperty("labelNotOwned").GetBoolean());
+        Assert.Empty(moved.Plex.Item("101").Labels);
+        Assert.Empty(await moved.GetLedgerAsync());
+
+        using KidRequestApiFactory other = new();
+        await other.LinkPlexAsync();
+        (_, int bea) = await other.SignInKidAsync("Bea");
+        HttpClient otherParent = await other.CreateSignedInClientAsync();
+        int otherId = (await GrantAsync(otherParent, bea, 603)).GetProperty("id").GetInt32();
+        await UpdateLedgerAsync(other, row => row.Guid = "plex://movie/another-title");
+
+        JsonElement kept = await RevokeAsync(otherParent, new { ids = new[] { otherId } });
+
+        Assert.Equal("succeeded", Item(kept, otherId).GetProperty("status").GetString());
+        Assert.True(Item(kept, otherId).GetProperty("labelNotOwned").GetBoolean());
+        Assert.Equal(["Bea"], other.Plex.Item("101").Labels);
+        Assert.Single(await other.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Revoking_again_does_not_remove_twice_and_a_pending_request_is_a_conflict()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient kid, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        int pending = await AskAsync(kid, 700);
+        await RevokeAsync(parent, new { ids = new[] { id } });
+        int writes = factory.LabelWrites;
+
+        JsonElement again = await RevokeAsync(parent, new { ids = new[] { id, pending } });
+
+        Assert.Equal("alreadyDecided", Item(again, id).GetProperty("status").GetString());
+        Assert.Equal("revoked", Item(again, id).GetProperty("state").GetString());
+        Assert.Equal("conflict", Item(again, pending).GetProperty("status").GetString());
+        Assert.Equal("pending", Item(again, pending).GetProperty("state").GetString());
+        Assert.Equal(writes, factory.LabelWrites);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Revoked);
+        Assert.Equal(RequestState.Pending, (await factory.GetRequestsAsync()).Single(request => request.Id == pending).State);
+    }
+
+    [Fact]
+    public async Task A_request_for_an_archived_profile_can_still_be_revoked()
     {
         using KidRequestApiFactory factory = new();
         await factory.LinkPlexAsync();
         (_, int ada) = await factory.SignInKidAsync();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
-        factory.Plex.ServerTokenOverride = "not-the-token";
-        int writes = factory.LabelWrites;
+        Assert.Equal(HttpStatusCode.NoContent, (await parent.DeleteAsync($"/api/v1/kid-profiles/{ada}")).StatusCode);
 
         JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } });
 
-        Assert.Equal("failed", Item(body, id).GetProperty("status").GetString());
-        Assert.Equal("labeled", Item(body, id).GetProperty("state").GetString());
-        Assert.Equal(RequestState.Labeled, Assert.Single(await factory.GetRequestsAsync()).State);
-        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
-        Assert.Single(await factory.GetLedgerAsync());
-        Assert.Equal(writes, factory.LabelWrites);
-        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Revoked);
+        Assert.Equal("succeeded", Item(body, id).GetProperty("status").GetString());
+        Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
     }
 
     [Fact]
@@ -238,6 +536,43 @@ public sealed class RequestAccessTests
         Assert.Equal(HttpStatusCode.Created, autoAgain.StatusCode);
         Assert.Equal("pending", (await autoAgain.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
         Assert.Empty(automatic.Plex.Item("101").Labels);
+    }
+
+    [Fact]
+    public async Task A_revoke_that_lands_while_the_kid_asks_again_keeps_the_new_request_waiting()
+    {
+        FakeLibraryIndex index = MatrixIndex();
+        using KidRequestApiFactory factory = new(index);
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int labeled = await AskAsync(kid, 603);
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int lookups = 0;
+        index.Gate = async () =>
+        {
+            if (Interlocked.Increment(ref lookups) == 1)
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        };
+
+        Task<HttpResponseMessage> asking = KidRequestApiFactory.RequestAsync(kid, "movie", 603);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        JsonElement revoked = await RevokeAsync(parent, new { ids = new[] { labeled } });
+        release.SetResult();
+        HttpResponseMessage again = await asking;
+        MediaRequest created = (await factory.GetRequestsAsync()).Single(request => request.Id != labeled);
+
+        Assert.Equal("succeeded", Item(revoked, labeled).GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.Created, again.StatusCode);
+        Assert.Equal("pending", (await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        Assert.Equal(RequestState.Pending, created.State);
+        Assert.True(created.CountsTowardAllowance);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
     }
 
     [Fact]
@@ -319,6 +654,52 @@ public sealed class RequestAccessTests
         HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/requests/revoke", body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).Clone();
+    }
+
+    private static FakeLibraryIndex MatrixIndex()
+    {
+        FakeLibraryIndex index = new();
+        index.Add(MediaKind.Movie, 603, new MediaItem("101", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1999, MediaKind.Movie, "1", []));
+        return index;
+    }
+
+    private static FakeLibraryIndex SpiritedAwayIndex()
+    {
+        FakeLibraryIndex index = new();
+        index.Add(MediaKind.Movie, 129, new MediaItem("102", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 2001, MediaKind.Movie, "1", []));
+        return index;
+    }
+
+    private static void AssertNotRevoked(JsonElement body, int id, List<MediaRequest> requests, List<MediaRequestEvent> history)
+    {
+        Assert.Equal("failed", Item(body, id).GetProperty("status").GetString());
+        Assert.Equal("labeled", Item(body, id).GetProperty("state").GetString());
+        Assert.Equal(RequestState.Labeled, Assert.Single(requests).State);
+        Assert.DoesNotContain(history, item => item.ToState == RequestState.Revoked);
+    }
+
+    private static async Task ClearLedgerAsync(KidRequestApiFactory factory)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().OwnedLabels.ExecuteDeleteAsync();
+    }
+
+    private static async Task UpdateLedgerAsync(KidRequestApiFactory factory, Action<OwnedLabel> change)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        change(await db.OwnedLabels.SingleAsync());
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task SetStateAsync(KidRequestApiFactory factory, int requestId, RequestState state)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().MediaRequests
+            .Where(request => request.Id == requestId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(request => request.State, state)
+                .SetProperty(request => request.Version, request => request.Version + 1));
     }
 
     private static JsonElement Item(JsonElement body, int id) =>

@@ -175,7 +175,7 @@ public sealed partial class RequestApproval(
             return FromResult(request.Id, available, approving: true);
         }
 
-        RequestResult moved = await labeling.LabelAsync(request.Id, matches, profile, system);
+        RequestResult moved = (await labeling.LabelAsync(request.Id, matches, profile, system)).Result;
         RequestState state = moved.Request?.State ?? RequestState.Failed;
         return new DecisionItem(
             request.Id,
