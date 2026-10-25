@@ -4,7 +4,9 @@ import {
   approveRequests,
   denyRequests,
   listRequests,
+  maxBatch,
   type DecisionItem,
+  type DecisionStatus,
   type ParentRequest,
 } from './requests'
 
@@ -18,6 +20,16 @@ const stateKey: Record<ParentRequest['state'], MessageKey> = {
   failed: 'requests.failed',
 }
 
+const statusKey: Record<DecisionStatus, MessageKey> = {
+  succeeded: 'requests.result.succeeded',
+  alreadyDecided: 'requests.result.alreadyDecided',
+  notFound: 'requests.result.notFound',
+  failed: 'requests.result.failed',
+  conflict: 'requests.result.conflict',
+}
+
+type Failure = { id: number; title: string; status: DecisionStatus }
+
 const messageOf = (failure: unknown, fallback: string) =>
   failure instanceof Error ? failure.message : fallback
 
@@ -29,18 +41,21 @@ const noteOf = (value: string) => {
 export default function RequestsAdmin() {
   const t = useT()
   const [rows, setRows] = useState<ParentRequest[] | null>(null)
+  const [total, setTotal] = useState(0)
   const [selected, setSelected] = useState<number[]>([])
   const [reason, setReason] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [results, setResults] = useState<Failure[]>([])
   const [busy, setBusy] = useState(false)
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
     let current = true
     listRequests('pending').then(
-      (loaded) => {
+      (page) => {
         if (!current) return
-        setRows(loaded)
+        setRows(page.items)
+        setTotal(page.total)
         setSelected([])
       },
       (failure: unknown) =>
@@ -59,23 +74,38 @@ export default function RequestsAdmin() {
     )
   }
 
+  function toggleAll() {
+    const ids = rows?.map((row) => row.id) ?? []
+    setSelected((current) => (current.length === ids.length ? [] : ids))
+  }
+
   async function decide(action: 'approve' | 'deny', ids: number[]) {
     if (ids.length === 0 || busy) return
     setError(null)
+    setResults([])
     setBusy(true)
+    const send = action === 'approve' ? approveRequests : denyRequests
+    const note = noteOf(reason)
+    const titles = new Map(rows?.map((row) => [row.id, row.title]))
+    const collected: DecisionItem[] = []
     try {
-      const note = noteOf(reason)
-      const body =
-        action === 'approve'
-          ? await approveRequests(ids, note)
-          : await denyRequests(ids, note)
-      if (unresolved(body.results)) setError(t('requests.notApplied'))
+      for (let start = 0; start < ids.length; start += maxBatch) {
+        const body = await send(ids.slice(start, start + maxBatch), note)
+        collected.push(...body.results)
+      }
       setReason('')
-      setVersion((current) => current + 1)
     } catch (failure) {
       setError(messageOf(failure, t('app.somethingWrong')))
     } finally {
+      setResults(
+        collected.filter(unresolved).map((item) => ({
+          id: item.id,
+          title: titles.get(item.id) ?? `#${item.id}`,
+          status: item.status,
+        })),
+      )
       setBusy(false)
+      setVersion((current) => current + 1)
     }
   }
 
@@ -83,10 +113,41 @@ export default function RequestsAdmin() {
     <section aria-labelledby="requests-heading">
       <h2 id="requests-heading">{t('requests.title')}</h2>
       {error && <p role="alert">{error}</p>}
+      {results.length > 0 && (
+        <div role="alert">
+          <p>{t('requests.notApplied')}</p>
+          <ul>
+            {results.map((item) => (
+              <li key={item.id}>
+                {t('requests.itemResult', {
+                  title: item.title,
+                  result: t(statusKey[item.status]),
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {rows === null && <p role="status">{t('app.loading')}</p>}
       {rows !== null && rows.length === 0 && <p>{t('requests.none')}</p>}
       {rows !== null && rows.length > 0 && (
         <>
+          {total > rows.length && (
+            <p>
+              {t('requests.showing', {
+                shown: String(rows.length),
+                total: String(total),
+              })}
+            </p>
+          )}
+          <label>
+            <input
+              type="checkbox"
+              checked={selected.length === rows.length}
+              onChange={toggleAll}
+            />
+            {t('requests.selectAll')}
+          </label>
           <ul>
             {rows.map((row) => (
               <li key={row.id}>
@@ -153,8 +214,6 @@ export default function RequestsAdmin() {
   )
 }
 
-function unresolved(results: DecisionItem[]) {
-  return results.some(
-    (item) => item.status !== 'succeeded' && item.status !== 'alreadyDecided',
-  )
+function unresolved(item: DecisionItem) {
+  return item.status !== 'succeeded' && item.status !== 'alreadyDecided'
 }

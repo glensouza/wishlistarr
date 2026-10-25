@@ -118,7 +118,7 @@ export const en = {
   'admin.plexLabel': 'Plex label',
   'admin.autoApprove': 'Auto-approve requests',
   'admin.autoApproveHint':
-    'Say yes without a parent, or only up to a rating. Leave a rating blank for no ceiling.',
+    'Approve titles with a known rating without a parent, or only up to a rating. Titles without a rating always wait for you. Leave a rating blank for no ceiling.',
   'admin.movieCeiling': 'Movie rating ceiling',
   'admin.tvCeiling': 'TV rating ceiling',
   'admin.ratingNone': 'No ceiling',
@@ -199,6 +199,15 @@ export const en = {
   'requests.reasonHint':
     'Optional. The kid sees this only if you deny the request.',
   'requests.notApplied': 'One or more requests could not be decided.',
+  'requests.itemResult': '{title}: {result}',
+  'requests.result.succeeded': 'Done',
+  'requests.result.alreadyDecided': 'Already decided',
+  'requests.result.notFound': 'Not found',
+  'requests.result.failed': 'Could not be completed. Check Plex and try again.',
+  'requests.result.conflict': 'Someone else decided it differently',
+  'requests.selectAll': 'Select all shown',
+  'requests.showing':
+    'Showing {shown} of {total} waiting. The rest appear after these are decided.',
   'requests.pending': 'Waiting',
   'requests.approved': 'Approved',
   'requests.denied': 'Denied',

@@ -41,7 +41,9 @@ function stubFetch(handler: (path: string, method: string) => unknown) {
         path,
         body: init?.body ? JSON.parse(init.body as string) : undefined,
       })
-      const body = handler(path, method)
+      const body = path.startsWith('/api/v1/requests')
+        ? { items: [], total: 0, limit: 100, offset: 0 }
+        : handler(path, method)
       if (body === undefined) return new Response(null, { status: 204 })
       return body === null
         ? Response.json({ title: 'Nope' }, { status: 401 })
