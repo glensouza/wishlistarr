@@ -7,7 +7,7 @@ export function WatchProviderCredit() {
   return (
     <>
       {t('providers.creditBefore')}
-      <a href="https://www.justwatch.com/">{t('providers.justWatch')}</a>
+      {t('providers.justWatch')}
     </>
   )
 }

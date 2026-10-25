@@ -15,20 +15,41 @@ function sources(dir: string): string[] {
   })
 }
 
-const allowedHref =
-  /^https:\/\/(?:www\.themoviedb\.org\/|www\.justwatch\.com\/|fanart\.tv\/|www\.doesthedogdie\.com\/?|www\.gnu\.org\/licenses\/gpl-3\.0\.html)$/
+const parentOnlyPage = join(web, 'src', 'about', 'About.tsx')
 
-it('loads nothing from third-party hosts', () => {
-  const files = [join(web, 'index.html'), ...sources(join(web, 'src'))]
+const allowedHref =
+  /^https:\/\/(?:www\.themoviedb\.org\/|www\.justwatch\.com\/|fanart\.tv\/|www\.doesthedogdie\.com|www\.gnu\.org\/licenses\/gpl-3\.0\.html)$/
+
+it('loads nothing from, and links to, no third-party host outside the parent About page', () => {
+  const files = [join(web, 'index.html'), ...sources(join(web, 'src'))].filter(
+    (file) => file !== parentOnlyPage,
+  )
   for (const file of files) {
-    const text = readFileSync(file, 'utf8')
-    expect(text, file).not.toMatch(
-      /src=["']https?:|url\(\s*["']?(?:https?:)?\/\/|@import\s+(?:url\()?["']?https?:|fonts\.(?:googleapis|gstatic)/,
+    expect(readFileSync(file, 'utf8'), file).not.toMatch(
+      /(?:src|href)=["']https?:|url\(\s*["']?(?:https?:)?\/\/|@import\s+(?:url\()?["']?https?:|fonts\.(?:googleapis|gstatic)|window\.open|target=["']_blank/,
     )
-    for (const match of text.matchAll(/href=["'](https?:[^"']+)["']/g)) {
-      expect(match[1], file).toMatch(allowedHref)
-    }
   }
+})
+
+it('limits the parent About page to the credited sites with safe link attributes', () => {
+  const text = readFileSync(parentOnlyPage, 'utf8')
+  expect(text).not.toMatch(/src=["']https?:/)
+  expect(text.match(/<a\s/g)).toHaveLength(1)
+  const hrefs = [...text.matchAll(/href="(https?:[^"]+)"/g)].map(
+    (match) => match[1],
+  )
+  expect(hrefs.length).toBeGreaterThan(0)
+  for (const href of hrefs) expect(href).toMatch(allowedHref)
+  expect(text).toContain('target="_blank" rel="noreferrer noopener"')
+})
+
+it('imports the parent About page only from the app routes', () => {
+  const importers = sources(join(web, 'src')).filter((file) =>
+    /from ['"][./]*(?:about\/)?About['"]/.test(readFileSync(file, 'utf8')),
+  )
+  expect(importers.map((file) => file.slice(web.length + 1))).toEqual([
+    join('src', 'App.tsx'),
+  ])
 })
 
 it('bundles its fonts from packages', () => {

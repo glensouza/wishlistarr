@@ -175,7 +175,7 @@ export const en = {
   'about.title': 'About',
   'about.tmdbAlt': 'TMDB',
   'about.tmdbNotice':
-    'This product uses the TMDB API but is not endorsed or certified by TMDB.',
+    'This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.',
   'about.fanartBefore': 'Artwork data from ',
   'about.fanartLink': 'fanart.tv',
   'about.fanartAfter': '.',

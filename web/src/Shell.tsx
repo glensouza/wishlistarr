@@ -1,4 +1,5 @@
 import { Link, Outlet } from 'react-router-dom'
+import { TmdbNotice } from './about/TmdbNotice'
 import { useT } from './i18n'
 import ThemeToggle from './theme/ThemeToggle'
 
@@ -22,7 +23,7 @@ export default function Shell() {
         <Outlet />
       </main>
       <footer className="shell-footer">
-        <Link to="/about">{t('about.link')}</Link>
+        <TmdbNotice />
       </footer>
     </div>
   )

@@ -37,11 +37,11 @@ export default function ParentArea() {
   return (
     <>
       <h1>{t('parent.title')}</h1>
-      <p>
-        <Link to="/about">{t('about.link')}</Link>
-      </p>
       {isParent && (
         <>
+          <p>
+            <Link to="/about">{t('about.link')}</Link>
+          </p>
           <KidProfilesAdmin />
           <KidDevicesAdmin />
           {error && <p role="alert">{error}</p>}

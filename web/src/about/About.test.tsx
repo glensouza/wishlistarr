@@ -11,13 +11,24 @@ afterEach(() => {
 })
 
 const notice =
-  'This product uses the TMDB API but is not endorsed or certified by TMDB.'
+  'This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.'
 const npmPackages = {
   packages: [{ name: 'zeta-pkg', version: '2.0.0', license: 'MIT' }],
 }
 const nugetPackages = {
   packages: [{ name: 'alpha-pkg', version: '1.0.0', license: 'Apache-2.0' }],
 }
+const parent = {
+  setupRequired: false,
+  principalType: 'Parent',
+  kidDevice: null,
+}
+const pairedDevice = {
+  setupRequired: false,
+  principalType: null,
+  kidDevice: { name: 'Tablet' },
+}
+const pairedKid = { ...pairedDevice, principalType: 'Kid' }
 
 function renderAt(path: string) {
   return render(
@@ -34,51 +45,67 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function stubLicenses(npm: unknown, nuget: unknown) {
-  const calls: string[] = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (path: string) => {
-      calls.push(path)
-      if (path === '/api/v1/auth/status') {
-        return jsonResponse({
-          setupRequired: false,
-          principalType: null,
-          kidDevice: { name: 'Tablet' },
-        })
-      }
-      if (path === '/licenses/npm.json') return respond(npm)
-      if (path === '/licenses/nuget.json') return respond(nuget)
-      return jsonResponse({ title: 'Nope' }, 401)
-    }),
-  )
-  return calls
-}
-
 function respond(body: unknown) {
   if (body instanceof Response) return body
   if (body === null) return jsonResponse({ title: 'Missing' }, 404)
   return jsonResponse(body)
 }
 
-it('shows the TMDB notice, logo, and the other credits', async () => {
-  const calls = stubLicenses(npmPackages, nugetPackages)
+function stubApp(
+  status: unknown,
+  npm: unknown = npmPackages,
+  nuget: unknown = nugetPackages,
+) {
+  const calls: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      calls.push(path)
+      if (path === '/api/v1/auth/status') return jsonResponse(status)
+      if (path === '/api/v1/kid/profiles') return jsonResponse([])
+      if (path === '/licenses/npm.json') return respond(npm)
+      if (path === '/licenses/nuget.json') return respond(nuget)
+      if (path.startsWith('/api/v1/parent') || path === '/api/v1/kid/me') {
+        return jsonResponse([])
+      }
+      return jsonResponse({ title: 'Nope' }, 401)
+    }),
+  )
+  return calls
+}
+
+function expectNoOutboundLinks(container: HTMLElement) {
+  expect(
+    container.querySelectorAll('a[href^="http"], a[href^="//"]'),
+  ).toHaveLength(0)
+  expect(container.querySelectorAll('a[target]')).toHaveLength(0)
+  expect(screen.queryByRole('link', { name: 'About' })).toBeNull()
+  expect(screen.queryByText(/DoesTheDogDie/)).toBeNull()
+  expect(screen.queryByText(/fanart\.tv/)).toBeNull()
+}
+
+function expectPlainTmdbCredit() {
+  expect(screen.getByText(notice)).toBeTruthy()
+  const logo = screen.getByRole('img', { name: 'TMDB' })
+  expect(logo.closest('a')).toBeNull()
+}
+
+it('shows the TMDB notice, logo, and the other credits to a parent', async () => {
+  const calls = stubApp(parent)
   const { container } = renderAt('/about')
 
   expect(await screen.findByRole('heading', { name: 'About' })).toBeTruthy()
-  expect(screen.getByText(notice)).toBeTruthy()
-  const logo = screen.getByRole('img', { name: 'TMDB' })
-  const src = logo.getAttribute('src') ?? ''
-  expect(src).toContain('273.42')
-  expect(src).toContain('90cea1')
-  expect(src).toContain('00b3e5')
-  expect(logo.closest('a')?.getAttribute('href')).toBe(
+  expect(screen.getAllByText(notice)).toHaveLength(2)
+  const logos = screen.getAllByRole('img', { name: 'TMDB' })
+  const linked = logos.filter((logo) => logo.closest('a'))
+  expect(linked).toHaveLength(1)
+  expect(linked[0].closest('a')?.getAttribute('href')).toBe(
     'https://www.themoviedb.org/',
   )
-  expect(
-    screen.getByRole('link', { name: 'JustWatch' }).getAttribute('href'),
-  ).toBe('https://www.justwatch.com/')
-  expect(screen.getByText(/Watch provider data from/).textContent).toBe(
+
+  const justWatch = screen.getByRole('link', { name: 'JustWatch' })
+  expect(justWatch.getAttribute('href')).toBe('https://www.justwatch.com/')
+  expect(justWatch.parentElement?.textContent).toBe(
     'Watch provider data from JustWatch',
   )
   expect(
@@ -92,26 +119,40 @@ it('shows the TMDB notice, logo, and the other credits', async () => {
       'Wishlistarr is not affiliated with, endorsed, or sponsored by Plex, Inc. Plex is a trademark of Plex, Inc.',
     ),
   ).toBeTruthy()
-  expect(
-    screen
-      .getByRole('link', { name: 'GNU General Public License v3.0' })
-      .getAttribute('href'),
-  ).toBe('https://www.gnu.org/licenses/gpl-3.0.html')
+  const gpl = screen.getByRole('link', {
+    name: 'GNU General Public License v3.0',
+  })
+  expect(gpl.getAttribute('href')).toBe(
+    'https://www.gnu.org/licenses/gpl-3.0.html',
+  )
+
+  const outbound = container.querySelectorAll('a[href^="https://"]')
+  expect(outbound).toHaveLength(5)
+  for (const anchor of outbound) {
+    expect(anchor.getAttribute('target')).toBe('_blank')
+    expect(anchor.getAttribute('rel')).toBe('noreferrer noopener')
+  }
 
   const items = await screen.findAllByRole('listitem')
   expect(items.map((item) => item.textContent)).toEqual([
     'alpha-pkg 1.0.0 (Apache-2.0)',
     'zeta-pkg 2.0.0 (MIT)',
   ])
-  expect(calls.filter((path) => path.startsWith('/api/')).sort()).toEqual([
-    '/api/v1/auth/status',
-    '/api/v1/kid/me',
-  ])
+  expect(calls.some((path) => path.startsWith('/api/v1/parent'))).toBe(false)
+  expect(calls).toContain('/api/v1/auth/status')
   expect(await axe(container)).toHaveNoViolations()
 })
 
+it('links to About from the parent area when signed in as a parent', async () => {
+  const user = userEvent.setup()
+  stubApp(parent)
+  renderAt('/parent')
+  await user.click(await screen.findByRole('link', { name: 'About' }))
+  expect(await screen.findByRole('heading', { name: 'About' })).toBeTruthy()
+})
+
 it('does not list packages when either notice file fails', async () => {
-  stubLicenses(npmPackages, null)
+  stubApp(parent, npmPackages, null)
   renderAt('/about')
   expect(
     await screen.findByText('The package license list is unavailable.'),
@@ -121,7 +162,8 @@ it('does not list packages when either notice file fails', async () => {
 })
 
 it('does not treat the site shell or a partial file as a license list', async () => {
-  stubLicenses(
+  stubApp(
+    parent,
     new Response('<!doctype html><title>test-shell</title>', {
       status: 200,
       headers: { 'content-type': 'text/html' },
@@ -133,11 +175,11 @@ it('does not treat the site shell or a partial file as a license list', async ()
     await screen.findByText('The package license list is unavailable.'),
   ).toBeTruthy()
   expect(screen.queryByText(/hidden-pkg/)).toBeNull()
-  expect(screen.getByText(notice)).toBeTruthy()
+  expect(screen.getAllByText(notice).length).toBeGreaterThan(0)
 })
 
 it('rejects an empty notice file', async () => {
-  stubLicenses({ packages: [] }, nugetPackages)
+  stubApp(parent, { packages: [] }, nugetPackages)
   renderAt('/about')
   expect(
     await screen.findByText('The package license list is unavailable.'),
@@ -145,11 +187,62 @@ it('rejects an empty notice file', async () => {
   expect(screen.queryByText(/alpha-pkg/)).toBeNull()
 })
 
-it('opens About from the footer without leaving kid mode', async () => {
-  const user = userEvent.setup()
-  stubLicenses(npmPackages, nugetPackages)
-  renderAt('/')
-  await user.click(screen.getByRole('link', { name: 'About' }))
-  expect(await screen.findByText(notice)).toBeTruthy()
-  expect(screen.queryByRole('heading', { name: 'Parents' })).toBeNull()
+it('shows the profile picker with the TMDB credit as plain text and no outbound links', async () => {
+  stubApp(pairedDevice)
+  const { container } = renderAt('/')
+  await screen.findByText('No profiles yet. Ask a parent to add one.')
+  expectPlainTmdbCredit()
+  expectNoOutboundLinks(container)
+  expect(await axe(container)).toHaveNoViolations()
+})
+
+it('shows the kid home with no outbound links', async () => {
+  stubApp(pairedKid)
+  const { container } = renderAt('/home')
+  expect(await screen.findByRole('main')).toBeTruthy()
+  await screen.findByRole('contentinfo')
+  expectPlainTmdbCredit()
+  expectNoOutboundLinks(container)
+})
+
+it('keeps a paired device parent sign-in free of outbound links', async () => {
+  stubApp(pairedDevice)
+  const { container } = renderAt('/parent')
+  expect(
+    await screen.findByRole('button', { name: 'Leave kid mode' }),
+  ).toBeTruthy()
+  expectPlainTmdbCredit()
+  expectNoOutboundLinks(container)
+})
+
+it('sends a paired device that is not a parent away from About', async () => {
+  const calls = stubApp(pairedDevice)
+  const { container } = renderAt('/about')
+  expect(
+    await screen.findByRole('button', { name: 'Leave kid mode' }),
+  ).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'About' })).toBeNull()
+  expectPlainTmdbCredit()
+  expectNoOutboundLinks(container)
+  expect(calls.some((path) => path.startsWith('/licenses/'))).toBe(false)
+})
+
+it('sends a signed-in kid away from About', async () => {
+  stubApp(pairedKid)
+  const { container } = renderAt('/about')
+  expect(
+    await screen.findByRole('button', { name: 'Leave kid mode' }),
+  ).toBeTruthy()
+  expectNoOutboundLinks(container)
+})
+
+it('sends a browser that is not signed in away from About', async () => {
+  const calls = stubApp({
+    setupRequired: false,
+    principalType: null,
+    kidDevice: null,
+  })
+  renderAt('/about')
+  expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy()
+  expect(calls.some((path) => path.startsWith('/licenses/'))).toBe(false)
 })

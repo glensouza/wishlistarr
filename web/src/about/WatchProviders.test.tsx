@@ -21,9 +21,9 @@ it('credits JustWatch in the same section as the provider names', () => {
     <WatchProviders providers={[{ name: 'Stream' }, { name: ' RentCo ' }]} />,
   )
   const stream = screen.getByText('Stream')
-  const credit = screen.getByRole('link', { name: 'JustWatch' })
-  expect(credit.getAttribute('href')).toBe('https://www.justwatch.com/')
+  const credit = screen.getByText('Watch provider data from JustWatch')
   expect(stream.closest('section')).toBe(credit.closest('section'))
+  expect(screen.queryByRole('link')).toBeNull()
   expect(screen.getByText('RentCo')).toBeTruthy()
   expect(screen.getByRole('region', { name: 'Watch providers' })).toBeTruthy()
 })
@@ -41,14 +41,17 @@ it('shows nothing when there is no provider data', () => {
   expect(blank.container.querySelector('a')).toBeNull()
 })
 
-it('requires the JustWatch credit wherever provider fields are rendered', () => {
+const providerData =
+  /watch[_-]?providers?|provider_?(?:name|id)|display_?priority|logo_?path|flatrate|\bjustwatch\b/i
+
+it('requires the JustWatch credit wherever provider data is rendered', () => {
   const watch = readFileSync(join(__dirname, 'WatchProviders.tsx'), 'utf8')
   expect(watch).toContain('<WatchProviderCredit')
   for (const file of tsxFiles(join(__dirname, '..'))) {
-    if (file.endsWith('WatchProviders.tsx')) continue
+    if (/(?:WatchProviders|About)\.tsx$/.test(file)) continue
     const text = readFileSync(file, 'utf8')
-    if (/providerName|provider_name|flatrate/.test(text)) {
-      expect(text, file).toContain('<WatchProviderCredit')
+    if (providerData.test(text)) {
+      expect(text, file).toMatch(/<WatchProviders\b|<WatchProviderCredit\b/)
     }
   }
 })
