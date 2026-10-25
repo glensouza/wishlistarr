@@ -576,6 +576,56 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
+    public async Task Kid_history_words_automatic_and_parent_approvals_differently()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        (HttpClient other, _) = await factory.SignInKidAsync("Ben", movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int pending = await AskAsync(kid, 129);
+        Assert.Equal(HttpStatusCode.OK, (await parent.PostAsJsonAsync("/api/v1/requests/approve", new { ids = new[] { pending } })).StatusCode);
+        HttpResponseMessage asked = await KidRequestApiFactory.RequestAsync(other, "show", 82728);
+        JsonElement instantBody = await asked.Content.ReadFromJsonAsync<JsonElement>();
+        int instant = instantBody.GetProperty("id").GetInt32();
+        Assert.Equal("labeled", instantBody.GetProperty("state").GetString());
+
+        JsonElement[] parentApproved = await kid.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history") ?? [];
+        JsonElement[] systemApproved = await other.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history") ?? [];
+
+        Assert.Contains(parentApproved, entry => entry.GetProperty("action").GetString() == "approved" && entry.GetProperty("requestId").GetInt32() == pending);
+        Assert.DoesNotContain(parentApproved, entry => entry.GetProperty("action").GetString() == "autoApproved");
+        Assert.Contains(systemApproved, entry => entry.GetProperty("action").GetString() == "autoApproved" && entry.GetProperty("requestId").GetInt32() == instant);
+        Assert.DoesNotContain(systemApproved, entry => entry.GetProperty("action").GetString() == "approved");
+    }
+
+    [Fact]
+    public async Task Kid_history_shows_the_denial_note_only_to_that_kid_and_is_paged()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient ada, _) = await factory.SignInKidAsync();
+        (HttpClient ben, _) = await factory.SignInKidAsync("Ben");
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskAsync(ada, 700);
+        await AskAsync(ben, 701);
+        Assert.Equal(HttpStatusCode.OK, (await parent.PostAsJsonAsync("/api/v1/requests/deny", new { ids = new[] { id }, reason = "  Not on a school night  " })).StatusCode);
+
+        JsonElement[] mine = await ada.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history") ?? [];
+        string theirs = await ben.GetStringAsync("/api/v1/kid/requests/history");
+        JsonElement[] newest = await ada.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history?limit=1") ?? [];
+        JsonElement[] older = await ada.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history?limit=1&offset=1") ?? [];
+        HttpResponseMessage tooMany = await ada.GetAsync("/api/v1/kid/requests/history?limit=500");
+
+        JsonElement denied = Assert.Single(mine, entry => entry.GetProperty("action").GetString() == "denied");
+        Assert.Equal("Not on a school night", denied.GetProperty("note").GetString());
+        Assert.DoesNotContain("school night", theirs, StringComparison.Ordinal);
+        Assert.Equal("denied", Assert.Single(newest).GetProperty("action").GetString());
+        Assert.Equal("asked", Assert.Single(older).GetProperty("action").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+    }
+
+    [Fact]
     public async Task Kid_history_shows_grants_and_revocations_without_the_parent_account()
     {
         using KidRequestApiFactory factory = new();

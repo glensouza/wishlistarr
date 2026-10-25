@@ -10,6 +10,7 @@ public enum KidHistoryAction
     Granted,
     Asked,
     Approved,
+    AutoApproved,
     Denied,
     Ready,
     Revoked,
@@ -75,44 +76,38 @@ public static class RequestViews
         WishlistarrDbContext db,
         int profileId,
         RequestTitles titles,
+        int limit,
+        int offset,
         CancellationToken ct)
     {
-        List<MediaRequest> requests = await db.MediaRequests.AsNoTracking()
-            .Where(request => request.KidProfileId == profileId)
+        List<MediaRequestEvent> events = await db.MediaRequestEvents.AsNoTracking()
+            .Where(item => db.MediaRequests.Any(request => request.Id == item.MediaRequestId && request.KidProfileId == profileId)
+                && item.ToState != RequestState.Available
+                && item.ToState != RequestState.Fulfilling)
+            .OrderByDescending(item => item.Id)
+            .Skip(offset)
+            .Take(limit)
             .ToListAsync(ct);
-        if (requests.Count == 0)
+        if (events.Count == 0)
         {
             return [];
         }
 
-        Dictionary<int, MediaRequest> byId = requests.ToDictionary(request => request.Id);
-        int[] requestIds = [.. byId.Keys];
-        List<MediaRequestEvent> events = await db.MediaRequestEvents.AsNoTracking()
-            .Where(item => requestIds.Contains(item.MediaRequestId))
-            .OrderByDescending(item => item.Id)
-            .ToListAsync(ct);
-        Dictionary<int, string> names = [];
+        int[] requestIds = [.. events.Select(item => item.MediaRequestId).Distinct()];
+        Dictionary<int, MediaRequest> byId = await db.MediaRequests.AsNoTracking()
+            .Where(request => requestIds.Contains(request.Id) && request.KidProfileId == profileId)
+            .ToDictionaryAsync(request => request.Id, ct);
+        IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(byId.Values, ct);
         List<KidHistoryEntry> history = [];
         foreach (MediaRequestEvent item in events)
         {
-            if (!byId.TryGetValue(item.MediaRequestId, out MediaRequest? request))
+            if (!byId.TryGetValue(item.MediaRequestId, out MediaRequest? request) || ActionFor(item) is not KidHistoryAction action)
             {
                 continue;
-            }
-
-            if (ActionFor(item) is not KidHistoryAction action)
-            {
-                continue;
-            }
-
-            if (!names.TryGetValue(request.Id, out string? title))
-            {
-                title = await titles.GetAsync(request, ct);
-                names[request.Id] = title;
             }
 
             string? note = action == KidHistoryAction.Denied && !string.IsNullOrWhiteSpace(item.Reason) ? item.Reason : null;
-            history.Add(new KidHistoryEntry(item.Id, request.Id, request.Kind, request.TmdbId, title, action, item.OccurredAt, note));
+            history.Add(new KidHistoryEntry(item.Id, request.Id, request.Kind, request.TmdbId, names[request.Id], action, item.OccurredAt, note));
         }
 
         return history;
@@ -127,7 +122,7 @@ public static class RequestViews
 
         return item.ToState switch
         {
-            RequestState.Approved => KidHistoryAction.Approved,
+            RequestState.Approved => item.ActorKind == RequestActorKind.Parent ? KidHistoryAction.Approved : KidHistoryAction.AutoApproved,
             RequestState.Denied => KidHistoryAction.Denied,
             RequestState.Labeled => KidHistoryAction.Ready,
             RequestState.Revoked => KidHistoryAction.Revoked,
