@@ -7,7 +7,7 @@ public sealed record AutoApproveRule(bool Enabled, RatingLevel? MaxMovieRating, 
 {
     public bool AppliesTo(ContentDecision decision, MediaKind kind, RatingLevel? rating, bool genresUnknown = false)
     {
-        if (genresUnknown || decision.Outcome == ContentOutcome.Blocked || decision.Reason.Code == ContentReasonCode.UnknownGenres)
+        if (genresUnknown || decision.Outcome != ContentOutcome.Allowed || rating is not RatingLevel level)
         {
             return false;
         }
@@ -18,6 +18,6 @@ public sealed record AutoApproveRule(bool Enabled, RatingLevel? MaxMovieRating, 
         }
 
         RatingLevel? ceiling = kind == MediaKind.Movie ? this.MaxMovieRating : this.MaxTvRating;
-        return rating is RatingLevel level && ceiling is RatingLevel max && level <= max;
+        return ceiling is RatingLevel max && level <= max;
     }
 }
