@@ -1,23 +1,26 @@
 changelog:
+  exclude:
+    authors:
+      - dependabot
   categories:
     - title: Security
       labels:
         - "area:security"
     - title: Features
       labels:
-        - feat
+        - enhancement
     - title: Fixes
       labels:
-        - fix
+        - bug
     - title: Documentation
       labels:
-        - docs
+        - documentation
         - "area:docs"
     - title: Maintenance
       labels:
-        - chore
         - "area:devops"
         - "area:testing"
+        - dependencies
     - title: Other changes
       labels:
         - "*"

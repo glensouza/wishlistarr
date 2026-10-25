@@ -31,20 +31,31 @@ Tags must be cut from commits on `main`; the workflow fails otherwise.
 
 GitHub writes the release notes. The workflow does not install changelog software and does not need a token other than the `GITHUB_TOKEN` it already uses to publish the image and the release.
 
-`gh release create --generate-notes` asks GitHub to list pull requests merged since the previous release. GitHub reads `.github/release.yml` (or `.github/release.yaml`) from the repository. If that file is missing, GitHub uses its default notes instead, so the workflow fails the release step when the tagged commit does not contain `.github/release.yml`. Creating the release by hand uses the same file: `gh release create v1.2.3 --title v1.2.3 --generate-notes`.
+`gh release create --generate-notes` asks GitHub to list pull requests merged since the previous release. GitHub reads `.github/release.yml` from the repository. If that file is missing, GitHub uses its default notes instead, so the workflow fails the release step when the tagged commit does not contain `.github/release.yml`. Creating the release by hand uses the same file: `gh release create v1.2.3 --title v1.2.3 --generate-notes`.
 
-A pull request is listed under the first category that has one of its labels. The categories follow the branch prefixes in [CONTRIBUTING.md](../CONTRIBUTING.md) (`feat/`, `fix/`, `docs/`, `chore/`) and the `area:` labels already used on the repository:
+Pull requests are labeled from their branch name by the **Label pull requests** workflow, which uses [actions/labeler](https://github.com/actions/labeler) and the rules in `.github/labeler.yml`. The labels must already exist; the workflow does not create them. Each category in `.github/release.yml` lists labels that exist on the repository:
+
+| Branch prefix | Label applied | Category |
+| --- | --- | --- |
+| `feat/` | `enhancement` | Features |
+| `fix/` | `bug` | Fixes |
+| `docs/` | `documentation` | Documentation |
+| `chore/` | `area:devops` | Maintenance |
 
 | Category | Labels |
 | --- | --- |
 | Security | `area:security` |
-| Features | `feat` |
-| Fixes | `fix` |
-| Documentation | `docs`, `area:docs` |
-| Maintenance | `chore`, `area:devops`, `area:testing` |
+| Features | `enhancement` |
+| Fixes | `bug` |
+| Documentation | `documentation`, `area:docs` |
+| Maintenance | `area:devops`, `area:testing`, `dependencies` |
 | Other changes | anything else |
 
-Add `feat`, `fix`, `docs` or `chore` to match the branch prefix. `area:backend`, `area:frontend` and `area:integration` do not pick a category on their own, so a pull request that only has one of those labels is listed under Other changes. `area:security` wins over `fix` when a pull request has both.
+Applied by hand: `area:security`, `area:docs`, `area:testing`, `dependencies`.
+
+Add one of those labels to a pull request when its branch prefix does not tell the whole story, for example `area:security` on a `fix/` branch. `area:backend`, `area:frontend` and `area:integration` do not pick a category, so a pull request that only has one of those labels is listed under Other changes. Pull requests opened by `dependabot` are left out of the notes.
+
+The labeler runs on `pull_request_target`, because the token of a `pull_request` run on a pull request from a fork is read-only and cannot add labels. GitHub warns that this trigger can hand repository write access to a malicious pull request author if the workflow runs untrusted code. This workflow has no checkout step and runs only the pinned action, which reads `.github/labeler.yml` from the base branch, so nothing from the pull request is executed. The token is limited to `contents: read` and `pull-requests: write`. Labels are added when a pull request is opened or reopened and are never removed by the workflow. Because the trigger uses the base branch, a pull request that changes the labeler or its rules is not labeled by its own change.
 
 ## Image tags
 
