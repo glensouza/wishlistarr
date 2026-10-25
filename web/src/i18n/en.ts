@@ -45,7 +45,6 @@ export const en = {
   'home.genreFamily': 'Family',
   'home.genreComedy': 'Comedy',
   'home.genreOther': 'Genre {id}',
-  'home.noPoster': 'No poster for {title}',
   'home.libraryBadge': '{title} is ready to watch',
 
   'search.title': 'Find something to watch',
@@ -136,6 +135,8 @@ export const en = {
   'admin.up': 'Up',
   'admin.down': 'Down',
   'admin.genreRow': 'Genre {id}',
+  'admin.addGenreRow': 'Add a genre row',
+  'admin.chooseGenre': 'Choose a genre',
   'admin.rulesInvalid':
     'Genres and keywords must be TMDB ids separated by commas.',
   'admin.plexLabel': 'Plex label',

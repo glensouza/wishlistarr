@@ -64,32 +64,21 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         }
 
         int capped = Math.Clamp(limit, 1, 100);
-        List<RecentRow> rows = await db.LibraryItems
+        List<int> titleIds = await db.LibraryItems
             .AsNoTracking()
             .Where(item => item.ServerId == serverId && item.TitleId != null && item.CanonicalTitle!.TmdbId > 0)
-            .Select(item => new RecentRow(item.Kind, item.CanonicalTitle!.TmdbId, item.Title, item.Year, item.PlexUpdatedAt, item.Id))
+            .GroupBy(item => item.TitleId!.Value)
+            .Select(group => new { TitleId = group.Key, AddedAt = group.Max(item => item.PlexAddedAtUnix), LastId = group.Max(item => item.Id) })
+            .OrderByDescending(row => row.AddedAt)
+            .ThenByDescending(row => row.LastId)
+            .Take(capped)
+            .Select(row => row.TitleId)
             .ToListAsync(ct);
-        rows.Sort(static (left, right) =>
-        {
-            int byTime = Nullable.Compare(right.UpdatedAt, left.UpdatedAt);
-            return byTime != 0 ? byTime : right.Id.CompareTo(left.Id);
-        });
-
-        List<LibraryCatalogEntry> distinct = [];
-        HashSet<(MediaKind Kind, int TmdbId)> seen = [];
-        foreach (RecentRow row in rows)
-        {
-            if (seen.Add((row.Kind, row.TmdbId)))
-            {
-                distinct.Add(new LibraryCatalogEntry(row.Kind, row.TmdbId, row.Title, row.Year));
-                if (distinct.Count == capped)
-                {
-                    break;
-                }
-            }
-        }
-
-        return distinct;
+        Dictionary<int, LibraryTitle> titles = await db.LibraryTitles
+            .AsNoTracking()
+            .Where(title => titleIds.Contains(title.Id))
+            .ToDictionaryAsync(title => title.Id, ct);
+        return [.. titleIds.Select(id => titles[id]).Select(title => new LibraryCatalogEntry(title.Kind, title.TmdbId))];
     }
 
     public async Task<LibraryStatus> GetStatusAsync(CancellationToken ct = default)
@@ -134,7 +123,6 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         _ => null,
     };
 
-    private sealed record RecentRow(MediaKind Kind, int TmdbId, string Title, int? Year, DateTimeOffset? UpdatedAt, int Id);
 }
 
 public sealed record LibraryStatus(

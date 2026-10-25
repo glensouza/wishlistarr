@@ -1,3 +1,5 @@
+using Wishlistarr.Core.Kids;
+
 namespace Wishlistarr.Data;
 
 public sealed class KidProfile
@@ -26,7 +28,7 @@ public sealed class KidProfile
 
     public List<string> AllowedOriginalLanguages { get; set; } = [];
 
-    public List<string> HomeRows { get; set; } = ["popular", "library", "genre"];
+    public List<string> HomeRows { get; set; } = [.. HomeRowTypes.Defaults];
 
     public int FailedPinCount { get; set; }
 

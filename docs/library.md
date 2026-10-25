@@ -4,7 +4,7 @@ Wishlistarr keeps a local copy of the movies and shows on the selected Plex serv
 
 ## What is stored
 
-- **Items**: one row per Plex movie or show with its server, rating key, guid, library, title, year and Plex's last-changed time.
+- **Items**: one row per Plex movie or show with its server, rating key, guid, library, title, year, Plex's last-changed time and the time Plex added it.
 - **Titles**: one canonical record per TMDB title (kind plus TMDB id, nothing else). Items that Plex lists more than once, for example a 1080p and a 4K copy, share one title.
 - **External ids**: for every item, the TMDB, TVDB and IMDb ids Plex reports, plus the Plex guid and rating key. Lookups by TMDB id go through a unique index on the title record; lookups by TVDB or IMDb id go through an index on the id map.
 - **Labels**: every label an item carries in Plex, not only the ones Wishlistarr applied. Labels are compared case-insensitively.
@@ -33,7 +33,7 @@ A Plex `library.new` [webhook](webhooks.md) refreshes the announced item straigh
 
 Plex section listings do not include labels; they only appear on an item's detail. Reading every item would cost one request per item, so each full and incremental refresh instead asks every movie and show library for its labels and then lists the items carrying each label (`/library/sections/{id}/all?label={key}`). That is a few requests per label rather than one per item, and it does not depend on Plex changing an item's last-changed time when a label is edited, so label changes are picked up by the next incremental refresh. If Plex returns fewer items for a label than it announced, the stored labels are left as they were for that run. A webhook item refresh reads the item detail, which carries its labels.
 
-Until the first full refresh completes the index reports that it cannot answer and requests fall back to asking Plex directly. The [home](kid-home.md) row "new in our library" asks the index for the newest distinct TMDB titles on the ready server, ordered by Plex's last-changed time (`PlexUpdatedAt`) and then by id. That time is when Plex last changed the item, not when it was added, and the index's own `IndexedAt` is rewritten on every refresh so it is not used. Items with no TMDB title are skipped. A different server's items are skipped. Before the first full refresh the index cannot answer, and that row is left out instead of asking Plex.
+Until the first full refresh completes the index reports that it cannot answer and requests fall back to asking Plex directly. The [home](kid-home.md) row "new in our library" asks the index for the newest distinct TMDB titles on the ready server, ordered by the time Plex added the item (`PlexAddedAtUnix`) and then by id. A metadata refresh in Plex does not move a title up, and the index's own `IndexedAt` is rewritten on every refresh so it is not used. Items indexed before this time was stored have none until the next full refresh reads them again; until then they are listed after items that have one. Items with no TMDB title are skipped. A different server's items are skipped. Before the first full refresh the index cannot answer, and that row is left out instead of asking Plex.
 
 Each refresh also crawls labels: one request per movie and show library for its label list, then one or more per label for the items carrying it, so the cost grows with the number of distinct labels rather than the number of items.
 

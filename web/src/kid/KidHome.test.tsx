@@ -48,9 +48,11 @@ const bluey: Item = {
 }
 
 const rows = [
-  { id: 'popular', genreId: null, items: [tiny, bluey] },
-  { id: 'genre:16', genreId: 16, items: [tiny] },
-  { id: 'genre:99', genreId: 99, items: [] },
+  { id: 'popular', genreId: null, genreName: null, items: [tiny, bluey] },
+  { id: 'genre:16', genreId: 16, genreName: 'Animation', items: [tiny] },
+  { id: 'genre:99', genreId: 99, genreName: 'Mystery', items: [] },
+  { id: 'genre:37', genreId: 37, genreName: 'Western', items: [bluey] },
+  { id: 'genre:12', genreId: 12, genreName: null, items: [bluey] },
 ]
 
 let homeStatus = 200
@@ -118,7 +120,9 @@ it('shows allowed rows with lazy posters, a reserved frame and a library badge',
     await screen.findByRole('heading', { name: 'Popular for my age' }),
   ).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Animation' })).toBeTruthy()
-  expect(screen.queryByRole('heading', { name: 'Genre 99' })).toBeNull()
+  expect(screen.getByRole('heading', { name: 'Western' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Genre 12' })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'Mystery' })).toBeNull()
   expect(
     screen.getByText('Here are some ideas, or search for something else.'),
   ).toBeTruthy()
@@ -130,8 +134,9 @@ it('shows allowed rows with lazy posters, a reserved frame and a library badge',
   expect(poster?.getAttribute('loading')).toBe('lazy')
   expect(poster?.getAttribute('alt')).toBe('')
   expect(poster?.closest('.poster-frame')).toBeTruthy()
+  expect(screen.queryAllByRole('img').length).toBe(0)
   expect(
-    screen.getAllByRole('img', { name: 'No poster for Bluey' }).length,
+    screen.getAllByRole('heading', { name: 'Bluey' }).length,
   ).toBeGreaterThan(0)
   expect(
     screen.getAllByText('Tiny Tale is ready to watch').length,
@@ -145,9 +150,7 @@ it('shows allowed rows with lazy posters, a reserved frame and a library badge',
   expect(css).toMatch(/\.poster-frame\s*\{[^}]*aspect-ratio:\s*2\s*\/\s*3/)
 
   fireEvent.error(poster!)
-  expect(
-    screen.getAllByRole('img', { name: 'No poster for Tiny Tale' }).length,
-  ).toBeGreaterThan(0)
+  expect(screen.queryAllByRole('img').length).toBe(0)
 
   expect(await axe(container)).toHaveNoViolations()
 })

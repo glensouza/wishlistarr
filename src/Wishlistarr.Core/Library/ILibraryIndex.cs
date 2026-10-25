@@ -11,4 +11,4 @@ public interface ILibraryIndex
     Task<IReadOnlyList<LibraryCatalogEntry>?> ListRecentAsync(int limit, CancellationToken ct = default);
 }
 
-public sealed record LibraryCatalogEntry(MediaKind Kind, int TmdbId, string Title, int? Year);
+public sealed record LibraryCatalogEntry(MediaKind Kind, int TmdbId);

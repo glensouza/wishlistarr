@@ -30,6 +30,11 @@ export type PlexRestrictions = {
   television: LabelRestriction
 }
 
+export type HomeOptions = {
+  defaultRows: string[]
+  genres: { id: number; name: string }[]
+}
+
 export type KidProfileInput = {
   name: string
   avatar: string
@@ -47,6 +52,9 @@ export type KidProfileInput = {
 }
 
 const base = '/api/v1/kid-profiles'
+
+export const getHomeOptions = () =>
+  request<HomeOptions>('GET', `${base}/home-options`)
 
 export const listKidProfiles = () => request<KidProfile[]>('GET', base)
 

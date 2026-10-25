@@ -208,6 +208,7 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(item => item.Title).HasMaxLength(500);
             entity.HasIndex(item => new { item.ServerId, item.RatingKey }).IsUnique();
             entity.HasIndex(item => item.TitleId);
+            entity.HasIndex(item => new { item.ServerId, item.PlexAddedAtUnix });
             entity.HasOne(item => item.CanonicalTitle)
                 .WithMany(title => title.Items)
                 .HasForeignKey(item => item.TitleId)

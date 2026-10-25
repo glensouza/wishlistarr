@@ -41,11 +41,13 @@ public sealed class FakeScanner : ILibraryScanner
         IReadOnlyList<ExternalId> ids,
         IReadOnlyList<string>? labels = null,
         DateTimeOffset? updatedAt = null,
-        string? guid = null) =>
+        string? guid = null,
+        DateTimeOffset? addedAt = null) =>
         new(
             new MediaItem(ratingKey, guid ?? $"plex://{kind.ToString().ToLowerInvariant()}/{ratingKey}", title, 2000, kind, kind == MediaKind.Movie ? "1" : "2", ids),
             labels ?? [],
-            updatedAt);
+            updatedAt,
+            addedAt);
 
     public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default)
     {
@@ -115,6 +117,8 @@ public sealed class FakeTmdbFinder : ITmdbClient
     public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => throw new NotSupportedException();
 
     public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+
+    public Task<IReadOnlyList<TmdbGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
     public Dictionary<(TmdbMediaType Type, int Id), string> Titles { get; } = [];
 

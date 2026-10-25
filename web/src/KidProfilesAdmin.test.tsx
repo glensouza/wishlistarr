@@ -48,6 +48,15 @@ beforeEach(() => {
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
+      if (path === '/api/v1/kid-profiles/home-options') {
+        return Response.json({
+          defaultRows: ['popular', 'library', 'genre'],
+          genres: [
+            { id: 35, name: 'Comedy' },
+            { id: 37, name: 'Western' },
+          ],
+        })
+      }
       if (path === '/api/v1/plex/users') {
         return plexUsers
           ? Response.json(plexUsers)
@@ -130,7 +139,7 @@ it('sends home rows in the chosen order and keeps an extra genre row', async () 
   fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
 
   expect(
-    (screen.getByRole('checkbox', { name: 'Genre 35' }) as HTMLInputElement)
+    (screen.getByRole('checkbox', { name: 'Comedy' }) as HTMLInputElement)
       .checked,
   ).toBe(true)
   fireEvent.click(
@@ -349,4 +358,23 @@ it('shows what Plex enforces for a mapped profile and how to fix it', async () =
     ),
   ).toBeTruthy()
   expect(screen.getAllByLabelText('Plex label enforcement')).toHaveLength(2)
+})
+
+it('adds a genre row from the picker and saves it', async () => {
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  fireEvent.change(await screen.findByLabelText('Add a genre row'), {
+    target: { value: '37' },
+  })
+  expect(
+    (screen.getByRole('checkbox', { name: 'Western' }) as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    homeRows: ['popular', 'library', 'genre', 'genre:37'],
+  })
 })

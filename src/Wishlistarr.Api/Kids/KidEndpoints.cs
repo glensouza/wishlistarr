@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
+using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Kids;
 
@@ -179,6 +181,24 @@ public static class KidEndpoints
             .WithSummary("Lists kid profiles. Archived profiles are not included and PIN hashes are never returned. Profiles mapped to a Plex user include whether that user enforces the label for movies and TV.")
             .Produces<IEnumerable<KidProfileSummary>>();
 
+        profiles.MapGet("/home-options", async (ITmdbClient tmdb, CancellationToken ct) =>
+        {
+            IReadOnlyList<TmdbGenre> genres;
+            try
+            {
+                genres = await tmdb.GetGenresAsync(ct: ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
+            {
+                genres = [];
+            }
+
+            return new HomeRowOptions(HomeRowTypes.Defaults, [.. genres.Select(genre => new HomeGenreOption(genre.Id, genre.Name))]);
+        })
+            .WithName("GetKidHomeOptions")
+            .WithSummary("Returns the default home rows and the TMDB genres a parent can add as rows. The genre list is empty when TMDB cannot be reached.")
+            .Produces<HomeRowOptions>();
+
         profiles.MapPost("/", async (KidProfileRequest? request, KidProfiles service, CancellationToken ct) =>
         {
             if (request is null)
@@ -341,3 +361,7 @@ public sealed record KidProfileSummary(
         profile.HomeRows,
         restrictions);
 }
+
+public sealed record HomeGenreOption(int Id, string Name);
+
+public sealed record HomeRowOptions(IReadOnlyList<string> DefaultRows, IReadOnlyList<HomeGenreOption> Genres);

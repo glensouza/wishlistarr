@@ -33,7 +33,7 @@ export default function HomeRows() {
     if (row.genreId === animationGenreId) return t('home.genreAnimation')
     if (row.genreId === familyGenreId) return t('home.genreFamily')
     if (row.genreId === comedyGenreId) return t('home.genreComedy')
-    return t('home.genreOther', { id: row.genreId ?? 0 })
+    return row.genreName ?? t('home.genreOther', { id: row.genreId ?? 0 })
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -156,11 +156,7 @@ function HomeCard({ item }: { item: HomeItem }) {
             onError={() => setPosterFailed(true)}
           />
         ) : (
-          <div
-            className="poster-fallback"
-            role="img"
-            aria-label={t('home.noPoster', { title: item.title })}
-          />
+          <div className="poster-fallback" aria-hidden="true" />
         )}
       </div>
       <h3 id={titleId}>{item.title}</h3>

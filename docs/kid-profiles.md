@@ -21,7 +21,7 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 
 ### Home rows
 
-`homeRows` is the order of shelves on [home](kid-home.md). The default, used when the field is omitted, is `["popular", "library", "genre"]`. `popular` is popular for the profile's ages, `library` is new in the Plex library, and `genre` expands to Animation, Family and Comedy. `genre:<id>` adds one shelf for that TMDB genre id (`genre:016` is stored as `genre:16`). Blank entries are skipped, duplicates are stored once, and anything else is rejected. At most 10 entries are accepted. The picker and `GET /api/v1/kid/me` do not include this list.
+`homeRows` is the order of shelves on [home](kid-home.md). The default, used when the field is omitted, is `["popular", "library", "genre"]`. `popular` is popular for the profile's ages, `library` is new in the Plex library, and `genre` expands to Animation, Family and Comedy. `genre:<id>` adds one shelf for that TMDB genre id (`genre:016` is stored as `genre:16`). Blank entries are skipped, duplicates are stored once, and anything else is rejected. At most 10 entries are accepted. The picker and `GET /api/v1/kid/me` do not include this list. `GET /api/v1/kid-profiles/home-options` (parents only) returns `{ defaultRows, genres }`: the default list above and the TMDB genres (`id`, `name`) a parent can add as `genre:<id>` rows. `genres` is empty when TMDB cannot be reached.
 
 ### Plex label
 

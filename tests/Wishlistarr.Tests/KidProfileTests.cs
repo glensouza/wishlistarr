@@ -193,9 +193,18 @@ public sealed class KidProfileTests
         {
             name = "TooManyRows",
             avatar = "fox",
-            homeRows = Enumerable.Range(1, KidProfiles.MaxHomeRows + 1).Select(i => "popular").ToArray(),
+            homeRows = Enumerable.Range(1, KidProfiles.MaxHomeRows + 1).Select(i => $"genre:{i}").ToArray(),
         });
         Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+
+        HttpResponseMessage padded = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "PaddedRows",
+            avatar = "fox",
+            homeRows = Enumerable.Range(1, KidProfiles.MaxHomeRows).Select(i => "popular").Concat(["", " ", "library"]).ToArray(),
+        });
+        Assert.Equal(HttpStatusCode.Created, padded.StatusCode);
+        Assert.Equal(["popular", "library"], Texts(await padded.Content.ReadFromJsonAsync<JsonElement>(), "homeRows"));
     }
 
     [Fact]

@@ -563,22 +563,23 @@ public sealed class LibraryIndexTests
     {
         await using LibraryHarness harness = await LibraryHarness.CreateAsync();
         DateTimeOffset newest = Early.AddDays(3);
-        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "Old Copy", [Tmdb("603")], updatedAt: Early));
-        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "New Copy", [Tmdb("603")], updatedAt: newest));
-        harness.Scanner.Entries.Add(FakeScanner.Entry("103", MediaKind.Movie, "Middle", [Tmdb("700")], updatedAt: Early.AddDays(2)));
-        harness.Scanner.Entries.Add(FakeScanner.Entry("104", MediaKind.Show, "Bluey", [Tmdb("82728")], updatedAt: Early.AddDays(1)));
-        harness.Scanner.Entries.Add(FakeScanner.Entry("105", MediaKind.Movie, "No Tmdb", [Imdb("tt0000001")], updatedAt: newest.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "Old Copy", [Tmdb("603")], updatedAt: Early.AddDays(10), addedAt: Early));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "New Copy", [Tmdb("603")], updatedAt: Early, addedAt: newest));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("103", MediaKind.Movie, "Middle", [Tmdb("700")], updatedAt: Early.AddDays(20), addedAt: Early.AddDays(2)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("104", MediaKind.Show, "Bluey", [Tmdb("82728")], updatedAt: Early.AddDays(30), addedAt: Early.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("105", MediaKind.Movie, "No Tmdb", [Imdb("tt0000001")], updatedAt: newest.AddDays(1), addedAt: newest.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("106", MediaKind.Movie, "Never Added", [Tmdb("900")], updatedAt: Early.AddDays(40)));
 
         Assert.Null(await harness.RecentAsync(10));
 
         await harness.FullAsync();
 
         Assert.Equal(
-            [("New Copy", 603), ("Middle", 700)],
-            (await harness.RecentAsync(2) ?? []).Select(entry => (entry.Title, entry.TmdbId)));
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700)],
+            (await harness.RecentAsync(2) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
         Assert.Equal(
-            ["New Copy", "Middle", "Bluey"],
-            (await harness.RecentAsync(10) ?? []).Select(entry => entry.Title));
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
+            (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
 
         await harness.InScopeAsync(async services =>
         {
@@ -593,7 +594,7 @@ public sealed class LibraryIndexTests
                 LibraryId = "1",
                 Title = "Foreign Server",
                 Year = 2001,
-                PlexUpdatedAt = newest.AddDays(5),
+                PlexAddedAtUnix = newest.AddDays(5).ToUnixTimeSeconds(),
                 IndexedAt = newest,
                 TitleId = title.Id,
             });
@@ -601,7 +602,9 @@ public sealed class LibraryIndexTests
             return 0;
         });
 
-        Assert.DoesNotContain(await harness.RecentAsync(10) ?? [], entry => entry.Title == "Foreign Server");
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
+            (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
     }
 
     private static async Task<string> QueryPlanAsync(LibraryHarness harness, string sql)

@@ -16,11 +16,6 @@ public sealed class KidSearch(
     public const int MinQueryLength = 2;
     public const int MaxQueryLength = 100;
     public const int MaxPage = 10;
-    public const int MaxParallelLookups = KidContentPipeline.MaxParallelLookups;
-    public const string PosterSize = KidContentPipeline.PosterSize;
-    public const string PosterRoute = KidContentPipeline.PosterRoute;
-
-    public static readonly TimeSpan LookupBudget = KidContentPipeline.LookupBudget;
 
     public static bool TryNormalize(string? query, out string normalized)
     {

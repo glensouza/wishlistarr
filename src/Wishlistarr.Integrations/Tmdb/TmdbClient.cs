@@ -110,6 +110,17 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
         return results is { Count: > 0 } ? results[0].Id : null;
     }
 
+    public async Task<IReadOnlyList<TmdbGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default)
+    {
+        GenresResponse movies = await this.GetAsync<GenresResponse>("genre/movie/list", [("language", language)], DetailLifetime, ct);
+        GenresResponse shows = await this.GetAsync<GenresResponse>("genre/tv/list", [("language", language)], DetailLifetime, ct);
+        return [.. (movies.Genres ?? []).Concat(shows.Genres ?? [])
+            .Where(genre => !string.IsNullOrWhiteSpace(genre.Name))
+            .GroupBy(genre => genre.Id)
+            .Select(group => group.First())
+            .OrderBy(genre => genre.Name, StringComparer.CurrentCultureIgnoreCase)];
+    }
+
     public async Task<TmdbCertification?> GetCertificationAsync(TmdbMediaType type, int id, IReadOnlyList<string> regions, CancellationToken ct = default)
     {
         string cacheKey = $"tmdb:cert:{Segment(type)}:{id}";
@@ -231,6 +242,9 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
 
         return await response.Content.ReadFromJsonAsync<T>(ct) ?? throw new TmdbException("TMDB returned an empty response.");
     }
+
+    private sealed record GenresResponse(
+        [property: JsonPropertyName("genres")] IReadOnlyList<TmdbGenre>? Genres);
 
     private sealed record FindResponse(
         [property: JsonPropertyName("movie_results")] IReadOnlyList<FindResult>? MovieResults,

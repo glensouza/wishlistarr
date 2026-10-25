@@ -7,6 +7,7 @@ public static class HomeRowTypes
     public const string Popular = "popular";
     public const string Library = "library";
     public const string Genre = "genre";
+    public const string GenrePrefix = "genre:";
 
     public const int AnimationGenreId = 16;
     public const int FamilyGenreId = 10751;
@@ -24,29 +25,27 @@ public static class HomeRowTypes
         }
 
         string trimmed = row.Trim();
-        if (trimmed.Equals(Popular, StringComparison.OrdinalIgnoreCase)
+        return trimmed.Equals(Popular, StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals(Library, StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals(Genre, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return trimmed.StartsWith("genre:", StringComparison.OrdinalIgnoreCase)
-            && int.TryParse(trimmed.AsSpan("genre:".Length), NumberStyles.None, CultureInfo.InvariantCulture, out int genreId)
-            && genreId > 0;
+            || trimmed.Equals(Genre, StringComparison.OrdinalIgnoreCase)
+            || TryParseGenre(trimmed, out _);
     }
 
     public static string Normalize(string row)
     {
-        string trimmed = row.Trim().ToLowerInvariant();
-        const string Prefix = "genre:";
-        if (trimmed.StartsWith(Prefix, StringComparison.Ordinal)
-            && int.TryParse(trimmed.AsSpan(Prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out int genreId)
-            && genreId > 0)
-        {
-            return $"{Prefix}{genreId.ToString(CultureInfo.InvariantCulture)}";
-        }
+        string trimmed = row.Trim();
+        return TryParseGenre(trimmed, out int genreId) ? GenreRow(genreId) : trimmed.ToLowerInvariant();
+    }
 
-        return trimmed;
+    public static string GenreRow(int genreId) => $"{GenrePrefix}{genreId.ToString(CultureInfo.InvariantCulture)}";
+
+    public static bool TryParseGenre(string? row, out int genreId)
+    {
+        genreId = 0;
+        string? trimmed = row?.Trim();
+        return trimmed is not null
+            && trimmed.StartsWith(GenrePrefix, StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(trimmed.AsSpan(GenrePrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out genreId)
+            && genreId > 0;
     }
 }

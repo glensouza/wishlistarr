@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
@@ -102,7 +103,7 @@ public sealed class KidHomeTests
         Assert.Equal("1", popular.Query["page"]);
         Assert.Equal("false", popular.Query["include_adult"]);
         Assert.Equal("en-US", popular.Query["language"]);
-        Assert.Equal(["16", "10751", "35"], movies.Where(request => request.Query.ContainsKey("with_genres")).Select(request => request.Query["with_genres"]));
+        Assert.Equal(["10751", "16", "35"], movies.Where(request => request.Query.ContainsKey("with_genres")).Select(request => request.Query["with_genres"]).Order(StringComparer.Ordinal));
         Assert.All(movies, request => Assert.Equal("G", request.Query["certification.lte"]));
         Assert.All(shows, request =>
         {
@@ -248,7 +249,7 @@ public sealed class KidHomeTests
     {
         FakeLibraryIndex index = new()
         {
-            Recent = [.. Enumerable.Range(900, 10).Select(id => new LibraryCatalogEntry(MediaKind.Movie, id, $"Plex {id}", 2024))],
+            Recent = [.. Enumerable.Range(900, 10).Select(id => new LibraryCatalogEntry(MediaKind.Movie, id))],
         };
         index.Add(MediaKind.Movie, 900, new MediaItem("1", "plex://movie/900", "Shelf 900", 2024, MediaKind.Movie, "1", []));
         using KidRequestApiFactory factory = PolicyFactory(index);
@@ -362,5 +363,261 @@ public sealed class KidHomeTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await kid.GetAsync(HomePath)).StatusCode);
         Assert.Equal(0, factory.Tmdb.Count("/3/discover/movie") + factory.Tmdb.Count("/3/discover/tv"));
+    }
+
+    [Fact]
+    public async Task All_certification_lookups_failing_answers_ok_with_no_rows()
+    {
+        using KidRequestApiFactory factory = new();
+        factory.Tmdb.SetBody("/3/discover/movie", PolicyMovies);
+        factory.Tmdb.SetBody("/3/discover/tv", """{"page":1,"results":[{"id":810,"name":"Grown Up Show","first_air_date":"2019-01-01","genre_ids":[18],"original_language":"en"}],"total_pages":1,"total_results":1}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 6, tvAgeLimit: 7, homeRows: ["popular"]);
+
+        HttpResponseMessage response = await kid.GetAsync(HomePath);
+        string text = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Empty(RowIds(JsonDocument.Parse(text).RootElement));
+        Assert.DoesNotContain("Tiny Tale", text);
+        Assert.DoesNotContain("Bluey", text);
+    }
+
+    [Fact]
+    public async Task A_library_detail_that_fails_drops_only_that_title()
+    {
+        FakeLibraryIndex index = new()
+        {
+            Recent = [.. Enumerable.Range(900, 3).Select(id => new LibraryCatalogEntry(MediaKind.Movie, id))],
+        };
+        using KidRequestApiFactory factory = PolicyFactory(index);
+        for (int id = 900; id <= 902; id++)
+        {
+            factory.Tmdb.SetBody(
+                $"/3/movie/{id}",
+                $$"""{"id":{{id}},"title":"Shelf {{id}}","overview":"On the shelf.","release_date":"2024-01-01","genres":[],"original_language":"en","vote_average":7}""");
+            SetMovie(factory, id, "G");
+        }
+
+        factory.Tmdb.Enqueue("/3/movie/901", 500);
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 6, homeRows: ["library"]);
+
+        HttpResponseMessage response = await kid.GetAsync(HomePath);
+        string text = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Shelf 900", text);
+        Assert.DoesNotContain("Shelf 901", text);
+        Assert.Contains("Shelf 902", text);
+    }
+
+    [Fact]
+    public async Task A_library_detail_that_times_out_drops_only_that_title()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        (_, int profileId) = await factory.SignInKidAsync(homeRows: ["library"]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        HomeClient tmdb = new() { TimeoutDetailId = 901 };
+        FakeLibraryIndex index = new() { Recent = [.. Enumerable.Range(900, 3).Select(id => new LibraryCatalogEntry(MediaKind.Movie, id))] };
+        KidHome home = NewHome(scope, tmdb, new ManualTimeProvider(), index);
+
+        HomeLoad load = await home.LoadAsync(profileId);
+
+        Assert.Equal(HomeLoadStatus.Ready, load.Status);
+        KidHomeRow row = Assert.Single(load.Response!.Rows);
+        Assert.Equal([900, 902], row.Items.Select(item => item.TmdbId).Order());
+    }
+
+    [Fact]
+    public async Task Rows_that_outlive_the_budget_are_left_out_and_never_shown_unfiltered()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 6, homeRows: ["popular", "genre:35"]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        HomeClient tmdb = new() { HangGenre = "35" };
+        ManualTimeProvider time = new();
+        KidHome home = NewHome(scope, tmdb, time);
+
+        Task<HomeLoad> pending = home.LoadAsync(profileId);
+        using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
+        while (tmdb.HangingCalls < 1)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        Assert.False(pending.IsCompleted);
+        time.Advance(KidContentPipeline.LookupBudget);
+        HomeLoad load = await pending.WaitAsync(guard.Token);
+
+        Assert.Equal(HomeLoadStatus.Ready, load.Status);
+        KidHomeRow row = Assert.Single(load.Response!.Rows);
+        Assert.Equal("popular", row.Id);
+        Assert.DoesNotContain(load.Response.Rows.SelectMany(item => item.Items), item => item.Title == "Half Done");
+        Assert.Equal(0, tmdb.HangingCalls);
+    }
+
+    [Fact]
+    public async Task When_every_discover_call_outlives_the_budget_home_answers_with_no_rows()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        (_, int profileId) = await factory.SignInKidAsync(homeRows: ["popular", "genre:35"]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        HomeClient tmdb = new() { HangGenre = "*" };
+        ManualTimeProvider time = new();
+        KidHome home = NewHome(scope, tmdb, time);
+
+        Task<HomeLoad> pending = home.LoadAsync(profileId);
+        using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
+        while (tmdb.HangingCalls < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        time.Advance(KidContentPipeline.LookupBudget);
+        HomeLoad load = await pending.WaitAsync(guard.Token);
+
+        Assert.Equal(HomeLoadStatus.Ready, load.Status);
+        Assert.Empty(load.Response!.Rows);
+    }
+
+    [Fact]
+    public async Task Genre_rows_carry_the_tmdb_genre_name()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        factory.Tmdb.SetBody("/3/genre/movie/list", """{"genres":[{"id":35,"name":"Comedy"},{"id":16,"name":"Animation"}]}""");
+        factory.Tmdb.SetBody("/3/genre/tv/list", """{"genres":[{"id":16,"name":"Animation"},{"id":10751,"name":"Family"}]}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 6, tvAgeLimit: 7, homeRows: ["popular", "genre:10751"]);
+
+        JsonElement body = await (await kid.GetAsync(HomePath)).Content.ReadFromJsonAsync<JsonElement>();
+
+        JsonElement rows = body.GetProperty("rows");
+        Assert.Equal(JsonValueKind.Null, rows[0].GetProperty("genreName").ValueKind);
+        Assert.Equal("Family", rows[1].GetProperty("genreName").GetString());
+    }
+
+    [Fact]
+    public async Task Home_options_list_the_default_rows_and_genres_for_parents_only()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        factory.Tmdb.SetBody("/3/genre/movie/list", """{"genres":[{"id":35,"name":"Comedy"}]}""");
+        factory.Tmdb.SetBody("/3/genre/tv/list", """{"genres":[{"id":37,"name":"Western"}]}""");
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+
+        JsonElement options = await parent.GetFromJsonAsync<JsonElement>("/api/v1/kid-profiles/home-options");
+
+        Assert.Equal(["popular", "library", "genre"], options.GetProperty("defaultRows").EnumerateArray().Select(row => row.GetString()));
+        Assert.Equal(
+            ["Comedy", "Western"],
+            options.GetProperty("genres").EnumerateArray().Select(genre => genre.GetProperty("name").GetString()));
+        Assert.Equal(HttpStatusCode.Forbidden, (await kid.GetAsync("/api/v1/kid-profiles/home-options")).StatusCode);
+
+        using KidRequestApiFactory down = PolicyFactory();
+        down.Tmdb.Enqueue("/3/genre/movie/list", 500);
+        HttpClient other = await down.CreateAuthorizedClientAsync();
+        JsonElement failed = await other.GetFromJsonAsync<JsonElement>("/api/v1/kid-profiles/home-options");
+        Assert.Empty(failed.GetProperty("genres").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_kid_cannot_change_home_rows_and_a_parent_write_needs_the_antiforgery_token()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        (HttpClient kid, int profileId) = await factory.SignInKidAsync(homeRows: ["popular"]);
+        HttpClient noToken = factory.CreateClient();
+        await noToken.PostAsJsonAsync("/api/v1/auth/login", new { username = ApiFactory.ParentUsername, password = ApiFactory.ParentPassword });
+        object update = new { name = "Ada", avatar = "fox", homeRows = new[] { "library" } };
+        string path = $"/api/v1/kid-profiles/{profileId}";
+
+        HttpResponseMessage forbidden = await kid.PutAsJsonAsync(path, update);
+        HttpResponseMessage rejected = await noToken.PutAsJsonAsync(path, update);
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        JsonElement[] profiles = [.. (await parent.GetFromJsonAsync<JsonElement[]>("/api/v1/kid-profiles"))!];
+        JsonElement stored = profiles.Single(profile => profile.GetProperty("id").GetInt32() == profileId);
+        Assert.Equal(["popular"], stored.GetProperty("homeRows").EnumerateArray().Select(row => row.GetString()));
+        Assert.Equal(HttpStatusCode.OK, (await parent.PutAsJsonAsync(path, update)).StatusCode);
+    }
+
+    private static KidHome NewHome(IServiceScope scope, ITmdbClient tmdb, TimeProvider time, FakeLibraryIndex? index = null) =>
+        new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance),
+            index is null ? [] : [index],
+            time,
+            NullLogger<KidHome>.Instance);
+
+    private sealed class HomeClient : ITmdbClient
+    {
+        private int hanging;
+
+        public string? HangGenre { get; init; }
+
+        public int TimeoutDetailId { get; init; }
+
+        public int HangingCalls => Volatile.Read(ref this.hanging);
+
+        public async Task<TmdbPage<TmdbSearchResult>> DiscoverAsync(TmdbMediaType type, TmdbDiscoverQuery query, string language = "en-US", CancellationToken ct = default)
+        {
+            bool movie = type == TmdbMediaType.Movie;
+            bool hang = this.HangGenre == "*" || (this.HangGenre is not null && query.Genres == this.HangGenre && !movie);
+            if (hang)
+            {
+                Interlocked.Increment(ref this.hanging);
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref this.hanging);
+                }
+            }
+
+            int id = query.Genres is null ? (movie ? 1 : 2) : (movie ? 3 : 4);
+            string title = query.Genres is null ? "Safe" : "Half Done";
+            return new TmdbPage<TmdbSearchResult>(
+                1,
+                [new TmdbSearchResult(id, null, movie ? title : null, movie ? null : title, null, null, null, null, null, 0)],
+                1,
+                1);
+        }
+
+        public Task<TmdbCertification?> GetCertificationAsync(TmdbMediaType type, int id, IReadOnlyList<string> regions, CancellationToken ct = default) =>
+            Task.FromResult<TmdbCertification?>(new TmdbCertification("US", "G", []));
+
+        public Task<IReadOnlyList<TmdbKeyword>> GetKeywordsAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TmdbKeyword>>([]);
+
+        public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default)
+        {
+            if (id == this.TimeoutDetailId)
+            {
+                throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
+            }
+
+            return Task.FromResult(new TmdbDetails(id, $"Shelf {id}", null, null, null, null, null, "2024-01-01", null, null, null, null, null, 0));
+        }
+
+        public Task<IReadOnlyList<TmdbGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TmdbGenre>>([new TmdbGenre(35, "Comedy")]);
+
+        public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<TmdbVideos> GetVideosAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<TmdbImages> GetImagesAsync(TmdbMediaType type, int id, string imageLanguages = "en,null", CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<TmdbPage<TmdbSearchResult>> GetTrendingAsync(TmdbMediaType type, string window = "week", int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<int?> FindIdAsync(TmdbMediaType type, ExternalIdSource source, string externalId, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

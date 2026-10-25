@@ -3,9 +3,11 @@ import {
   avatars,
   createKidProfile,
   deleteKidProfile,
+  getHomeOptions,
   listKidProfiles,
   unlockKidProfile,
   updateKidProfile,
+  type HomeOptions,
   type KidProfile,
   type KidProfileInput,
   type PlexRestrictions,
@@ -31,17 +33,15 @@ type FormState = {
 
 type HomeChoice = { id: string; enabled: boolean }
 
-const standardHomeRows = ['popular', 'library', 'genre']
-
-function homeChoices(configured: string[]): HomeChoice[] {
+function homeChoices(configured: string[], defaults: string[]): HomeChoice[] {
   const choices = configured.map((id) => ({ id, enabled: true }))
-  for (const id of standardHomeRows) {
+  for (const id of defaults) {
     if (!configured.includes(id)) choices.push({ id, enabled: false })
   }
   return choices
 }
 
-const emptyForm: FormState = {
+const emptyForm = (defaults: string[]): FormState => ({
   name: '',
   avatar: avatars[0],
   pin: '',
@@ -54,10 +54,10 @@ const emptyForm: FormState = {
   blockedGenres: '',
   blockedKeywords: '',
   allowedLanguages: '',
-  homeRows: homeChoices(standardHomeRows),
-}
+  homeRows: homeChoices(defaults, defaults),
+})
 
-function toForm(profile: KidProfile): FormState {
+function toForm(profile: KidProfile, defaults: string[]): FormState {
   return {
     name: profile.name,
     avatar: profile.avatar,
@@ -71,7 +71,7 @@ function toForm(profile: KidProfile): FormState {
     blockedGenres: profile.blockedGenreIds.join(', '),
     blockedKeywords: profile.blockedKeywordIds.join(', '),
     allowedLanguages: profile.allowedOriginalLanguages.join(', '),
-    homeRows: homeChoices(profile.homeRows),
+    homeRows: homeChoices(profile.homeRows, defaults),
   }
 }
 
@@ -124,6 +124,7 @@ export default function KidProfilesAdmin() {
   const [profiles, setProfiles] = useState<KidProfile[]>([])
   const [editing, setEditing] = useState<KidProfile | 'new' | null>(null)
   const [deleting, setDeleting] = useState<KidProfile | null>(null)
+  const [options, setOptions] = useState<HomeOptions | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const [version, setVersion] = useState(0)
@@ -140,6 +141,17 @@ export default function KidProfilesAdmin() {
       current = false
     }
   }, [version, t])
+
+  useEffect(() => {
+    let current = true
+    getHomeOptions().then(
+      (loaded) => current && setOptions(loaded),
+      () => current && setOptions({ defaultRows: [], genres: [] }),
+    )
+    return () => {
+      current = false
+    }
+  }, [])
 
   async function unlock(profile: KidProfile) {
     setError(null)
@@ -181,8 +193,9 @@ export default function KidProfilesAdmin() {
           {t('admin.add')}
         </button>
       )}
-      {editing !== null && (
+      {editing !== null && options !== null && (
         <ProfileForm
+          options={options}
           key={editing === 'new' ? 'new' : editing.id}
           profile={editing === 'new' ? null : editing}
           onCancel={() => setEditing(null)}
@@ -234,15 +247,23 @@ function RestrictionNotes({
 }
 
 type ProfileFormProps = {
+  options: HomeOptions
   profile: KidProfile | null
   onCancel: () => void
   onSaved: () => void
 }
 
-function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
+function ProfileForm({
+  options,
+  profile,
+  onCancel,
+  onSaved,
+}: ProfileFormProps) {
   const t = useT()
   const [form, setForm] = useState<FormState>(
-    profile ? toForm(profile) : emptyForm,
+    profile
+      ? toForm(profile, options.defaultRows)
+      : emptyForm(options.defaultRows),
   )
   const [error, setError] = useState<string | null>(null)
 
@@ -265,7 +286,22 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
     if (id === 'library') return translate('admin.rowLibrary')
     if (id === 'genre') return translate('admin.rowGenre')
     const genre = /^genre:(\d+)$/.exec(id)
-    return genre ? translate('admin.genreRow', { id: genre[1] }) : id
+    if (!genre) return id
+    const known = options.genres.find((item) => item.id === Number(genre[1]))
+    return known ? known.name : translate('admin.genreRow', { id: genre[1] })
+  }
+
+  const pickable = options.genres.filter(
+    (genre) =>
+      !form.homeRows.some((choice) => choice.id === `genre:${genre.id}`),
+  )
+
+  function addGenreRow(value: string) {
+    if (value === '') return
+    setForm((current) => ({
+      ...current,
+      homeRows: [...current.homeRows, { id: `genre:${value}`, enabled: true }],
+    }))
   }
 
   async function submit(event: FormEvent) {
@@ -435,6 +471,22 @@ function ProfileForm({ profile, onCancel, onSaved }: ProfileFormProps) {
             </div>
           )
         })}
+        {pickable.length > 0 && (
+          <label>
+            {t('admin.addGenreRow')}
+            <select
+              value=""
+              onChange={(event) => addGenreRow(event.target.value)}
+            >
+              <option value="">{t('admin.chooseGenre')}</option>
+              {pickable.map((genre) => (
+                <option key={genre.id} value={genre.id}>
+                  {genre.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </fieldset>
       <label>
         {t('admin.weekly')}

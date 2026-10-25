@@ -44,6 +44,7 @@ public static class KidHomeEndpoints
             .WithName("GetKidHome")
             .WithSummary("Returns the signed-in profile's home rows. Every title is allowed by that profile's content policy. Titles that need approval, are blocked, or whose rating or keywords cannot be checked are left out. Posters use the kid image proxy.")
             .Produces<KidHomeResponse>()
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status502BadGateway)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }

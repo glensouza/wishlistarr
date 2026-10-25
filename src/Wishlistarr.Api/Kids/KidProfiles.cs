@@ -359,13 +359,6 @@ public sealed class KidProfiles(
             return;
         }
 
-        if (rows.Count > MaxHomeRows)
-        {
-            normalized = [];
-            error = $"Home rows are limited to {MaxHomeRows}.";
-            return;
-        }
-
         List<string> distinct = [];
         foreach (string? row in rows)
         {
@@ -386,6 +379,13 @@ public sealed class KidProfiles(
             {
                 distinct.Add(clean);
             }
+        }
+
+        if (distinct.Count > MaxHomeRows)
+        {
+            normalized = [];
+            error = $"Home rows are limited to {MaxHomeRows}.";
+            return;
         }
 
         normalized = distinct;
