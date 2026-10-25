@@ -30,12 +30,12 @@ docker compose up -d
 
 The image is published as `ghcr.io/glensouza/wishlistarr` for `linux/amd64` and `linux/arm64`. See [docker-compose.example.yml](docker-compose.example.yml).
 
-| Setting         | Default         | Purpose                                                                                                                   |
-| --------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Setting | Default | Purpose |
+| --- | --- | --- |
 | `PUID` / `PGID` | `1000` / `1000` | User and group the app runs as. The data volume is chowned to them at start. Must not be `0`; the app never runs as root. |
-| `TZ`            | `UTC`           | Time zone, for example `America/Los_Angeles`.                                                                             |
-| `/data`         |                 | Volume holding the database, keys and logs. Back it up.                                                                   |
-| `8080`          |                 | Port the web interface and API listen on.                                                                                 |
+| `TZ` | `UTC` | Time zone, for example `America/Los_Angeles`. |
+| `/data` | | Volume holding the database, keys and logs. Back it up. |
+| `8080` | | Port the web interface and API listen on. |
 
 The container must start as root (do not set `--user`, `user:` or `runAsNonRoot`): the entrypoint applies `PUID`/`PGID` and then drops privileges, so the app itself never runs as root.
 
@@ -101,13 +101,13 @@ Wishlistarr does not collect any telemetry or analytics.
 
 <a href="https://www.themoviedb.org/"><img src="site/tmdb.svg" alt="TMDB" width="140"></a>
 
-This product uses the TMDB API but is not endorsed or certified by TMDB.
+This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
 
 Watch provider data comes from [JustWatch](https://www.justwatch.com/). Artwork data comes from [fanart.tv](https://fanart.tv/). Powered by [DoesTheDogDie.com](https://www.doesthedogdie.com).
 
 Wishlistarr is not affiliated with, endorsed, or sponsored by Plex, Inc. Plex is a trademark of Plex, Inc.
 
-The same credits, and the open source package list, are on the in-app About page and in [docs/attribution.md](docs/attribution.md).
+The same credits, and the open source package list, are on the in-app About page for parents and in [docs/attribution.md](docs/attribution.md).
 
 ## License
 

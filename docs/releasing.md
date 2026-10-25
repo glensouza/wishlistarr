@@ -25,14 +25,14 @@ Tags must be cut from commits on `main`; the workflow fails otherwise.
    git push origin v1.2.3
    ```
 
-3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create` with generated notes. The release title is the tag name. Before the image build it writes the third-party license notices, uploads them as artifacts, and attaches `npm-licenses.json` and `nuget-licenses.json` to the GitHub release. The image serves the same notices at `/licenses/npm.json` and `/licenses/nuget.json`. See [Attribution](attribution.md).
+3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create` with generated notes. The release title is the tag name. Before the image build it publishes the Api project to write the third-party license notices, uploads them as artifacts, and attaches `npm-licenses.json` and `nuget-licenses.json` to the GitHub release. The image serves the same notices at `/licenses/npm.json` and `/licenses/nuget.json`. See [Attribution](attribution.md).
 
 ## Image tags
 
-| Release                    | Tags published                |
-| -------------------------- | ----------------------------- |
-| Stable, `v1.2.3`           | `1.2.3`, `1.2`, `1`, `latest` |
-| Pre-release, `v1.0.0-rc.1` | `1.0.0-rc.1` only             |
+| Release | Tags published |
+| --- | --- |
+| Stable, `v1.2.3` | `1.2.3`, `1.2`, `1`, `latest` |
+| Pre-release, `v1.0.0-rc.1` | `1.0.0-rc.1` only |
 
 Publishing a stable patch on an older line, such as `v1.1.5` after `v1.2.0`, would still move `latest` and `1`, so avoid it. Pre-releases never move `latest`, `1` or `1.2`, and the GitHub release is marked as a pre-release. Stable releases are marked as the latest release.
 
