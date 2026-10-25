@@ -141,7 +141,7 @@ The internal state is not returned. Each item has one of four labels:
 | `Available`, `Labeled` | `ready` | Ready to watch |
 | `Denied` | `denied` | Not this time |
 
-`Failed` is shown as waiting for a parent because a parent is who can retry it or decide it is not this time. A state the server does not recognise is left off the list.
+`Failed` is shown as waiting for a parent because a parent is who can retry it or decide it is not this time. A state the server does not recognise is shown as `waiting`, so a request never disappears from the list. If the web app is given a `state` it does not know, it shows a neutral "Checking on it" badge.
 
 ### Denial note
 
@@ -153,12 +153,12 @@ A ready item has `plex` only when the selected server's machine identifier is kn
 
 `plex.webUrl` opens the item in the hosted Plex Web app. [Opening Plex Web App](https://support.plex.tv/articles/200288666-opening-plex-web-app/) documents `https://app.plex.tv/desktop` as that app. The item path is the one Plex Web puts in the address bar, `#!/server/<machineIdentifier>/details?key=/library/metadata/<ratingKey>`, with the key percent-encoded so the whole thing is one URL. That shape is what the web app uses, as described in the Plex forum thread [Supported deep link to a specific library item's detail page](https://forums.plex.tv/t/supported-deep-link-to-a-specific-library-items-detail-page-on-android-mobile-and-windows-desktop/944608) (October 2026).
 
-`plex.appUrl` uses the `plex://` scheme: `plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F<ratingKey>&metadataType=<type>&server=<machineIdentifier>`. `metadataType` is `1` for a movie and `2` for a show. The movie value is the one in that October 2026 example, and the same `1` movie / `2` show numbering is what a Plex employee gave for the metadata match API in [Android universal linking](https://forums.plex.tv/t/android-universal-linking-watch-plex-tv-links/932340). There is no support article for the `plex://` parameters. The same October 2026 thread notes that some current app builds open Home instead of the item, and that the desktop app does not take these links. The web link is the one that opens the detail page. Neither link carries `X-Plex-Token` or the server's own address.
+The link does not carry `X-Plex-Token` or the server's own address. It only works when the browser is signed in to a Plex account that can reach the server. The machine identifier is part of the link and is exposed to kids; it is not a secret. There is no link for the Plex apps, because the `plex://` links are not supported consistently and the desktop app does not take them.
 
-The page uses the URLs from this response as the link targets. It accepts a web link only when it starts with `https://app.plex.tv/` and an app link only when it starts with `plex://`, and it drops either one that contains `X-Plex-Token` or a `:32400` port. A ready title with no accepted link still shows "Ready to watch".
+The page uses the URL from this response as the link target. It accepts a link only when it starts with `https://app.plex.tv/`, and it drops one that contains `X-Plex-Token` or a `:32400` port. A ready title with no accepted link still shows "Ready to watch". The library lookups for all ready items in a list are made in one query.
 
 ### Keeping the list current
 
-The kid home polls `GET /api/v1/kid/requests` every 15 seconds while the tab is visible. A failed load waits 30 seconds, then 60, and stays at 60 until a load works again. While the tab is hidden the timer is cleared, and showing the tab loads the list at once. The page does not reload.
+The kid home polls `GET /api/v1/kid/requests` every 15 seconds while the tab is visible. A failed load waits 30 seconds, then 60, and stays at 60 until a load works again. After the first load, a failed refresh keeps the list on screen and shows a notice with a retry button until a load works. A `401` or `403` ends the kid session in the app and stops polling. While the tab is hidden the timer is cleared, and showing the tab loads the list at once. The page does not reload.
 
 Polling is the fit for this app. The wishlist is one small JSON document behind the cookie session the kid already has, and a parent decision or a download is not second-critical. Server-sent events would hold a connection open, and nothing else in the API streams. Polling stops in the background and slows down when the server is unhappy, without a second way to authenticate.

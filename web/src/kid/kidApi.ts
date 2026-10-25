@@ -70,7 +70,6 @@ export type KidWishState = 'waiting' | 'onTheWay' | 'ready' | 'denied'
 
 export type KidPlexLinks = {
   webUrl: string
-  appUrl: string
 }
 
 export type KidWish = {

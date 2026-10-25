@@ -47,6 +47,9 @@ export const en = {
   'wishlist.onTheWay': 'On its way',
   'wishlist.ready': 'Ready to watch',
   'wishlist.denied': 'Not this time',
+  'wishlist.unknown': 'Checking on it',
+  'wishlist.refreshFailed': 'We could not check for updates.',
+  'wishlist.changed': '{title}: {state}',
   'wishlist.remaining': '{count} wishes left this week',
   'wishlist.remainingOne': '1 wish left this week',
   'wishlist.noneLeft':
@@ -55,7 +58,6 @@ export const en = {
     'You have used your wishes for this week. More wishes start on {when}.',
   'wishlist.unlimited': 'You can ask for as many as you like.',
   'wishlist.watch': 'Watch {title} in Plex',
-  'wishlist.openApp': 'Open {title} in the Plex app',
   'wishlist.untitled': 'Something you asked for',
 
   'search.title': 'Find something to watch',

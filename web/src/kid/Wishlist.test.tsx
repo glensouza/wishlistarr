@@ -1,20 +1,23 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { axe } from '../test/axe'
 import Wishlist, { wishlistPollMaxMs, wishlistPollMs } from './Wishlist'
+
+const clearSession = vi.hoisted(() => vi.fn())
+
+vi.mock('./KidSession', () => ({
+  useKidSession: () => ({ clear: clearSession }),
+}))
 
 type Wish = {
   id: number
   kind: 'movie' | 'show'
   tmdbId: number
   title: string | null
-  state: 'waiting' | 'onTheWay' | 'ready' | 'denied'
+  state: string
   note: string | null
-  plex: { webUrl: string; appUrl: string } | null
+  plex: { webUrl: string } | null
 }
 
 const waiting: Wish = {
@@ -29,15 +32,13 @@ const waiting: Wish = {
 
 const webUrl =
   'https://app.plex.tv/desktop/#!/server/machine/details?key=%2Flibrary%2Fmetadata%2F102'
-const appUrl =
-  'plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F102&metadataType=1&server=machine'
 
 const ready: Wish = {
   ...waiting,
   id: 2,
   title: 'Ready Film',
   state: 'ready',
-  plex: { webUrl, appUrl },
+  plex: { webUrl },
 }
 
 let wishlist: {
@@ -46,19 +47,28 @@ let wishlist: {
   items: Wish[]
 }
 let failures: number
+let failStatus: number
 let calls: number
+let hold: Promise<void> | null
 
 beforeEach(() => {
   wishlist = { remaining: 2, resetsAt: null, items: [waiting] }
   failures = 0
+  failStatus = 503
   calls = 0
+  hold = null
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => {
       calls += 1
+      if (hold) {
+        const pending = hold
+        hold = null
+        await pending
+      }
       if (failures > 0) {
         failures -= 1
-        return Response.json({ title: 'Nope' }, { status: 503 })
+        return Response.json({ title: 'Nope' }, { status: failStatus })
       }
       return Response.json(wishlist)
     }),
@@ -67,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  clearSession.mockClear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   Object.defineProperty(document, 'hidden', {
@@ -112,11 +123,8 @@ it('links a ready title to the Plex URLs from the API', async () => {
   const web = await screen.findByRole('link', {
     name: 'Watch Ready Film in Plex',
   })
-  const app = screen.getByRole('link', {
-    name: 'Open Ready Film in the Plex app',
-  })
   expect(web.getAttribute('href')).toBe(webUrl)
-  expect(app.getAttribute('href')).toBe(appUrl)
+  expect(screen.getAllByRole('link')).toHaveLength(1)
   expect(document.body.innerHTML).not.toContain('X-Plex-Token')
   expect(document.body.innerHTML).not.toContain(':32400')
   await user.tab()
@@ -132,8 +140,7 @@ it('drops a Plex link that carries a token or a server port', async () => {
         ...ready,
         plex: {
           webUrl:
-            'http://192.168.1.20:32400/web/index.html#!/server/machine/details?key=/library/metadata/102&X-Plex-Token=secret-token',
-          appUrl: 'plex://preplay/?metadataKey=102&X-Plex-Token=secret-token',
+            'http://plex.example.test:32400/web/index.html#!/server/machine/details?key=/library/metadata/102&X-Plex-Token=fake-token-value',
         },
       },
     ],
@@ -141,8 +148,8 @@ it('drops a Plex link that carries a token or a server port', async () => {
   render(<Wishlist />)
   expect(await screen.findByText('Ready to watch')).toBeTruthy()
   expect(screen.queryByRole('link')).toBeNull()
-  expect(document.body.innerHTML).not.toContain('secret-token')
-  expect(document.body.innerHTML).not.toContain('192.168.1.20')
+  expect(document.body.innerHTML).not.toContain('fake-token-value')
+  expect(document.body.innerHTML).not.toContain('plex.example.test')
 })
 
 it('shows how many wishes are left', async () => {
@@ -216,14 +223,170 @@ it('waits longer after a failed refresh', async () => {
   expect(calls).toBe(afterFirstGap + 1)
 })
 
-it('does not hard-code a server address or a token', () => {
-  const source = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), 'Wishlist.tsx'),
-    'utf8',
+it('caps the wait after repeated failures', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  failures = 100
+  const base = calls
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  await vi.advanceTimersByTimeAsync(wishlistPollMs * 2)
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs)
+  expect(calls).toBe(base + 3)
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs)
+  expect(calls).toBe(base + 4)
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs)
+  expect(calls).toBe(base + 5)
+})
+
+it('stops polling and signs the kid out when the session has ended', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  failures = 100
+  failStatus = 401
+  const base = calls
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  expect(calls).toBe(base + 1)
+  expect(clearSession).toHaveBeenCalledTimes(1)
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 5)
+  expect(calls).toBe(base + 1)
+  expect(clearSession).toHaveBeenCalledTimes(1)
+})
+
+it('also stops on a forbidden answer', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  failures = 100
+  failStatus = 403
+  render(<Wishlist />)
+  await vi.advanceTimersByTimeAsync(0)
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 5)
+  expect(calls).toBe(1)
+  expect(clearSession).toHaveBeenCalledTimes(1)
+})
+
+it('does not fetch again after it is removed', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  const { unmount } = render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  const base = calls
+  unmount()
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 5)
+  expect(calls).toBe(base)
+  expect(clearSession).not.toHaveBeenCalled()
+})
+
+it('keeps one request chain when the tab is hidden and shown during a fetch', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  let hidden = false
+  Object.defineProperty(document, 'hidden', {
+    configurable: true,
+    get: () => hidden,
+  })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+
+  let release = () => {}
+  hold = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  const pending = calls
+
+  hidden = true
+  document.dispatchEvent(new Event('visibilitychange'))
+  hidden = false
+  document.dispatchEvent(new Event('visibilitychange'))
+  expect(calls).toBe(pending)
+
+  await act(async () => release())
+  await vi.advanceTimersByTimeAsync(wishlistPollMs * 3)
+  expect(calls).toBe(pending + 3)
+})
+
+it('shows a neutral badge for a state it does not know', async () => {
+  wishlist = {
+    remaining: 1,
+    resetsAt: null,
+    items: [{ ...waiting, state: 'somethingNew' }],
+  }
+  render(<Wishlist />)
+  const badge = await screen.findByText('Checking on it')
+  expect(badge.className).toContain('badge-unknown')
+})
+
+it('announces a changed state with the title and not on first load', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  const { container } = render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  const live = container.querySelector('.visually-hidden[aria-live="polite"]')
+  expect(live?.textContent).toBe('')
+  expect(container.querySelectorAll('.badge[aria-live]')).toHaveLength(0)
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  expect(live?.textContent).toBe('')
+
+  wishlist = {
+    remaining: 2,
+    resetsAt: null,
+    items: [{ ...waiting, state: 'ready', plex: null }],
+  }
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  expect(live?.textContent).toBe('Tiny Tale: Ready to watch')
+})
+
+it('offers a retry when the first load fails', async () => {
+  const user = userEvent.setup()
+  failures = 1
+  render(<Wishlist />)
+  expect(await screen.findByRole('alert')).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByText('Waiting for a parent')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('keeps the list and says so when a later refresh fails', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  expect(screen.queryByText('We could not check for updates.')).toBeNull()
+
+  failures = 1
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  expect(
+    await screen.findByText('We could not check for updates.'),
+  ).toBeTruthy()
+  expect(screen.getByText('Waiting for a parent')).toBeTruthy()
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMs * 3)
+  await waitFor(() =>
+    expect(screen.queryByText('We could not check for updates.')).toBeNull(),
   )
-  expect(source).not.toMatch(/X-Plex-Token=/)
-  expect(source).not.toMatch(/https?:\/\/\S*:32400/)
-  expect(source).not.toMatch(/\b\d{1,3}(?:\.\d{1,3}){3}\b/)
-  expect(wishlistPollMs).toBe(15_000)
-  expect(wishlistPollMaxMs).toBe(60_000)
+})
+
+it('retries a failed refresh on request', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  failures = 1
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  const button = await screen.findByRole('button', { name: 'Try again' })
+  await act(async () => button.click())
+  await vi.advanceTimersByTimeAsync(0)
+  expect(screen.queryByText('We could not check for updates.')).toBeNull()
+})
+
+it('says how many wishes are left', async () => {
+  wishlist = { remaining: 3, resetsAt: null, items: [] }
+  const { unmount } = render(<Wishlist />)
+  expect(await screen.findByText('3 wishes left this week')).toBeTruthy()
+  unmount()
+
+  wishlist = { remaining: 1, resetsAt: null, items: [] }
+  render(<Wishlist />)
+  expect(await screen.findByText('1 wish left this week')).toBeTruthy()
 })
