@@ -185,6 +185,11 @@ export const en = {
   'backups.pending':
     'This backup replaces the current data the next time Wishlistarr starts. The current data is kept as a backup.',
   'backups.restoreFailed': 'That backup could not be used.',
+  'backups.confirmTitle': 'Confirm restore',
+  'backups.confirmQuestion':
+    'Restore {name}? This replaces all current data, including kids, requests, settings and saved secrets, the next time Wishlistarr restarts. The current data is saved as a backup first.',
+  'backups.confirmRestore': 'Replace all data on restart',
+  'backups.cancelRestore': 'Cancel',
 } as const
 
 export type MessageKey = keyof typeof en

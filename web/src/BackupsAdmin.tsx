@@ -26,6 +26,7 @@ export default function BackupsAdmin() {
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
+  const [confirming, setConfirming] = useState<File | null>(null)
 
   useEffect(() => {
     let current = true
@@ -75,12 +76,18 @@ export default function BackupsAdmin() {
     }
   }
 
-  async function restore(event: FormEvent<HTMLFormElement>) {
+  function askToRestore(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const input = event.currentTarget.elements.namedItem('backup')
     const file =
       input instanceof HTMLInputElement && input.files ? input.files[0] : null
     if (!file) return
+    setError(null)
+    setConfirming(file)
+  }
+
+  async function restore(file: File) {
+    setConfirming(null)
     setError(null)
     setWorking(true)
     try {
@@ -124,15 +131,26 @@ export default function BackupsAdmin() {
           ))}
         </ul>
       )}
-      <form onSubmit={(event) => void restore(event)}>
+      <form onSubmit={askToRestore}>
         <label>
           {t('backups.file')}
           <input name="backup" type="file" accept=".zip,application/zip" />
         </label>
-        <button type="submit" disabled={working}>
+        <button type="submit" disabled={working || confirming !== null}>
           {t('backups.restore')}
         </button>
       </form>
+      {confirming && (
+        <div role="alertdialog" aria-label={t('backups.confirmTitle')}>
+          <p>{t('backups.confirmQuestion', { name: confirming.name })}</p>
+          <button type="button" onClick={() => void restore(confirming)}>
+            {t('backups.confirmRestore')}
+          </button>
+          <button type="button" onClick={() => setConfirming(null)}>
+            {t('backups.cancelRestore')}
+          </button>
+        </div>
+      )}
     </section>
   )
 }

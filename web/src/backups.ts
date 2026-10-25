@@ -36,32 +36,12 @@ export const latestBackupRun = async (runId: number) => {
   return runs.find((run) => run.id === runId) ?? null
 }
 
-async function antiforgeryHeader(): Promise<Record<string, string>> {
-  const response = await fetch('/api/v1/auth/antiforgery')
-  const tokens = (await response.json()) as {
-    token: string
-    headerName: string
-  }
-  return { [tokens.headerName]: tokens.token }
-}
-
 export async function restoreBackup(file: File): Promise<void> {
-  const headers = await antiforgeryHeader()
   const body = new FormData()
   body.append('file', file)
-  const response = await fetch(`${backupsPath}/restore`, {
-    method: 'POST',
-    headers,
+  await request<{ restorePending: boolean }>(
+    'POST',
+    `${backupsPath}/restore`,
     body,
-  })
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`
-    try {
-      const problem = (await response.json()) as { title?: string }
-      if (problem.title) message = problem.title
-    } catch {
-      // The response had no problem body.
-    }
-    throw new Error(message)
-  }
+  )
 }

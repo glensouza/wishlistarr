@@ -6,6 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { resetAntiforgery } from './api'
 import BackupsAdmin from './BackupsAdmin'
 import { axe } from './test/axe'
 
@@ -14,14 +15,19 @@ type Call = { method: string; path: string; body: unknown; headers: Headers }
 let calls: Call[]
 let restorePending = false
 
+let antiforgeryFetches = 0
+
 beforeEach(() => {
   calls = []
+  antiforgeryFetches = 0
+  resetAntiforgery()
   restorePending = false
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (path === '/api/v1/auth/antiforgery') {
+        antiforgeryFetches++
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
       calls.push({
@@ -92,21 +98,58 @@ it('starts a backup with the antiforgery token', async () => {
   expect(run?.headers.get('X-CSRF-TOKEN')).toBe('tok')
 })
 
-it('uploads a restore with the antiforgery token and no json body', async () => {
-  render(<BackupsAdmin />)
-  await screen.findByRole('link', { name: 'Download' })
+function chooseBackup() {
   const input = screen.getByLabelText('Backup file')
   const file = new File(['zip'], 'backup.zip', { type: 'application/zip' })
   fireEvent.change(input, { target: { files: [file] } })
   fireEvent.submit(input.closest('form')!)
+}
+
+it('asks for confirmation and uploads nothing when the restore is cancelled', async () => {
+  const { container } = render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  chooseBackup()
+
+  const dialog = await screen.findByRole('alertdialog', {
+    name: 'Confirm restore',
+  })
+  expect(dialog.textContent).toMatch(/replaces all current data/i)
+  expect(dialog.textContent).toMatch(/next time Wishlistarr restarts/i)
+  expect(await axe(container)).toHaveNoViolations()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+    false,
+  )
+})
+
+it('uploads a confirmed restore with the cached antiforgery token and no json body', async () => {
+  render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  fireEvent.click(screen.getByRole('button', { name: 'Back up now' }))
+  await waitFor(() =>
+    expect(
+      calls.some((call) => call.path === '/api/v1/jobs/database-backup/run'),
+    ).toBe(true),
+  )
+  chooseBackup()
+  expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+    false,
+  )
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Replace all data on restart' }),
+  )
   await waitFor(() =>
     expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
       true,
     ),
   )
   const restore = calls.find((call) => call.path === '/api/v1/backups/restore')
+  expect(restore?.method).toBe('POST')
   expect(restore?.headers.get('X-CSRF-TOKEN')).toBe('tok')
   expect(restore?.headers.get('Content-Type')).toBeNull()
   expect(restore?.body).toBeInstanceOf(FormData)
+  expect(antiforgeryFetches).toBe(1)
   expect(await screen.findByText(/next time Wishlistarr starts/i)).toBeTruthy()
 })
