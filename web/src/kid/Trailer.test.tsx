@@ -1,31 +1,29 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it } from 'vitest'
-import Trailer, {
-  trailerPlayerVars,
-  youtubeApiUrl,
-  youtubeHost,
-} from './Trailer'
+import Trailer, { youtubeApiUrl } from './Trailer'
 
 type PlayerOptions = ConstructorParameters<
   NonNullable<Window['YT']>['Player']
 >[1]
 
+type User = ReturnType<typeof userEvent.setup>
+
 class FakePlayer {
   static created = 0
   static last: FakePlayer | null = null
+  static constructorArgs: unknown[] = []
   options: PlayerOptions
+  element: HTMLElement
   played = false
   destroyed = false
-  iframe: HTMLIFrameElement
 
   constructor(element: HTMLElement, options: PlayerOptions) {
     FakePlayer.created += 1
     FakePlayer.last = this
+    FakePlayer.constructorArgs = [element, options]
+    this.element = element
     this.options = options
-    this.iframe = document.createElement('iframe')
-    this.iframe.src = `${options.host}/embed/${options.videoId}`
-    element.replaceWith(this.iframe)
     queueMicrotask(() => {
       if (!this.destroyed) options.events.onReady({ target: this })
     })
@@ -37,7 +35,7 @@ class FakePlayer {
 
   destroy() {
     this.destroyed = true
-    this.iframe.remove()
+    this.element.remove()
   }
 }
 
@@ -57,11 +55,26 @@ afterEach(() => {
     .querySelectorAll('script')
     .forEach((script) => script.src === youtubeApiUrl && script.remove())
   delete window.YT
-  delete window.YTConfig
   delete window.onYouTubeIframeAPIReady
   FakePlayer.created = 0
   FakePlayer.last = null
+  FakePlayer.constructorArgs = []
 })
+
+async function startPlaying(user: User) {
+  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
+  installApi()
+  window.onYouTubeIframeAPIReady?.()
+  await waitFor(() => expect(FakePlayer.last?.played).toBe(true))
+}
+
+const endVideo = () =>
+  act(() => {
+    FakePlayer.last?.options.events.onStateChange({
+      data: 0,
+      target: FakePlayer.last!,
+    })
+  })
 
 it('does not contact YouTube until play is clicked', async () => {
   const user = userEvent.setup()
@@ -79,37 +92,34 @@ it('does not contact YouTube until play is clicked', async () => {
   const script = [...document.scripts].find(
     (item) => item.src === youtubeApiUrl,
   )
-  expect(script?.src).toBe(youtubeApiUrl)
   expect(script?.async).toBe(true)
-  expect(window.YTConfig?.host).toBe(youtubeHost)
   expect(document.querySelector('iframe')).toBeNull()
   expect(container.innerHTML).not.toMatch(/i\.ytimg|img\.youtube/i)
 })
 
-it('plays on the privacy-enhanced host and closes when the video ends', async () => {
+it('builds the privacy-enhanced iframe itself and attaches the player to it', async () => {
   const user = userEvent.setup()
   render(<Trailer videoId="M7lc1UVf-VE" backdropUrl="/art.jpg" />)
-  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
-  installApi()
-  window.onYouTubeIframeAPIReady?.()
+  await startPlaying(user)
 
-  await waitFor(() => expect(FakePlayer.last?.played).toBe(true))
-  const options = FakePlayer.last?.options
-  expect(options?.host).toBe(youtubeHost)
-  expect(options?.videoId).toBe('M7lc1UVf-VE')
-  expect(options?.playerVars).toEqual({
-    ...trailerPlayerVars,
-    origin: window.location.origin,
-  })
-  expect(options?.width).toBeGreaterThanOrEqual(480)
-  expect(options?.height).toBeGreaterThanOrEqual(270)
-  expect(document.querySelector('iframe')?.getAttribute('src')).toBe(
-    `${youtubeHost}/embed/M7lc1UVf-VE`,
+  const frame = document.querySelector('iframe')
+  expect(frame?.getAttribute('src')).toBe(
+    `https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`,
   )
+  expect(frame?.title).toBe('Trailer')
+  const [element, options] = FakePlayer.constructorArgs
+  expect(element).toBe(frame)
+  expect(Object.keys(options as object)).toEqual(['events'])
+  expect(Number(frame?.getAttribute('width'))).toBeGreaterThanOrEqual(480)
+  expect(Number(frame?.getAttribute('height'))).toBeGreaterThanOrEqual(270)
+})
 
-  act(() => {
-    options?.events.onStateChange({ data: 0, target: FakePlayer.last! })
-  })
+it('closes when the video ends', async () => {
+  const user = userEvent.setup()
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl="/art.jpg" />)
+  await startPlaying(user)
+
+  endVideo()
 
   expect(FakePlayer.last?.destroyed).toBe(true)
   expect(document.querySelector('iframe')).toBeNull()
@@ -133,10 +143,7 @@ it('does not build a player after the trailer was closed during load', async () 
 it('closes the player when Escape is pressed', async () => {
   const user = userEvent.setup()
   render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
-  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
-  installApi()
-  window.onYouTubeIframeAPIReady?.()
-  await waitFor(() => expect(FakePlayer.last?.played).toBe(true))
+  await startPlaying(user)
 
   await user.keyboard('{Escape}')
 
@@ -147,10 +154,7 @@ it('closes the player when Escape is pressed', async () => {
 it('removes the player when playback fails', async () => {
   const user = userEvent.setup()
   render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
-  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
-  installApi()
-  window.onYouTubeIframeAPIReady?.()
-  await waitFor(() => expect(FakePlayer.last?.played).toBe(true))
+  await startPlaying(user)
 
   act(() => {
     FakePlayer.last?.options.events.onError({
@@ -164,6 +168,83 @@ it('removes the player when playback fails', async () => {
   expect(screen.getByRole('alert').textContent).toBe(
     'The trailer could not be played.',
   )
+})
+
+it('moves focus to Close when the trailer opens and keeps it after the frame in tab order', async () => {
+  const user = userEvent.setup()
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await startPlaying(user)
+
+  const close = screen.getByRole('button', { name: 'Close trailer' })
+  expect(document.activeElement).toBe(close)
+  const frame = document.querySelector('iframe')!
+  expect(
+    frame.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
+})
+
+it.each([
+  [
+    'the Close button',
+    async (user: User) => {
+      await user.click(screen.getByRole('button', { name: 'Close trailer' }))
+    },
+  ],
+  [
+    'Escape',
+    async (user: User) => {
+      await user.keyboard('{Escape}')
+    },
+  ],
+  ['the video ending', async () => endVideo()],
+  [
+    'a player error',
+    async () => {
+      act(() => {
+        FakePlayer.last?.options.events.onError({
+          data: 101,
+          target: FakePlayer.last!,
+        })
+      })
+    },
+  ],
+])('returns focus to Play when closed by %s', async (_name, closeIt) => {
+  const user = userEvent.setup()
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await startPlaying(user)
+
+  await closeIt(user)
+
+  const play = screen.getByRole('button', { name: 'Play trailer' })
+  await waitFor(() => expect(document.activeElement).toBe(play))
+})
+
+it('recovers from a failed script load and plays on retry', async () => {
+  const user = userEvent.setup()
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
+  const failedScript = [...document.scripts].find(
+    (item) => item.src === youtubeApiUrl,
+  )!
+  act(() => {
+    failedScript.onerror?.(new Event('error'))
+  })
+
+  expect(scriptLoaded()).toBe(false)
+  expect(screen.getByRole('alert').textContent).toBe(
+    'The trailer could not be played.',
+  )
+  const play = screen.getByRole('button', { name: 'Play trailer' })
+  await waitFor(() => expect(document.activeElement).toBe(play))
+
+  await user.click(play)
+
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(scriptLoaded()).toBe(true)
+  installApi()
+  window.onYouTubeIframeAPIReady?.()
+  await waitFor(() => expect(FakePlayer.last?.played).toBe(true))
+  expect(document.querySelector('iframe')).toBeTruthy()
 })
 
 it('ignores a key that is not a YouTube id', () => {

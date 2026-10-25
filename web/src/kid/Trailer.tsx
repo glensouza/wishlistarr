@@ -5,20 +5,14 @@ import Artwork from './Artwork'
 export const youtubeApiUrl = 'https://www.youtube.com/iframe_api'
 export const youtubeHost = 'https://www.youtube-nocookie.com'
 
-export const trailerPlayerVars = {
-  rel: 0,
-  iv_load_policy: 3,
-  playsinline: 1,
-  controls: 1,
-  disablekb: 0,
-  fs: 1,
-} as const
-
 const minPlayerWidth = 480
 const minPlayerHeight = 270
 
 export const isYoutubeId = (key: string | null | undefined): key is string =>
   typeof key === 'string' && /^[A-Za-z0-9_-]{11}$/.test(key)
+
+export const embedUrl = (videoId: string, origin: string) =>
+  `${youtubeHost}/embed/${videoId}?enablejsapi=1&rel=0&iv_load_policy=3&playsinline=1&origin=${encodeURIComponent(origin)}`
 
 type YoutubePlayer = {
   playVideo: () => void
@@ -31,11 +25,6 @@ type YoutubeEvent = {
 }
 
 type PlayerOptions = {
-  width: number
-  height: number
-  videoId: string
-  host: string
-  playerVars: Record<string, string | number>
   events: {
     onReady: (event: { target: YoutubePlayer }) => void
     onStateChange: (event: YoutubeEvent) => void
@@ -45,7 +34,6 @@ type PlayerOptions = {
 
 declare global {
   interface Window {
-    YTConfig?: { host?: string }
     YT?: {
       Player: new (
         element: HTMLElement,
@@ -70,6 +58,8 @@ export default function Trailer({
   const readyRef = useRef<(() => void) | null>(null)
   const generation = useRef(0)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const playButton = useRef<HTMLButtonElement>(null)
+  const wasPlaying = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [failed, setFailed] = useState(false)
   const canPlay = isYoutubeId(videoId)
@@ -101,7 +91,12 @@ export default function Trailer({
   }, [stop])
 
   useEffect(() => {
-    if (playing) closeButton.current?.focus()
+    if (playing) {
+      closeButton.current?.focus()
+    } else if (wasPlaying.current) {
+      playButton.current?.focus()
+    }
+    wasPlaying.current = playing
   }, [playing])
 
   useEffect(() => {
@@ -120,16 +115,18 @@ export default function Trailer({
     const Player = window.YT?.Player
     if (!stage || generation.current !== ticket || !Player) return
     stage.replaceChildren()
-    const slot = document.createElement('div')
-    stage.appendChild(slot)
+    const frame = document.createElement('iframe')
     const width = Math.max(minPlayerWidth, stage.clientWidth)
-    const height = Math.max(minPlayerHeight, Math.round((width * 9) / 16))
-    const player = new Player(slot, {
-      width,
-      height,
-      videoId: id,
-      host: youtubeHost,
-      playerVars: { ...trailerPlayerVars, origin: window.location.origin },
+    frame.src = embedUrl(id, window.location.origin)
+    frame.title = t('details.trailerFrame')
+    frame.width = String(width)
+    frame.height = String(
+      Math.max(minPlayerHeight, Math.round((width * 9) / 16)),
+    )
+    frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'
+    frame.allowFullscreen = true
+    stage.appendChild(frame)
+    const player = new Player(frame, {
       events: {
         onReady: (event) => {
           if (generation.current !== ticket) {
@@ -168,7 +165,6 @@ export default function Trailer({
     const id = videoId
     setFailed(false)
     setPlaying(true)
-    window.YTConfig = { host: youtubeHost }
     const begin = () => openPlayer(ticket, id)
     if (window.YT?.Player) {
       begin()
@@ -184,8 +180,9 @@ export default function Trailer({
     script.src = youtubeApiUrl
     script.async = true
     script.onerror = () => {
+      script.remove()
       if (generation.current !== ticket) return
-      setPlaying(false)
+      close()
       setFailed(true)
     }
     document.head.append(script)
@@ -198,7 +195,12 @@ export default function Trailer({
           <>
             <Artwork src={backdropUrl} className="title-backdrop" />
             {canPlay && (
-              <button type="button" className="trailer-play" onClick={play}>
+              <button
+                ref={playButton}
+                type="button"
+                className="trailer-play"
+                onClick={play}
+              >
                 {t('details.playTrailer')}
               </button>
             )}
