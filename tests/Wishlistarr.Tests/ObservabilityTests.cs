@@ -39,11 +39,12 @@ public sealed class ObservabilityApiFactory : AuthApiFactory
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
+        builder.UseSetting("Metrics:Enabled", this.MetricsEnabled ? "true" : "false");
         builder.ConfigureAppConfiguration((_, configuration) =>
             configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Logs:Capacity"] = this.LogCapacity.ToString(CultureInfo.InvariantCulture),
-                ["Metrics:Enabled"] = this.MetricsEnabled ? "true" : "false",
+                ["Health:CacheDuration"] = "00:00:00",
                 ["Jobs:Schedules:job-history-cleanup:Enabled"] = "false",
                 ["Jobs:Schedules:webhook-events:Enabled"] = "false",
                 ["Jobs:Schedules:tmdb-data-purge:Enabled"] = "false",

@@ -1,5 +1,7 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Jobs;
+using Wishlistarr.Api.System;
 using Wishlistarr.Data;
 
 namespace Wishlistarr.Tests.Jobs;
@@ -43,6 +45,58 @@ public sealed class JobRunnerTests
         Assert.Equal("boom", run.Error);
         Assert.NotNull(run.FinishedAt);
         Assert.False(harness.Runner.IsRunning(ProbeJob.Name));
+    }
+
+    [Theory]
+    [InlineData(false, "succeeded")]
+    [InlineData(true, "failed")]
+    public async Task A_finished_run_adds_one_to_the_job_counter_with_its_outcome(bool fail, string outcome)
+    {
+        List<(string Job, string Outcome)> seen = [];
+        using MeterListener listener = new();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Meter.Name == AppMetrics.Name && instrument.Name == "wishlistarr.jobs")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+        {
+            string job = string.Empty;
+            string finished = string.Empty;
+            foreach (KeyValuePair<string, object?> tag in tags)
+            {
+                if (tag.Key == "job")
+                {
+                    job = (string)tag.Value!;
+                }
+                else if (tag.Key == "outcome")
+                {
+                    finished = (string)tag.Value!;
+                }
+            }
+
+            if (value == 1)
+            {
+                lock (seen)
+                {
+                    seen.Add((job, finished));
+                }
+            }
+        });
+        listener.Start();
+        await using JobHarness harness = await JobHarness.CreateAsync();
+        harness.Probe.Block = false;
+        harness.Probe.Failure = fail ? new InvalidOperationException("boom") : null;
+
+        JobStartResult result = await harness.Runner.StartAsync(ProbeJob.Name, JobRunTrigger.Manual);
+        await result.Completion;
+
+        lock (seen)
+        {
+            Assert.Contains((ProbeJob.Name, outcome), seen);
+        }
     }
 
     [Fact]

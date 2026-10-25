@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace Wishlistarr.Api.System;
 
 public static class ObservabilityEndpoints
@@ -44,7 +42,7 @@ public static class ObservabilityEndpoints
                 return LevelProblem();
             }
 
-            return Results.File(Encoding.UTF8.GetBytes(logs.Download(minimum)), "text/plain", "wishlistarr.log");
+            return Results.Stream(stream => logs.WriteDownloadAsync(stream, minimum), "text/plain", "wishlistarr.log");
         })
             .WithTags("System")
             .WithName("DownloadLogs")

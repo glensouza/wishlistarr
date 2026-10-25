@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Webhooks;
@@ -31,30 +32,92 @@ public interface IHealthCheck
     Task<HealthCheckResult> CheckAsync(IServiceProvider services, CancellationToken ct);
 }
 
-public sealed class HealthReport(IEnumerable<IHealthCheck> checks, IServiceScopeFactory scopes)
+public sealed class HealthOptions
 {
-    public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(8);
+    public const string SectionName = "Health";
 
+    public static readonly TimeSpan DefaultCacheDuration = TimeSpan.FromSeconds(30);
+
+    public static readonly TimeSpan DefaultCheckTimeout = TimeSpan.FromSeconds(8);
+
+    public TimeSpan CacheDuration { get; set; } = DefaultCacheDuration;
+
+    public TimeSpan CheckTimeout { get; set; } = DefaultCheckTimeout;
+
+    public bool IsValid() =>
+        this.CacheDuration >= TimeSpan.Zero
+        && this.CacheDuration <= TimeSpan.FromMinutes(10)
+        && this.CheckTimeout > TimeSpan.Zero
+        && this.CheckTimeout <= TimeSpan.FromMinutes(1);
+}
+
+public sealed class HealthReport(
+    IEnumerable<IHealthCheck> checks,
+    IServiceScopeFactory scopes,
+    IOptions<HealthOptions> options,
+    TimeProvider time)
+{
     private static readonly string[] Order = ["plex", "tmdb", "seerr", "sonarr", "radarr", "webhooks", "jobs", "database"];
 
-    public async Task<IReadOnlyList<HealthCheckResult>> CheckAsync(CancellationToken ct = default)
+    private readonly Lock gate = new();
+    private Task<IReadOnlyList<HealthCheckResult>>? running;
+    private IReadOnlyList<HealthCheckResult>? cached;
+    private DateTimeOffset expires;
+
+    public Task<IReadOnlyList<HealthCheckResult>> CheckAsync(CancellationToken ct = default)
     {
-        Dictionary<string, IHealthCheck> byName = checks.ToDictionary(check => check.Name, StringComparer.Ordinal);
-        HealthCheckResult[] results = await Task.WhenAll(Order.Select(name => this.RunAsync(byName[name], ct)));
-        AppMetrics.PublishHealth(results);
-        return results;
+        Task<IReadOnlyList<HealthCheckResult>> run;
+        lock (this.gate)
+        {
+            if (this.cached is not null && time.GetUtcNow() < this.expires)
+            {
+                return Task.FromResult(this.cached);
+            }
+
+            run = this.running ??= Task.Run(this.RunAllAsync, CancellationToken.None);
+        }
+
+        return run.WaitAsync(ct);
+    }
+
+    private async Task<IReadOnlyList<HealthCheckResult>> RunAllAsync()
+    {
+        try
+        {
+            Dictionary<string, IHealthCheck> byName = checks.ToDictionary(check => check.Name, StringComparer.Ordinal);
+            HealthCheckResult[] results = await Task.WhenAll(Order.Select(name => this.RunAsync(byName[name], CancellationToken.None)));
+            AppMetrics.PublishHealth(results);
+            lock (this.gate)
+            {
+                this.cached = results;
+                this.expires = time.GetUtcNow() + options.Value.CacheDuration;
+            }
+
+            return results;
+        }
+        finally
+        {
+            lock (this.gate)
+            {
+                this.running = null;
+            }
+        }
     }
 
     private async Task<HealthCheckResult> RunAsync(IHealthCheck check, CancellationToken ct)
     {
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(Timeout);
+        timeout.CancelAfter(options.Value.CheckTimeout);
         try
         {
             using IServiceScope scope = scopes.CreateScope();
             return await check.CheckAsync(scope.ServiceProvider, timeout.Token);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             return Checked(check.Name, HealthCheckStatus.Error, $"{check.DisplayName} did not answer in time.", check.Fix);
         }
@@ -79,7 +142,7 @@ public sealed class PlexHealthCheck : IHealthCheck
     public async Task<HealthCheckResult> CheckAsync(IServiceProvider services, CancellationToken ct)
     {
         MediaServerTestResult test = await services.GetRequiredService<IMediaServer>().TestConnectionAsync(ct);
-        bool setup = test.Message is "Plex is not linked." or "No Plex server is selected.";
+        bool setup = test.Code is MediaServerTestCode.NotLinked or MediaServerTestCode.NoServerSelected;
         HealthCheckStatus status = test.Valid
             ? HealthCheckStatus.Ok
             : setup ? HealthCheckStatus.Warning : HealthCheckStatus.Error;
@@ -180,7 +243,7 @@ public sealed class ArrHealthCheck(ArrService service) : IHealthCheck
             return HealthReport.Checked(this.Name, HealthCheckStatus.Ok, result.Message, this.Fix);
         }
 
-        if (result.Message.Contains("not configured", StringComparison.OrdinalIgnoreCase))
+        if (result.Code == ArrTestCode.NotConfigured)
         {
             return HealthReport.Checked(this.Name, HealthCheckStatus.Ok, $"{this.DisplayName} is not configured.", this.Fix);
         }
@@ -202,11 +265,12 @@ public sealed class WebhookHealthCheck : IHealthCheck
         WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
         TimeProvider time = services.GetRequiredService<TimeProvider>();
         DateTimeOffset cutoff = time.GetUtcNow() - TimeSpan.FromMinutes(2);
-        List<DateTimeOffset> pending = await db.WebhookEvents.AsNoTracking()
+        DateTimeOffset? oldest = await db.WebhookEvents.AsNoTracking()
             .Where(item => item.ProcessedAt == null)
-            .Select(item => item.ReceivedAt)
-            .ToListAsync(ct);
-        bool stuck = pending.Exists(received => received < cutoff);
+            .OrderBy(item => item.Id)
+            .Select(item => (DateTimeOffset?)item.ReceivedAt)
+            .FirstOrDefaultAsync(ct);
+        bool stuck = oldest < cutoff;
         JobRun? last = await services.GetRequiredService<JobRunner>().GetLastRunAsync(WebhookEventProcessor.JobName, ct);
         if (last?.Outcome == JobRunOutcome.Failed)
         {
@@ -285,8 +349,12 @@ public sealed class DatabaseHealthCheck : IHealthCheck
 
 public static class HealthCheckRegistration
 {
-    public static IServiceCollection AddIntegrationHealthChecks(this IServiceCollection services)
+    public static IServiceCollection AddIntegrationHealthChecks(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddOptions<HealthOptions>()
+            .Bind(configuration.GetSection(HealthOptions.SectionName))
+            .Validate(options => options.IsValid(), "Health:CacheDuration must be from 0 to 10 minutes and Health:CheckTimeout above 0 and up to 1 minute.")
+            .ValidateOnStart();
         services.AddSingleton<IHealthCheck, PlexHealthCheck>();
         services.AddSingleton<IHealthCheck, TmdbHealthCheck>();
         services.AddSingleton<IHealthCheck, SeerrHealthCheck>();

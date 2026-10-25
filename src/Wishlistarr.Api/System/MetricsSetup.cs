@@ -17,19 +17,24 @@ public static class MetricsSetup
 
     public static void AddWishlistarrMetrics(this WebApplicationBuilder builder)
     {
-        builder.Services.AddOptions<MetricsOptions>()
-            .Bind(builder.Configuration.GetSection(MetricsOptions.SectionName));
+        MetricsOptions options = builder.Configuration.GetSection(MetricsOptions.SectionName).Get<MetricsOptions>() ?? new MetricsOptions();
+        builder.Services.AddSingleton(options);
+        AppMetrics.Start();
+        if (!options.Enabled)
+        {
+            return;
+        }
+
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics => metrics
                 .SetResourceBuilder(ResourceBuilder.CreateEmpty().AddService("wishlistarr", autoGenerateServiceInstanceId: false))
                 .AddMeter(AppMetrics.Name)
                 .AddPrometheusExporter());
-        AppMetrics.Start();
     }
 
     public static void MapWishlistarrMetrics(this WebApplication app)
     {
-        if (app.Configuration.GetValue<bool>($"{MetricsOptions.SectionName}:Enabled"))
+        if (app.Services.GetRequiredService<MetricsOptions>().Enabled)
         {
             app.MapPrometheusScrapingEndpoint(Path)
                 .RequireAuthorization(Policies.Parent)

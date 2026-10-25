@@ -36,6 +36,7 @@ builder.Host.UseSerilog(
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
             .Enrich.With<WebhookTokenRedactor>()
+            .Enrich.With<LogEventRedactor>()
             .WriteTo.Sink(services.GetRequiredService<LogBuffer>())
             .WriteTo.Console()
             .WriteTo.File(
@@ -65,7 +66,7 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddLogBuffer(builder.Configuration);
-builder.Services.AddIntegrationHealthChecks();
+builder.Services.AddIntegrationHealthChecks(builder.Configuration);
 builder.AddWishlistarrMetrics();
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddBackgroundJobs(builder.Configuration);

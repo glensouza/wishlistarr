@@ -14,6 +14,8 @@ public sealed class LogOptions
 
     public const int MaxCapacity = 5000;
 
+    public const int MaxMessageLength = 4096;
+
     public int Capacity { get; set; } = DefaultCapacity;
 
     public bool IsValid() => this.Capacity is >= 1 and <= MaxCapacity;
@@ -33,6 +35,9 @@ public sealed record LogEntry(DateTimeOffset At, LogBufferLevel Level, string Ca
 
 public sealed class LogBuffer(IOptions<LogOptions> options) : ILogEventSink
 {
+    private const int RedactionWindow = 65536;
+    private const string TruncationMarker = " [truncated]";
+
     private readonly LogEntry[] slots = new LogEntry[options.Value.Capacity];
     private readonly Lock gate = new();
     private int next;
@@ -40,26 +45,19 @@ public sealed class LogBuffer(IOptions<LogOptions> options) : ILogEventSink
 
     public void Emit(LogEvent logEvent)
     {
-        foreach (KeyValuePair<string, LogEventPropertyValue> property in logEvent.Properties.ToArray())
-        {
-            if (property.Value is not ScalarValue { Value: string text })
-            {
-                continue;
-            }
-
-            string redacted = LogRedactor.IsSecretName(property.Key) ? "***" : LogRedactor.Redact(text);
-            if (!string.Equals(redacted, text, StringComparison.Ordinal))
-            {
-                logEvent.AddOrUpdateProperty(new LogEventProperty(property.Key, new ScalarValue(redacted)));
-            }
-        }
-
-        string message = LogRedactor.Redact(logEvent.RenderMessage());
+        LogEvent safe = new(
+            logEvent.Timestamp,
+            logEvent.Level,
+            logEvent.Exception,
+            logEvent.MessageTemplate,
+            logEvent.Properties.Select(property => new LogEventProperty(property.Key, LogRedactor.Redact(property.Key, property.Value))));
+        string message = Clip(safe.RenderMessage(), RedactionWindow);
         if (logEvent.Exception is not null)
         {
-            message = LogRedactor.Redact(message + " " + logEvent.Exception.Message);
+            message = Clip(message + " " + logEvent.Exception.Message, RedactionWindow);
         }
 
+        message = Clip(LogRedactor.Redact(message), LogOptions.MaxMessageLength);
         LogEntry entry = new(logEvent.Timestamp.ToUniversalTime(), Map(logEvent.Level), Category(logEvent), message);
         lock (this.gate)
         {
@@ -91,22 +89,18 @@ public sealed class LogBuffer(IOptions<LogOptions> options) : ILogEventSink
         }
     }
 
-    public string Download(LogBufferLevel? minimum)
+    public async Task WriteDownloadAsync(Stream destination, LogBufferLevel? minimum, CancellationToken ct = default)
     {
-        StringBuilder text = new();
+        await using StreamWriter writer = new(destination, new UTF8Encoding(false), leaveOpen: true) { NewLine = "\n" };
         foreach (LogEntry entry in this.List(minimum))
         {
-            text.Append(entry.At.ToString("O", CultureInfo.InvariantCulture));
-            text.Append(' ');
-            text.Append(entry.Level.ToString().ToLowerInvariant());
-            text.Append(' ');
-            text.Append(entry.Category);
-            text.Append(' ');
-            text.Append(entry.Message);
-            text.Append('\n');
+            ct.ThrowIfCancellationRequested();
+            await writer.WriteLineAsync(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{entry.At:O} {entry.Level.ToString().ToLowerInvariant()} {entry.Category} {entry.Message}"));
         }
 
-        return text.ToString();
+        await writer.FlushAsync(ct);
     }
 
     public static bool TryParseLevel(string? value, out LogBufferLevel? level)
@@ -125,6 +119,9 @@ public sealed class LogBuffer(IOptions<LogOptions> options) : ILogEventSink
         level = parsed;
         return true;
     }
+
+    private static string Clip(string text, int limit) =>
+        text.Length <= limit ? text : string.Concat(text.AsSpan(0, limit), TruncationMarker);
 
     private static string Category(LogEvent logEvent)
     {
