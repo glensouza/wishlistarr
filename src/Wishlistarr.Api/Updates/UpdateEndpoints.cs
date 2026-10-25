@@ -10,24 +10,9 @@ public static class UpdateEndpoints
 {
     public static IServiceCollection AddUpdateCheck(this IServiceCollection services)
     {
-        services.AddHttpClient(UpdateChecker.HttpClientName, client =>
-            {
-                client.Timeout = UpdateChecker.Timeout;
-                client.MaxResponseContentBufferSize = UpdateChecker.MaxResponseBytes;
-                client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Wishlistarr", AppVersionHeader()));
-                client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", UpdateChecker.AcceptMediaType);
-                client.DefaultRequestHeaders.TryAddWithoutValidation("X-GitHub-Api-Version", UpdateChecker.ApiVersion);
-            })
+        services.AddHttpClient(UpdateChecker.HttpClientName, ConfigureClient)
             .RemoveAllLoggers()
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-            {
-                AllowAutoRedirect = false,
-                UseCookies = false,
-                AutomaticDecompression = DecompressionMethods.None,
-
-                // Trace and request ids would identify this server to GitHub.
-                ActivityHeadersPropagator = null,
-            });
+            .ConfigurePrimaryHttpMessageHandler(CreateHandler);
         services.AddScoped<UpdateChecker>();
         services.AddBackgroundJob<UpdateCheckJob>(
             UpdateCheckJob.JobName,
@@ -35,6 +20,25 @@ public static class UpdateEndpoints
             UpdateChecker.Interval);
         return services;
     }
+
+    private static void ConfigureClient(HttpClient client)
+    {
+        client.Timeout = UpdateChecker.Timeout;
+        client.MaxResponseContentBufferSize = UpdateChecker.MaxResponseBytes;
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Wishlistarr", AppVersionHeader()));
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", UpdateChecker.AcceptMediaType);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-GitHub-Api-Version", UpdateChecker.ApiVersion);
+    }
+
+    public static SocketsHttpHandler CreateHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+        AutomaticDecompression = DecompressionMethods.None,
+
+        // Trace and request ids would identify this server to GitHub.
+        ActivityHeadersPropagator = null,
+    };
 
     public static void MapUpdates(this RouteGroupBuilder v1)
     {

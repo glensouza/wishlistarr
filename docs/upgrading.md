@@ -14,7 +14,7 @@ docker pull ghcr.io/glensouza/wishlistarr:1.2.3
 
 ## Update notice
 
-A signed-in parent sees a notice when a newer version has been published. The notice links to that version's release notes and to this page. Kid screens never show it, and the kid API does not include it.
+A signed-in parent sees a notice when a newer version has been published. The notice links to that version's release notes and to this page as it is in that version's tag. Kid screens never show it, and the kid API does not include it.
 
 The notice comes from a daily check of GitHub's list-releases API. That check is the only call Wishlistarr makes to GitHub by itself.
 
@@ -24,5 +24,6 @@ The notice comes from a daily check of GitHub's list-releases API. That check is
 - Being offline does not stop the app. A failed check is logged and ignored, and the previous result is kept.
 - Drafts are ignored. Pre-releases are ignored unless the running version is itself a pre-release. Versions are compared as semantic versions, not by the order GitHub returns them.
 - Only the first page is read, so at most 100 releases.
+- The request names GitHub REST API version `2022-11-28` in `X-GitHub-Api-Version`. GitHub supports that version until 2028-03-10 and then answers `410 Gone`. The check logs a warning that says so and the notice stops appearing, so upgrade before then; the version is set in `UpdateChecker.ApiVersion`.
 
 The check is on when `updates.check` is missing. Turn it off from the Parents page, with `PUT /api/v1/updates` and `{ "checkEnabled": false }`, or with `PUT /api/v1/settings/updates.check` and `{ "value": "false" }`. While it is off, the app does not call GitHub and does not show the notice. Those writes accept only `true` or `false`. A stored value that is not `true` leaves the check off.

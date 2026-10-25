@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Settings;
@@ -70,7 +71,10 @@ public sealed class UpdateChecker(IHttpClientFactory httpClients, SettingsStore 
 
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
-    public static string UserAgent => "Wishlistarr/" + AppVersion.Current;
+    public static string UpgradeNotesUrlFor(string? tag) =>
+        tag is not null && SemanticVersion.TryParseTag(tag, out _)
+            ? "https://github.com/glensouza/wishlistarr/blob/" + Uri.EscapeDataString(tag) + "/docs/upgrading.md"
+            : UpgradeNotesUrl;
 
     public static string ReleaseNotesUrlFor(string tag) =>
         "https://github.com/glensouza/wishlistarr/releases/tag/" + Uri.EscapeDataString(tag);
@@ -139,7 +143,7 @@ public sealed class UpdateChecker(IHttpClientFactory httpClients, SettingsStore 
             return null;
         }
 
-        return new AvailableUpdate(published.ToString(), url, UpgradeNotesUrl);
+        return new AvailableUpdate(published.ToString(), url, UpgradeNotesUrlFor(tag));
     }
 
     private async Task CheckAsync(CancellationToken ct)
@@ -197,6 +201,14 @@ public sealed class UpdateChecker(IHttpClientFactory httpClients, SettingsStore 
         try
         {
             using HttpResponseMessage response = await http.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Gone)
+            {
+                logger.LogWarning(
+                    "Update check failed with HTTP status 410 because GitHub no longer supports API version {ApiVersion:l}. Update notices stop until Wishlistarr is upgraded.",
+                    ApiVersion);
+                return null;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning("Update check failed with HTTP status {Status}.", (int)response.StatusCode);

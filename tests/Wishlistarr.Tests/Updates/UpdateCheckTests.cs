@@ -65,7 +65,7 @@ public sealed class UpdateCheckTests(UpdateApiFactory factory) : IClassFixture<U
         string notes = available.GetProperty("releaseNotesUrl").GetString()!;
         Assert.Equal("https://github.com/glensouza/wishlistarr/releases/tag/" + Uri.EscapeDataString(chosen), notes);
         Assert.Equal(
-            "https://github.com/glensouza/wishlistarr/blob/main/docs/upgrading.md",
+            "https://github.com/glensouza/wishlistarr/blob/" + Uri.EscapeDataString(chosen) + "/docs/upgrading.md",
             available.GetProperty("upgradeNotesUrl").GetString());
         string raw = notice.GetRawText();
         Assert.DoesNotContain("evil.example", raw, StringComparison.Ordinal);
@@ -127,28 +127,37 @@ public sealed class UpdateCheckTests(UpdateApiFactory factory) : IClassFixture<U
     }
 
     [Fact]
-    public async Task Redirects_are_not_followed()
+    public async Task A_retired_api_version_logs_a_distinct_warning()
     {
         await factory.ResetAsync();
-        factory.GitHub.Response = () =>
-        {
-            HttpResponseMessage response = new(HttpStatusCode.Found)
-            {
-                Content = new StringContent(StatusSecret, Encoding.UTF8),
-            };
-            response.Headers.Location = new Uri("https://evil.example/follow");
-            return response;
-        };
+        string chosen = Tag(Running(), 1);
+        factory.GitHub.Json("[" + Release(chosen, false, false, "https://evil.example/chosen") + "]");
         await factory.RunAsync();
+        factory.Clock.Advance(TimeSpan.FromDays(1));
+        factory.Logs.Clear();
+        factory.GitHub.Status(HttpStatusCode.Gone, StatusSecret);
         await factory.RunAsync();
 
-        Assert.Single(factory.GitHub.Requests);
-        Assert.Equal(UpdateChecker.ReleasesUrl, factory.GitHub.Requests[0].Uri);
-        Assert.DoesNotContain("evil.example", factory.Logs.Text(), StringComparison.Ordinal);
-        Assert.Contains("Update check failed with HTTP status 302.", factory.Logs.Text(), StringComparison.Ordinal);
-        Assert.Equal(JsonValueKind.Null, (await this.ParentNoticeAsync()).GetProperty("available").ValueKind);
-        HttpResponseMessage health = await factory.CreateClient().GetAsync("/api/health");
-        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+        string logs = factory.Logs.Text();
+        Assert.Contains("no longer supports API version 2022-11-28", logs, StringComparison.Ordinal);
+        Assert.DoesNotContain("Update check failed with HTTP status 410.", logs, StringComparison.Ordinal);
+        Assert.DoesNotContain(StatusSecret, logs, StringComparison.Ordinal);
+        Assert.Equal(chosen[1..], (await this.ParentNoticeAsync()).GetProperty("available").GetProperty("version").GetString());
+    }
+
+    [Fact]
+    public void The_upgrade_notes_follow_a_valid_tag_and_fall_back_to_main()
+    {
+        Assert.Equal(
+            "https://github.com/glensouza/wishlistarr/blob/v1.2.3/docs/upgrading.md",
+            UpdateChecker.UpgradeNotesUrlFor("v1.2.3"));
+        Assert.Equal(
+            "https://github.com/glensouza/wishlistarr/blob/v1.2.3-rc.1/docs/upgrading.md",
+            UpdateChecker.UpgradeNotesUrlFor("v1.2.3-rc.1"));
+        foreach (string? bad in new[] { null, "", "main", "1.2.3", "v1.2/../x", "v1.2.3/../../x" })
+        {
+            Assert.Equal(UpdateChecker.UpgradeNotesUrl, UpdateChecker.UpgradeNotesUrlFor(bad));
+        }
     }
 
     [Fact]
@@ -185,7 +194,6 @@ public sealed class UpdateCheckTests(UpdateApiFactory factory) : IClassFixture<U
         Assert.Equal("2022-11-28", request.Header("X-GitHub-Api-Version"));
         Assert.Null(request.Header("Authorization"));
         Assert.Null(request.Header("Cookie"));
-        Assert.Null(request.Header("traceparent"));
 
         HttpClient client = factory.Services.GetRequiredService<IHttpClientFactory>().CreateClient(UpdateChecker.HttpClientName);
         Assert.Equal(UpdateChecker.Timeout, client.Timeout);
@@ -431,7 +439,7 @@ public sealed class ReleaseClientFactory : ApiFactory
     protected override bool ReplaceGitHubHandler => false;
 }
 
-public sealed class UpdateApiFactory : AuthApiFactory
+public class UpdateApiFactory : AuthApiFactory
 {
     private readonly ResettableTime clock = new(new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero));
     private readonly GitHubCapture gitHub = new();
