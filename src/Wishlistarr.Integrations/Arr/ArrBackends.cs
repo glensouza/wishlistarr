@@ -21,7 +21,7 @@ public abstract class ArrBackend(ArrService service, ArrClient client, ArrConnec
         ArrConnection? connection = await store.GetAsync(service, ct);
         if (connection is null)
         {
-            return new ArrTestResult(false, $"{this.Name} is not configured. Save its address and API key first.");
+            return new ArrTestResult(false, $"{this.Name} is not configured. Save its address and API key first.", Code: ArrTestCode.NotConfigured);
         }
 
         try
@@ -34,7 +34,7 @@ public abstract class ArrBackend(ArrService service, ArrClient client, ArrConnec
             }
 
             string? version = ArrJson.String(status?["version"]);
-            return new ArrTestResult(true, $"{this.Name} answered and accepted the API key.", version);
+            return new ArrTestResult(true, $"{this.Name} answered and accepted the API key.", version, ArrTestCode.Connected);
         }
         catch (ArrException ex)
         {
