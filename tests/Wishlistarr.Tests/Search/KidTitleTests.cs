@@ -456,6 +456,20 @@ public sealed class KidTitleTests
     }
 
     [Fact]
+    public async Task Only_a_parent_can_change_the_trailer_setting()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient anonymous = factory.CreateClient();
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await kid.PutAsJsonAsync(TrailerSetting, new { value = "true", isSecret = false })).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PutAsJsonAsync(TrailerSetting, new { value = "true", isSecret = false })).StatusCode);
+
+        HttpResponseMessage response = await kid.GetAsync(MoviePath);
+        Assert.Equal(JsonValueKind.Null, (await ReadAsync(response)).GetProperty("trailerKey").ValueKind);
+    }
+
+    [Fact]
     public async Task A_bad_kind_does_not_call_tmdb()
     {
         using KidRequestApiFactory factory = CreateFactory();
