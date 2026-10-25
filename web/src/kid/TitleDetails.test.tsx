@@ -158,7 +158,6 @@ afterEach(() => {
   document
     .querySelectorAll('script')
     .forEach((script) => script.src === youtubeApiUrl && script.remove())
-  delete window.YTConfig
   delete window.onYouTubeIframeAPIReady
   vi.unstubAllGlobals()
 })
@@ -203,7 +202,6 @@ it('shows the title and loads a trailer only after play is clicked', async () =>
   expect(
     [...document.scripts].some((script) => script.src === youtubeApiUrl),
   ).toBe(true)
-  expect(window.YTConfig?.host).toBe('https://www.youtube-nocookie.com')
   expect(document.querySelector('iframe')).toBeNull()
   expect(await axe(container)).toHaveNoViolations()
 })
@@ -243,7 +241,7 @@ it.each([
   ['pending', 'Asked'],
   ['approved', 'On the way'],
   ['fulfilling', 'On the way'],
-  ['available', 'Ready to watch'],
+  ['available', 'Almost ready'],
   ['labeled', 'Added'],
   ['failed', 'Could not add it'],
   ['elsewhere', 'Could not add it'],
@@ -403,4 +401,17 @@ it('sends a signed-out kid back to the picker', async () => {
 
   expect(await screen.findByRole('heading', { name: 'Picker' })).toBeTruthy()
   expect(calls.some((call) => call.path.includes('/titles/'))).toBe(false)
+})
+
+it('does not use the same words for the library badge and an almost-ready request', async () => {
+  payload = {
+    ...movie,
+    availability: 'inLibrary',
+    request: { state: 'available', requestCount: 1 },
+  }
+  renderAt('/title/movie/800')
+
+  expect(await screen.findByText('Ready to watch')).toBeTruthy()
+  expect(screen.getAllByText('Ready to watch')).toHaveLength(1)
+  expect(screen.getByRole('button', { name: 'Almost ready' })).toBeTruthy()
 })

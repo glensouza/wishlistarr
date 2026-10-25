@@ -180,6 +180,7 @@ export const en = {
   'details.playTrailer': 'Play trailer',
   'details.closeTrailer': 'Close trailer',
   'details.trailerFailed': 'The trailer could not be played.',
+  'details.trailerFrame': 'Trailer',
   'details.cast': 'Cast',
   'details.seasons': 'Seasons',
   'details.seasonNote': 'Access is for the whole show, not one season.',
@@ -194,7 +195,7 @@ export const en = {
   'details.requested': 'Asked',
   'details.added': 'Added',
   'details.onTheWay': 'On the way',
-  'details.ready': 'Ready to watch',
+  'details.ready': 'Almost ready',
   'details.failedRequest': 'Could not add it',
   'details.notAllowed': 'That one is not available.',
   'details.allowance': 'You have used all your requests for this week.',
@@ -210,6 +211,8 @@ export const en = {
   'parent.trailersHint':
     'When this is off, kids never see a trailer and YouTube is not loaded.',
   'parent.trailersFailed': 'We could not save that. Try again.',
+  'parent.trailersLoadFailed': 'We could not load this setting.',
+  'parent.trailersRetry': 'Try again',
 } as const
 
 export type MessageKey = keyof typeof en
