@@ -2,40 +2,33 @@
 
   <PropertyGroup>
     <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</RepoRoot>
-    <NuGetNoticeIntermediate>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'obj', 'nuget-licenses.raw.json'))</NuGetNoticeIntermediate>
-    <NuGetNoticePublic>$([System.IO.Path]::Combine('$(RepoRoot)', 'web', 'public', 'licenses', 'nuget.json'))</NuGetNoticePublic>
-    <NuGetNoticeWwwroot>$([System.IO.Path]::Combine('$(RepoRoot)', 'src', 'Wishlistarr.Api', 'wwwroot', 'licenses', 'nuget.json'))</NuGetNoticeWwwroot>
+    <NuGetNoticeRaw>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'obj', 'licenses', 'nuget.raw.json'))</NuGetNoticeRaw>
+    <NuGetNotice>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'obj', 'licenses', 'nuget.json'))</NuGetNotice>
+    <NuGetNoticeDev>$([System.IO.Path]::Combine('$(RepoRoot)', 'web', 'public', 'licenses', 'nuget.json'))</NuGetNoticeDev>
   </PropertyGroup>
 
   <Target
     Name="WriteLicenseNotices"
-    BeforeTargets="BeforeBuild"
     Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipLicenseCheck)' != 'true' and '$(LicenseNoticesWritten)' != 'true'">
-    <Delete Files="$(NuGetNoticePublic);$(NuGetNoticeWwwroot);$(NuGetNoticeIntermediate)" />
-    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(NuGetNoticeIntermediate)'))" />
+    <Delete Files="$(NuGetNotice);$(NuGetNoticeRaw)" />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(NuGetNotice)'))" />
     <Exec WorkingDirectory="$(RepoRoot)" EnvironmentVariables="SkipLicenseCheck=true" Command="dotnet tool restore" />
     <Exec
       WorkingDirectory="$(RepoRoot)"
       EnvironmentVariables="SkipLicenseCheck=true"
-      Command="dotnet tool run nuget-license -- -ji build/license-inputs.json -t --exclude-publish-false -a build/allowed-licenses.json -o Json -fo &quot;$(NuGetNoticeIntermediate)&quot;" />
+      Command="dotnet tool run nuget-license -- -ji build/license-inputs.json -t --exclude-publish-false -a build/allowed-licenses.json -o Json -fo &quot;$(NuGetNoticeRaw)&quot;" />
     <Exec
       WorkingDirectory="$(RepoRoot)"
       EnvironmentVariables="SkipLicenseCheck=true"
-      Command="dotnet run --file &quot;$(RepoRoot)/build/WriteNuGetNotices.cs&quot; -- &quot;$(NuGetNoticeIntermediate)&quot; &quot;$(NuGetNoticePublic)&quot;" />
-    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(NuGetNoticeWwwroot)'))" />
-    <Copy SourceFiles="$(NuGetNoticePublic)" DestinationFiles="$(NuGetNoticeWwwroot)" />
+      Command="dotnet run --file &quot;$(RepoRoot)/build/WriteNuGetNotices.cs&quot; -- &quot;$(NuGetNoticeRaw)&quot; &quot;$(NuGetNotice)&quot;" />
+    <Copy SourceFiles="$(NuGetNotice)" DestinationFiles="$(NuGetNoticeDev)" Condition="Exists('$(RepoRoot)/web')" />
     <PropertyGroup>
       <LicenseNoticesWritten>true</LicenseNoticesWritten>
     </PropertyGroup>
   </Target>
 
-  <Target Name="AddLicenseNoticeToPublish" BeforeTargets="ComputeFilesToPublish" DependsOnTargets="WriteLicenseNotices" Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipLicenseCheck)' != 'true'">
-    <ItemGroup>
-      <ResolvedFileToPublish Include="$(NuGetNoticeWwwroot)">
-        <RelativePath>wwwroot/licenses/nuget.json</RelativePath>
-        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      </ResolvedFileToPublish>
-    </ItemGroup>
+  <Target Name="PublishLicenseNotice" AfterTargets="Publish" DependsOnTargets="WriteLicenseNotices" Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipLicenseCheck)' != 'true'">
+    <Copy SourceFiles="$(NuGetNotice)" DestinationFiles="$(PublishDir)wwwroot/licenses/nuget.json" />
   </Target>
 
 </Project>

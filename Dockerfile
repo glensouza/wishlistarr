@@ -3,7 +3,7 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
-COPY site/tmdb.svg /src/site/tmdb.svg
+COPY build/allowed-licenses.json /src/build/allowed-licenses.json
 RUN npm run build
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS api

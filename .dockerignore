@@ -14,8 +14,7 @@ src/Wishlistarr.Api/wwwroot/
 *.db-shm
 *.db-wal
 *.log
-site/*
-!site/tmdb.svg
+site/
 web/public/licenses/
 docs/
 tests/

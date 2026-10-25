@@ -16,7 +16,6 @@ jobs:
     permissions:
       contents: write
       packages: write
-      actions: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -39,11 +38,11 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Generate third-party license notices
         run: |
-          dotnet build src/Wishlistarr.Api/Wishlistarr.Api.csproj -c Release
+          dotnet publish src/Wishlistarr.Api/Wishlistarr.Api.csproj -c Release -o "$RUNNER_TEMP/publish"
           npm ci --prefix web
           npm run build --prefix web
+          cp "$RUNNER_TEMP/publish/wwwroot/licenses/nuget.json" nuget-licenses.json
           cp web/public/licenses/npm.json npm-licenses.json
-          cp web/public/licenses/nuget.json nuget-licenses.json
       - uses: actions/upload-artifact@v7
         with:
           name: third-party-licenses

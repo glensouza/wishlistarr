@@ -5,8 +5,10 @@ namespace Wishlistarr.Tests;
 
 public sealed class LicenseNoticeTests
 {
+    private static readonly Lazy<Task<bool>> ToolRestored = new(RestoreToolAsync);
+
     [Fact]
-    public void Build_writes_nuget_license_notices()
+    public void Notices_are_written_when_publishing_and_not_on_every_build()
     {
         string root = RepoRoot();
         string targets = File.ReadAllText(Path.Combine(root, "build", "LicenseNotices.targets"));
@@ -14,63 +16,52 @@ public sealed class LicenseNoticeTests
         Assert.Contains("--exclude-publish-false", targets, StringComparison.Ordinal);
         Assert.Contains("allowed-licenses.json", targets, StringComparison.Ordinal);
         Assert.Contains("WriteNuGetNotices.cs", targets, StringComparison.Ordinal);
+        Assert.Contains("AfterTargets=\"Publish\"", targets, StringComparison.Ordinal);
+        Assert.DoesNotContain("BeforeBuild", targets, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResolvedFileToPublish", targets, StringComparison.Ordinal);
 
-        string path = Path.Combine(root, "web", "public", "licenses", "nuget.json");
-        string wwwroot = Path.Combine(root, "src", "Wishlistarr.Api", "wwwroot", "licenses", "nuget.json");
-        Assert.True(File.Exists(path), path);
-        Assert.True(File.Exists(wwwroot), wwwroot);
-
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-        JsonElement packages = document.RootElement.GetProperty("packages");
-        Assert.True(packages.GetArrayLength() > 0);
-        bool serilog = false;
-        bool scalar = false;
-        foreach (JsonElement package in packages.EnumerateArray())
-        {
-            string? name = package.GetProperty("name").GetString();
-            string? version = package.GetProperty("version").GetString();
-            string? license = package.GetProperty("license").GetString();
-            Assert.False(string.IsNullOrWhiteSpace(name));
-            Assert.False(string.IsNullOrWhiteSpace(version));
-            Assert.False(string.IsNullOrWhiteSpace(license));
-            Assert.DoesNotContain("PackageId", package.ToString(), StringComparison.Ordinal);
-            if (name == "Serilog")
-            {
-                Assert.Equal("Apache-2.0", license);
-                serilog = true;
-            }
-
-            if (name == "Scalar.AspNetCore")
-            {
-                Assert.Equal("MIT", license);
-                scalar = true;
-            }
-        }
-
-        Assert.True(serilog);
-        Assert.True(scalar);
-        Assert.DoesNotContain("PackageId", File.ReadAllText(path), StringComparison.Ordinal);
+        string project = File.ReadAllText(Path.Combine(root, "src", "Wishlistarr.Api", "Wishlistarr.Api.csproj"));
+        Assert.Contains("LicenseNotices.targets", project, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Nuget_license_rejects_an_incompatible_package()
+    [Theory]
+    [InlineData("GPL-2.0-only", false)]
+    [InlineData("GPL-2.0-only OR MIT", true)]
+    [InlineData("MIT AND Apache-2.0", true)]
+    [InlineData("GPL-2.0-only AND MIT", false)]
+    public async Task Nuget_license_applies_the_allowlist_to_license_expressions(string expression, bool accepted)
     {
-        string root = RepoRoot();
-        string assets = Path.Combine(root, "src", "Wishlistarr.Api", "obj", "project.assets.json");
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(assets));
-        List<OverridePackage> overrides = [];
-        foreach (JsonProperty library in document.RootElement.GetProperty("libraries").EnumerateObject())
+        if (!await ToolRestored.Value)
         {
-            const string prefix = "Serilog/";
-            if (!library.Name.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            overrides.Add(new OverridePackage("Serilog", library.Name[prefix.Length..], "GPL-2.0-only"));
+            // The tool package cannot be restored without a network or a populated NuGet cache.
+            return;
         }
 
-        Assert.NotEmpty(overrides);
+        string root = RepoRoot();
+        List<OverridePackage> overrides = [];
+        foreach (string project in new[] { "Api", "Core", "Data", "Integrations" })
+        {
+            string assets = Path.Combine(root, "src", $"Wishlistarr.{project}", "obj", "project.assets.json");
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(assets));
+            foreach (JsonProperty library in document.RootElement.GetProperty("libraries").EnumerateObject())
+            {
+                if (library.Value.GetProperty("type").GetString() != "package")
+                {
+                    continue;
+                }
+
+                int slash = library.Name.IndexOf('/', StringComparison.Ordinal);
+                string id = library.Name[..slash];
+                string version = library.Name[(slash + 1)..];
+                string license = id == "Serilog" ? expression : "MIT";
+                if (!overrides.Exists(existing => existing.Id == id && existing.Version == version))
+                {
+                    overrides.Add(new OverridePackage(id, version, license));
+                }
+            }
+        }
+
+        Assert.Contains(overrides, package => package.Id == "Serilog");
         string temp = Directory.CreateTempSubdirectory("wishlistarr-license").FullName;
         try
         {
@@ -88,9 +79,15 @@ public sealed class LicenseNoticeTests
             start.ArgumentList.Add("-err");
             (int exitCode, string stdout, string stderr) = await RunAsync(start);
             string output = stdout + stderr;
-            Assert.NotEqual(0, exitCode);
-            Assert.Contains("GPL-2.0-only", output, StringComparison.Ordinal);
-            Assert.Contains("Serilog", output, StringComparison.Ordinal);
+            if (accepted)
+            {
+                Assert.True(exitCode == 0, output);
+            }
+            else
+            {
+                Assert.NotEqual(0, exitCode);
+                Assert.Contains("Serilog", output, StringComparison.Ordinal);
+            }
         }
         finally
         {
@@ -139,6 +136,20 @@ public sealed class LicenseNoticeTests
         }
     }
 
+    private static async Task<bool> RestoreToolAsync()
+    {
+        ProcessStartInfo start = new()
+        {
+            FileName = "dotnet",
+            WorkingDirectory = RepoRoot(),
+        };
+        start.Environment["SkipLicenseCheck"] = "true";
+        start.ArgumentList.Add("tool");
+        start.ArgumentList.Add("restore");
+        (int exitCode, _, _) = await RunAsync(start);
+        return exitCode == 0;
+    }
+
     private static ProcessStartInfo Tool(string root)
     {
         ProcessStartInfo start = new()
@@ -147,6 +158,10 @@ public sealed class LicenseNoticeTests
             WorkingDirectory = root,
         };
         start.Environment["SkipLicenseCheck"] = "true";
+        start.Environment["HTTP_PROXY"] = "http://127.0.0.1:9";
+        start.Environment["HTTPS_PROXY"] = "http://127.0.0.1:9";
+        start.Environment["http_proxy"] = "http://127.0.0.1:9";
+        start.Environment["https_proxy"] = "http://127.0.0.1:9";
         start.ArgumentList.Add("tool");
         start.ArgumentList.Add("run");
         start.ArgumentList.Add("nuget-license");
