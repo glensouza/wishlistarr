@@ -31,20 +31,44 @@ The `database-backup` job takes a backup and then keeps the newest `Backups:Rete
 
 `Retention` is a whole number from 1 to 100. `MaxUploadBytes` caps a restore upload and defaults to 512 MiB. It cannot be raised above that.
 
+Retention orders backups by the time and sequence number in the file name, not by the file's modified time, and the backup that was just written is always kept, even if the clock has gone backwards. Only files whose names match `wishlistarr-<yyyyMMddTHHmmssfffZ>-<6 digits>.zip` are counted or deleted, so other files in the backups folder are left alone. The same rule applies to the backups taken before a migration and before a restore.
+
+A backup is written to a `.partial` file, flushed to disk and read back to check its entries before it is renamed to its final name.
+
 ## Before a migration
 
 On startup, if the database file already exists and a migration is pending, Wishlistarr takes a backup before applying it. The migration does not run when that backup fails, and the process stops so the existing database is left as it was. A new data directory has no database to copy, so the first start migrates without a backup. Details of the migration policy are in [migrations.md](migrations.md).
 
+A backup needs the key ring. If the database exists but the `keys` folder is missing or has no key files, the pre-migration backup fails and startup stops on purpose: without the key ring the saved secrets cannot be decrypted, and migrating would make that harder to undo. To recover, stop the app and do one of these:
+
+- put the `keys` folder back from the same install, or extract `keys/*.xml` from the newest backup zip into `keys` in the data directory, then start again
+- if no copy of the key ring exists, the saved secrets cannot be decrypted by any build. Copy `wishlistarr.db` somewhere safe, then remove it from the data directory and start again. Wishlistarr starts as a new install with a new key ring, and the copied database is kept in case the key ring turns up later
+
 ## Restore
 
-Restore is a parent action and the browser must send the antiforgery token. The Parents page accepts one zip. Before anything in the live data directory is changed, the upload is checked:
+Restore is a parent action and the browser must send the antiforgery token. The Parents page accepts one zip and asks for confirmation, because a restore replaces all current data when the app next starts. Before anything in the live data directory is changed, the upload is checked:
 
 - the file is within the size cap
-- every zip entry is a relative name with no `..`, drive prefix, or backslash
-- the only entries are `wishlistarr.db` and `keys/*.xml` key files
+- the zip has at most 64 entries, and the declared sizes of all entries together are within the size cap
+- every entry decompresses to exactly its declared length and checksum, so a zip that lies about its sizes is refused
+- every zip entry is a relative name with no `..`, drive prefix, backslash or leading `/`, no name appears twice, and no entry is a symlink or other link
+- the only entries are `wishlistarr.db` and `keys/*.xml` key files, and both are present
 - `PRAGMA integrity_check` on the database returns `ok`
 - every migration id in the database is one this build knows. A backup from a newer version is refused
 
-A zip that fails a check is rejected and the current database is not touched. A zip that passes is staged under `restore-pending`. The running process keeps serving the current database. On the next start, before the database is opened, the staged files replace the live database and key ring. The data that was in use is written to a backup zip first, so it can be restored again. Do not copy files over the live database while the app is running.
+The upload is unpacked into a `restore-staging-<id>` folder in the data directory. A zip that fails a check is rejected with a 400 response, the staging folder is deleted, and the current database is not touched. A zip that passes is moved to `restore-pending`. The running process keeps serving the current database. Do not copy files over the live database while the app is running.
 
-If a staged restore fails those checks again at startup, it is not applied and the process stops. Remove `restore-pending` from the data directory to start on the current data.
+ASP.NET Core writes an upload larger than 64 KiB to a temporary file while the request is read and deletes it when the request ends. That file is a full copy of the backup, secrets included. It goes to the folder named by the `ASPNETCORE_TEMP` environment variable, or the system temp folder when that is not set. On a shared machine, set `ASPNETCORE_TEMP` to a folder only the Wishlistarr user can read, for example a `tmp` folder inside the data volume.
+
+### Applying a restore at startup
+
+On the next start, before the database is opened:
+
+1. Any `restore-staging-<id>` folder left by a crash during an upload is deleted. Only folder names that match that exact pattern are removed.
+2. The staged files are checked again. If they fail, the staged restore is deleted, the error is logged and this start stops. The current data is not changed, and the next start runs on it.
+3. The current database and key ring are written to a backup zip, so they can be restored later. If that backup fails, for example because the current key ring is missing (see [Before a migration](#before-a-migration)), the staged restore is deleted, nothing is swapped and this start stops. Upload the zip again after fixing the cause.
+4. The files are swapped. A journal file, `restore-journal.json`, is written first and records that a swap is in progress. The current database (with any `-wal` and `-shm` files) and `keys` folder are moved into `restore-previous`, then the staged database and key ring are moved into place. Once both are in place the journal is marked committed, and only then are `restore-pending` and `restore-previous` deleted and the journal removed.
+
+If any step of the swap fails, the previous database and key ring are moved back together, the staged restore is deleted, and the start stops with an error. The next start runs on the previous data. If the process is killed part way through, the next start reads the journal: an uncommitted swap is rolled back so the previous database and key ring are live again and the restore is then tried again, and a committed swap is finished by deleting the leftovers. Either way the database and key ring always come from the same side, old or new, and running startup again after a recovery changes nothing.
+
+Do not delete `restore-journal.json`, `restore-previous` or `restore-pending` by hand while a journal exists, because together they are what lets the next start put matching files back. If startup reports that the journal cannot be read, stop the app, copy the whole data directory somewhere safe, and then look in `restore-previous` and `restore-pending`: the database and `keys` folder that belong together are either both in `restore-previous` (the old data) or both live in the data directory (the restored data).
