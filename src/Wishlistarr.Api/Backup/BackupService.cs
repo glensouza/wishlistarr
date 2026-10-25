@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Wishlistarr.Core;
@@ -100,7 +99,7 @@ public sealed class BackupService(
             throw new BackupRejectedException(BackupRejection.TooLarge);
         }
 
-        string staging = Path.Combine(directory.Root, "restore-staging-" + Guid.NewGuid().ToString("N"));
+        string staging = Path.Combine(directory.Root, BackupNames.StagingPrefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         try
         {
@@ -117,11 +116,7 @@ public sealed class BackupService(
             await this.gate.WaitAsync(ct);
             try
             {
-                if (Directory.Exists(directory.RestorePendingPath))
-                {
-                    Directory.Delete(directory.RestorePendingPath, true);
-                }
-
+                this.DiscardPendingRestore();
                 Directory.Move(extracted, directory.RestorePendingPath);
             }
             finally
@@ -131,45 +126,61 @@ public sealed class BackupService(
         }
         finally
         {
-            try
-            {
-                if (Directory.Exists(staging))
-                {
-                    Directory.Delete(staging, true);
-                }
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
+            this.TryDeleteDirectory(staging);
         }
     }
 
     public async Task ApplyPendingRestoreAsync(CancellationToken ct = default)
     {
+        this.DeleteOrphanedStaging();
+        RestoreSwap swap = new(directory, logger, this.AfterRestoreStep);
+        swap.Recover();
+        if (swap.InProgress)
+        {
+            return;
+        }
+
         if (!this.RestorePending)
         {
+            DeleteDirectoryIfExists(directory.RestorePendingPath);
             return;
         }
 
         string stagedDatabase = Path.Combine(directory.RestorePendingPath, BackupNames.DatabaseEntryName);
         string stagedKeys = Path.Combine(directory.RestorePendingPath, "keys");
-        if (!await this.StagedIsValidAsync(stagedDatabase, stagedKeys, ct))
+        try
         {
-            logger.LogError("Pending restore failed validation and was not applied.");
-            throw new InvalidOperationException("A pending restore failed validation and was not applied.");
+            if (!await this.StagedIsValidAsync(stagedDatabase, stagedKeys, ct))
+            {
+                throw new InvalidOperationException("The pending restore failed validation.");
+            }
+
+            if (File.Exists(directory.DatabasePath))
+            {
+                await this.CreateBackupAsync(ct);
+            }
+
+            swap.Run();
+        }
+        catch (Exception exception) when (!swap.InProgress)
+        {
+            try
+            {
+                this.DiscardPendingRestore();
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                logger.LogWarning(cleanup, "The pending restore could not be removed.");
+            }
+
+            logger.LogError(exception, "Pending restore was not applied. It was removed and the current data was kept.");
+            throw new InvalidOperationException("A pending restore was not applied. The current data was kept.", exception);
         }
 
-        if (File.Exists(directory.DatabasePath))
-        {
-            await this.CreateBackupAsync(ct);
-        }
-
-        this.SwapIn(stagedDatabase, stagedKeys);
         logger.LogInformation("Pending restore applied.");
     }
+
+    internal Action<RestoreStep>? AfterRestoreStep { get; set; }
 
     private async Task<BackupItem> CreateBackupCoreAsync(CancellationToken ct)
     {
@@ -204,7 +215,7 @@ public sealed class BackupService(
 
         try
         {
-            this.ApplyRetention();
+            this.ApplyRetention(name);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -213,83 +224,6 @@ public sealed class BackupService(
 
         logger.LogInformation("Database backup {BackupName} completed.", name);
         return ToItem(new FileInfo(zipPath)) ?? throw new InvalidOperationException("The backup file could not be read.");
-    }
-
-    private void SwapIn(string stagedDatabase, string stagedKeys)
-    {
-        string previousDatabase = directory.DatabasePath + ".previous";
-        string previousWal = directory.DatabasePath + "-wal.previous";
-        string previousShm = directory.DatabasePath + "-shm.previous";
-        string previousKeys = directory.KeysPath + ".previous";
-        if (File.Exists(directory.DatabasePath))
-        {
-            DeleteIfExists(previousDatabase);
-            DeleteIfExists(previousWal);
-            DeleteIfExists(previousShm);
-        }
-
-        if (Directory.Exists(directory.KeysPath) && Directory.Exists(previousKeys))
-        {
-            Directory.Delete(previousKeys, true);
-        }
-
-        bool retiredDatabase = MoveIfExists(directory.DatabasePath, previousDatabase);
-        bool retiredWal = MoveIfExists(directory.DatabasePath + "-wal", previousWal);
-        bool retiredShm = MoveIfExists(directory.DatabasePath + "-shm", previousShm);
-        bool retiredKeys = false;
-        if (Directory.Exists(directory.KeysPath))
-        {
-            Directory.Move(directory.KeysPath, previousKeys);
-            retiredKeys = true;
-        }
-
-        try
-        {
-            File.Move(stagedDatabase, directory.DatabasePath);
-            Directory.Move(stagedKeys, directory.KeysPath);
-        }
-        catch
-        {
-            if (!File.Exists(directory.DatabasePath) && File.Exists(previousDatabase))
-            {
-                File.Move(previousDatabase, directory.DatabasePath);
-                MoveIfExists(previousWal, directory.DatabasePath + "-wal");
-                MoveIfExists(previousShm, directory.DatabasePath + "-shm");
-            }
-
-            if (!Directory.Exists(directory.KeysPath) && Directory.Exists(previousKeys))
-            {
-                Directory.Move(previousKeys, directory.KeysPath);
-            }
-
-            throw;
-        }
-
-        DeleteIfExists(this.PendingReadyPath);
-        if (retiredDatabase)
-        {
-            DeleteIfExists(previousDatabase);
-        }
-
-        if (retiredWal)
-        {
-            DeleteIfExists(previousWal);
-        }
-
-        if (retiredShm)
-        {
-            DeleteIfExists(previousShm);
-        }
-
-        if (retiredKeys && Directory.Exists(previousKeys))
-        {
-            Directory.Delete(previousKeys, true);
-        }
-
-        if (Directory.Exists(directory.RestorePendingPath))
-        {
-            Directory.Delete(directory.RestorePendingPath, true);
-        }
     }
 
     private async Task<bool> StagedIsValidAsync(string databasePath, string keysPath, CancellationToken ct)
@@ -386,16 +320,48 @@ public sealed class BackupService(
         return files;
     }
 
-    private void ApplyRetention()
+    private void ApplyRetention(string keep)
     {
-        List<FileInfo> files = [.. new DirectoryInfo(directory.BackupsPath)
+        List<FileInfo> older = [.. new DirectoryInfo(directory.BackupsPath)
             .EnumerateFiles()
-            .Where(file => BackupNames.IsBackupFileName(file.Name))
-            .OrderByDescending(file => file.LastWriteTimeUtc)
-            .ThenByDescending(file => file.Name, StringComparer.Ordinal)];
-        foreach (FileInfo extra in files.Skip(options.Value.Retention))
+            .Where(file => BackupNames.IsBackupFileName(file.Name) && file.Name != keep)
+            .OrderByDescending(file => file.Name, StringComparer.Ordinal)];
+        foreach (FileInfo extra in older.Skip(options.Value.Retention - 1))
         {
             extra.Delete();
+        }
+    }
+
+    private void DiscardPendingRestore()
+    {
+        DeleteIfExists(this.PendingReadyPath);
+        DeleteDirectoryIfExists(directory.RestorePendingPath);
+    }
+
+    private void DeleteOrphanedStaging()
+    {
+        foreach (DirectoryInfo orphan in new DirectoryInfo(directory.Root).EnumerateDirectories(BackupNames.StagingPrefix + "*"))
+        {
+            if (BackupNames.IsStagingDirectoryName(orphan.Name))
+            {
+                this.TryDeleteDirectory(orphan.FullName);
+            }
+        }
+    }
+
+    private void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                bool link = new DirectoryInfo(path).Attributes.HasFlag(FileAttributes.ReparsePoint);
+                Directory.Delete(path, recursive: !link);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(exception, "Restore staging folder {StagingPath} could not be deleted.", path);
         }
     }
 
@@ -412,11 +378,11 @@ public sealed class BackupService(
 
     private string NextName()
     {
-        string stamp = time.GetUtcNow().ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
+        DateTimeOffset now = time.GetUtcNow();
         for (int attempt = 0; attempt < 1000; attempt++)
         {
-            this.sequence++;
-            string name = "wishlistarr-" + stamp + "-" + this.sequence.ToString("D6", CultureInfo.InvariantCulture) + ".zip";
+            this.sequence = (this.sequence % 999_999) + 1;
+            string name = BackupNames.NextFileName(now, this.sequence);
             if (!File.Exists(Path.Combine(directory.BackupsPath, name)))
             {
                 return name;
@@ -457,22 +423,19 @@ public sealed class BackupService(
         }
     }
 
-    private static bool MoveIfExists(string source, string destination)
-    {
-        if (!File.Exists(source))
-        {
-            return false;
-        }
-
-        File.Move(source, destination);
-        return true;
-    }
-
     private static void DeleteIfExists(string path)
     {
         if (File.Exists(path))
         {
             File.Delete(path);
+        }
+    }
+
+    private static void DeleteDirectoryIfExists(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
         }
     }
 }

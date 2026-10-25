@@ -11,7 +11,11 @@ public static partial class BackupNames
 
     public const string ReadyFileName = "ready";
 
+    public const string StagingPrefix = "restore-staging-";
+
     public static bool IsBackupFileName(string name) => BackupFile().IsMatch(name);
+
+    public static bool IsStagingDirectoryName(string name) => StagingDirectory().IsMatch(name);
 
     public static bool IsKeyFileName(string name)
     {
@@ -56,6 +60,9 @@ public static partial class BackupNames
         + sequence.ToString("D6", CultureInfo.InvariantCulture)
         + ".zip";
 
-    [GeneratedRegex(@"^wishlistarr-\d{8}T\d{9}Z-\d{6}\.zip$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^wishlistarr-[0-9]{8}T[0-9]{9}Z-[0-9]{6}\.zip$", RegexOptions.CultureInvariant)]
     private static partial Regex BackupFile();
+
+    [GeneratedRegex(@"^restore-staging-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
+    private static partial Regex StagingDirectory();
 }

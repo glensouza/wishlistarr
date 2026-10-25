@@ -22,6 +22,10 @@ public sealed class DataDirectory
 
     public string RestorePendingPath => Path.Combine(this.Root, "restore-pending");
 
+    public string RestorePreviousPath => Path.Combine(this.Root, "restore-previous");
+
+    public string RestoreJournalPath => Path.Combine(this.Root, "restore-journal.json");
+
     public static DataDirectory Resolve(IConfiguration configuration, string contentRoot)
     {
         string? configured = configuration[EnvironmentVariable];
