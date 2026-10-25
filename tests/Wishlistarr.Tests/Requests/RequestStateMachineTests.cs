@@ -53,12 +53,6 @@ public sealed class RequestStateMachineTests
     }
 
     [Theory]
-    [InlineData(RequestState.Denied)]
-    [InlineData(RequestState.Revoked)]
-    public void A_denied_or_revoked_title_can_be_requested_again(RequestState state) =>
-        Assert.True(RequestStateMachine.AllowsAnotherRequest(state));
-
-    [Theory]
     [InlineData(RequestState.Approved, RequestState.Fulfilling)]
     [InlineData(RequestState.Fulfilling, RequestState.Fulfilling)]
     [InlineData(RequestState.Available, RequestState.Available)]

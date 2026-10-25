@@ -46,8 +46,6 @@ public static class RequestStateMachine
 
     public static bool IsTerminal(RequestState state) => Transitions.All(transition => transition.From != state);
 
-    public static bool AllowsAnotherRequest(RequestState state) => state is RequestState.Denied or RequestState.Revoked;
-
     public static RequestState RetryTargetFor(RequestState failedFrom) =>
         failedFrom == RequestState.Available ? RequestState.Available : RequestState.Fulfilling;
 }
