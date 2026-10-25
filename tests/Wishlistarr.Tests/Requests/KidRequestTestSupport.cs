@@ -17,6 +17,22 @@ using Wishlistarr.Tests.Tmdb;
 
 namespace Wishlistarr.Tests.Requests;
 
+public sealed class Rendezvous(int parties)
+{
+    private readonly TaskCompletionSource all = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int arrived;
+
+    public async Task ArriveAsync()
+    {
+        if (Interlocked.Increment(ref this.arrived) == parties)
+        {
+            this.all.TrySetResult();
+        }
+
+        await this.all.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+}
+
 public sealed class FakeLibraryIndex : ILibraryIndex
 {
     private readonly Dictionary<(MediaKind, ExternalId), List<MediaItem>> items = [];
@@ -24,6 +40,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
     public bool Ready { get; set; } = true;
 
     public int Calls { get; private set; }
+
+    public Func<Task>? Gate { get; set; }
 
     public void Add(MediaKind kind, int tmdbId, MediaItem item)
     {
@@ -36,19 +54,24 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         list.Add(item);
     }
 
-    public Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
     {
         this.Calls++;
-        if (!this.Ready)
+        if (this.Gate is not null)
         {
-            return Task.FromResult<IReadOnlyList<MediaItem>?>(null);
+            await this.Gate();
         }
 
-        return Task.FromResult<IReadOnlyList<MediaItem>?>(this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : []);
+        if (!this.Ready)
+        {
+            return null;
+        }
+
+        return this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : [];
     }
 }
 
-public sealed class KidRequestApiFactory : AuthApiFactory
+public class KidRequestApiFactory : AuthApiFactory
 {
     public const string RequestsPath = "/api/v1/kid/requests";
 
