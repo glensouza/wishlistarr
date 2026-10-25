@@ -100,7 +100,6 @@ public static class BackupEndpoints
 
                 return next(context);
             })
-            .DisableAntiforgery()
             .WithName("RestoreBackup")
             .WithSummary("Checks a backup zip and stages it. The files are swapped in on the next start, and the current data is kept as a backup.")
             .Produces<RestoreAccepted>(StatusCodes.Status202Accepted)

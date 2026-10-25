@@ -14,6 +14,7 @@ using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Data;
+using static Wishlistarr.Tests.Backup.BackupTestSupport;
 
 namespace Wishlistarr.Tests.Backup;
 
@@ -288,15 +289,21 @@ public sealed class BackupTests
 
             await AuthApiFactory.AddAntiforgeryTokenAsync(browser);
             string marker = "wishlistarr-slip-marker.txt";
-            await AssertRejectedAsync(browser, Zip(("../" + marker, "nope"u8.ToArray()), ("keys/../../" + marker, "nope"u8.ToArray()), ("keys\\..\\" + marker, "nope"u8.ToArray())), "unsafe path");
+            await AssertRejectedAsync(browser, Zip(("../" + marker, "nope"u8.ToArray())), "unsafe path");
             Assert.False(File.Exists(Path.Combine(path, marker)));
             Assert.False(File.Exists(Path.Combine(Directory.GetParent(path)!.FullName, marker)));
 
             await AssertRejectedAsync(browser, Encoding.UTF8.GetBytes("this is not a zip"), "not a valid backup zip");
+            byte[] truncated = Zip((BackupNames.DatabaseEntryName, await EmptyDatabaseAsync()), ("keys/key.xml", KeyXml()));
+            await AssertRejectedAsync(browser, truncated[..(truncated.Length / 2)], "not a valid backup zip");
+            await AssertRejectedAsync(browser, Zip(("keys/key.xml", KeyXml())), "does not contain the database");
+            await AssertRejectedAsync(browser, Zip((BackupNames.DatabaseEntryName, await EmptyDatabaseAsync())), "does not contain the data protection key ring");
+            await AssertRejectedAsync(browser, Zip((BackupNames.DatabaseEntryName, await EmptyDatabaseAsync()), ("keys/key.xml", KeyXml()), ("keys/key.xml", KeyXml())), "same file more than once");
             await AssertRejectedAsync(browser, Zip((BackupNames.DatabaseEntryName, "not a database"u8.ToArray()), ("keys/key.xml", KeyXml())), "integrity check");
             await AssertRejectedAsync(browser, await FutureSchemaZipAsync(), "newer version");
             await AssertRejectedAsync(browser, Zip((BackupNames.DatabaseEntryName, await EmptyDatabaseAsync()), ("keys/key.xml", KeyXml()), ("readme.txt", "notes"u8.ToArray())), "not part of a Wishlistarr backup");
             Assert.False(Directory.Exists(Path.Combine(path, "restore-pending")));
+            Assert.Empty(Directory.GetDirectories(path, "restore-staging-*"));
 
             await using OwnedDataApiFactory tiny = new(TempChild(path, "tiny"), maxUploadBytes: 32);
             HttpClient limited = await tiny.CreateAuthorizedClientAsync();
@@ -342,22 +349,6 @@ public sealed class BackupTests
         ByteArrayContent file = new(body);
         file.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
         return new MultipartFormDataContent { { file, "file", "backup.zip" } };
-    }
-
-    private static byte[] Zip(params (string Name, byte[] Content)[] entries)
-    {
-        using MemoryStream stream = new();
-        using (ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            foreach ((string name, byte[] content) in entries)
-            {
-                ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.NoCompression);
-                using Stream output = entry.Open();
-                output.Write(content);
-            }
-        }
-
-        return stream.ToArray();
     }
 
     private static async Task<byte[]> FutureSchemaZipAsync()
@@ -411,12 +402,6 @@ public sealed class BackupTests
             DeleteDirectory(directory);
         }
     }
-
-    private static byte[] KeyXml() =>
-        """
-        <?xml version="1.0" encoding="utf-8"?>
-        <key id="11111111-1111-1111-1111-111111111111" version="1" />
-        """u8.ToArray();
 
     private static async Task<string> CreateDowngradedDatabaseAsync(string path)
     {
@@ -645,29 +630,10 @@ public sealed class BackupTests
 
     private static string DatabasePath(string path) => Path.Combine(path, "wishlistarr.db");
 
-    private static string TempDirectory() => Directory.CreateTempSubdirectory("wishlistarr-backup").FullName;
-
     private static string TempChild(string path, string name)
     {
         string child = Path.Combine(path, name);
         Directory.CreateDirectory(child);
         return child;
-    }
-
-    private static void DeleteDirectory(string path)
-    {
-        SqliteConnection.ClearAllPools();
-        for (int attempt = 0; attempt < 5 && Directory.Exists(path); attempt++)
-        {
-            try
-            {
-                Directory.Delete(path, true);
-                return;
-            }
-            catch (IOException)
-            {
-                Thread.Sleep(100);
-            }
-        }
     }
 }

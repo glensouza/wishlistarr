@@ -4,17 +4,34 @@ namespace Wishlistarr.Api.Backup;
 
 public static class BackupArchive
 {
+    public const int MaxEntries = 64;
+
+    private const int UnixFileTypeMask = 0xF000;
+
+    private const int UnixRegularFile = 0x8000;
+
+    private const int UnixDirectory = 0x4000;
+
     public static void Write(string zipPath, string databasePath, IReadOnlyList<string> keyFiles)
     {
-        using ZipArchive archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
-        archive.CreateEntryFromFile(databasePath, BackupNames.DatabaseEntryName, CompressionLevel.Optimal);
-        foreach (string keyFile in keyFiles)
+        using (FileStream stream = new(zipPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
         {
-            archive.CreateEntryFromFile(
-                keyFile,
-                BackupNames.KeysEntryPrefix + Path.GetFileName(keyFile),
-                CompressionLevel.Optimal);
+            using (ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                archive.CreateEntryFromFile(databasePath, BackupNames.DatabaseEntryName, CompressionLevel.Optimal);
+                foreach (string keyFile in keyFiles)
+                {
+                    archive.CreateEntryFromFile(
+                        keyFile,
+                        BackupNames.KeysEntryPrefix + Path.GetFileName(keyFile),
+                        CompressionLevel.Optimal);
+                }
+            }
+
+            stream.Flush(flushToDisk: true);
         }
+
+        Verify(zipPath, databasePath, keyFiles);
     }
 
     public static async Task ExtractAsync(string zipPath, string destination, long maxBytes, CancellationToken ct)
@@ -36,6 +53,7 @@ public static class BackupArchive
         using (archive)
         {
             RejectEntries(archive, maxBytes);
+            long total = 0;
             foreach (ZipArchiveEntry entry in archive.Entries)
             {
                 if (entry.FullName is "keys" or "keys/")
@@ -54,28 +72,68 @@ public static class BackupArchive
                 }
 
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                await CopyEntryAsync(entry, target, maxBytes, ct);
+                try
+                {
+                    total += await CopyEntryAsync(entry, target, maxBytes - total, ct);
+                }
+                catch (InvalidDataException)
+                {
+                    throw new BackupRejectedException(BackupRejection.NotAZip);
+                }
             }
+        }
+    }
+
+    private static void Verify(string zipPath, string databasePath, IReadOnlyList<string> keyFiles)
+    {
+        Dictionary<string, long> expected = new(StringComparer.Ordinal)
+        {
+            [BackupNames.DatabaseEntryName] = new FileInfo(databasePath).Length,
+        };
+        foreach (string keyFile in keyFiles)
+        {
+            expected[BackupNames.KeysEntryPrefix + Path.GetFileName(keyFile)] = new FileInfo(keyFile).Length;
+        }
+
+        using ZipArchive archive = ZipFile.OpenRead(zipPath);
+        if (archive.Entries.Count != expected.Count
+            || archive.Entries.Any(entry => !expected.TryGetValue(entry.FullName, out long length) || entry.Length != length))
+        {
+            throw new InvalidDataException("The backup zip did not read back as written.");
         }
     }
 
     private static void RejectEntries(ZipArchive archive, long maxBytes)
     {
-        if (archive.Entries.Count is 0 or > 64)
+        if (archive.Entries.Count == 0)
         {
-            throw new BackupRejectedException(archive.Entries.Count == 0
-                ? BackupRejection.NotAZip
-                : BackupRejection.UnexpectedEntry);
+            throw new BackupRejectedException(BackupRejection.NotAZip);
+        }
+
+        if (archive.Entries.Count > MaxEntries)
+        {
+            throw new BackupRejectedException(BackupRejection.TooManyEntries);
         }
 
         bool database = false;
         int keys = 0;
         long uncompressed = 0;
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             if (!IsSafeEntry(entry.FullName) || entry.Length < 0)
             {
                 throw new BackupRejectedException(BackupRejection.UnsafePath);
+            }
+
+            if (IsLinkOrSpecial(entry))
+            {
+                throw new BackupRejectedException(BackupRejection.LinkEntry);
+            }
+
+            if (!names.Add(entry.FullName.TrimEnd('/')))
+            {
+                throw new BackupRejectedException(BackupRejection.DuplicateEntry);
             }
 
             uncompressed += entry.Length;
@@ -113,6 +171,20 @@ public static class BackupArchive
         }
     }
 
+    // Zip tools record a Unix file mode in the high half of the external attributes and Windows
+    // attributes in the low half. Only plain files and directories are accepted, so a symlink or
+    // reparse point cannot make the restore read or write outside the backup.
+    private static bool IsLinkOrSpecial(ZipArchiveEntry entry)
+    {
+        int unixType = (entry.ExternalAttributes >> 16) & UnixFileTypeMask;
+        if (unixType is not (0 or UnixRegularFile or UnixDirectory))
+        {
+            return true;
+        }
+
+        return ((FileAttributes)(entry.ExternalAttributes & 0xFFFF)).HasFlag(FileAttributes.ReparsePoint);
+    }
+
     private static bool IsKeyEntry(string name)
     {
         if (!name.StartsWith(BackupNames.KeysEntryPrefix, StringComparison.Ordinal))
@@ -142,27 +214,43 @@ public static class BackupArchive
         return true;
     }
 
-    private static async Task CopyEntryAsync(ZipArchiveEntry entry, string target, long maxBytes, CancellationToken ct)
+    // The sizes in a zip header are whatever the file's author wrote. The reader stops at the
+    // declared length, so the length and checksum are both checked to catch an entry that was cut short.
+    private static async Task<long> CopyEntryAsync(ZipArchiveEntry entry, string target, long remaining, CancellationToken ct)
     {
         await using Stream input = entry.Open();
         await using FileStream output = new(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         byte[] buffer = new byte[81920];
         long written = 0;
+        uint crc = 0;
         while (true)
         {
             int read = await input.ReadAsync(buffer, ct);
             if (read == 0)
             {
-                return;
+                break;
             }
 
             written += read;
-            if (written > maxBytes)
+            if (written > entry.Length)
+            {
+                throw new BackupRejectedException(BackupRejection.NotAZip);
+            }
+
+            if (written > remaining)
             {
                 throw new BackupRejectedException(BackupRejection.TooLarge);
             }
 
+            crc = ZipCrc32.Append(crc, buffer.AsSpan(0, read));
             await output.WriteAsync(buffer.AsMemory(0, read), ct);
         }
+
+        if (written != entry.Length || crc != entry.Crc32)
+        {
+            throw new BackupRejectedException(BackupRejection.NotAZip);
+        }
+
+        return written;
     }
 }
