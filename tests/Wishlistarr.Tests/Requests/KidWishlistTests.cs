@@ -15,7 +15,7 @@ public sealed class KidWishlistTests
 {
     private static readonly string[] ResponseFields = ["remaining", "resetsAt", "items"];
     private static readonly string[] ItemFields = ["id", "kind", "tmdbId", "title", "state", "note", "plex"];
-    private static readonly string[] PlexFields = ["webUrl", "appUrl"];
+    private static readonly string[] PlexFields = ["webUrl"];
 
     [Fact]
     public async Task A_kid_sees_only_their_own_requests_and_no_parent_fields()
@@ -125,13 +125,12 @@ public sealed class KidWishlistTests
         Assert.Equal(
             $"https://app.plex.tv/desktop/#!/server/{machine}/details?key=%2Flibrary%2Fmetadata%2F102",
             film.GetProperty("webUrl").GetString());
-        Assert.Equal(
-            $"plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F102&metadataType=1&server={machine}",
-            film.GetProperty("appUrl").GetString());
         JsonElement show = Item(body, "Ready Show").GetProperty("plex");
         Assert.Equal(
-            $"plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F201&metadataType=2&server={machine}",
-            show.GetProperty("appUrl").GetString());
+            $"https://app.plex.tv/desktop/#!/server/{machine}/details?key=%2Flibrary%2Fmetadata%2F201",
+            show.GetProperty("webUrl").GetString());
+        Assert.DoesNotContain("plex://", text, StringComparison.Ordinal);
+        Assert.Equal(1, index.ManyCalls);
         Assert.Equal(JsonValueKind.Null, Item(body, "Bad Key").GetProperty("plex").ValueKind);
         Assert.Equal(JsonValueKind.Null, Item(body, "Not Ready").GetProperty("plex").ValueKind);
         Assert.DoesNotContain(token, text, StringComparison.Ordinal);
@@ -139,6 +138,10 @@ public sealed class KidWishlistTests
         Assert.DoesNotContain("X-Plex-Token", text, StringComparison.Ordinal);
         Assert.DoesNotContain("10/2", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void An_unknown_future_state_is_shown_as_waiting() =>
+        Assert.Equal(KidWishState.Waiting, KidWishlist.ToWishState((RequestState)999));
 
     [Fact]
     public async Task A_ready_item_has_no_link_when_the_library_cannot_answer()

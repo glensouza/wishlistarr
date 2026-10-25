@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
@@ -24,6 +25,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
     public bool Ready { get; set; } = true;
 
     public int Calls { get; private set; }
+
+    public int ManyCalls { get; private set; }
 
     public void Add(MediaKind kind, int tmdbId, MediaItem item)
     {
@@ -45,6 +48,27 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         }
 
         return Task.FromResult<IReadOnlyList<MediaItem>?>(this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : []);
+    }
+
+    public Task<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?> FindManyByTmdbAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        this.ManyCalls++;
+        if (!this.Ready)
+        {
+            return Task.FromResult<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?>(null);
+        }
+
+        Dictionary<TitleKey, IReadOnlyList<MediaItem>> found = [];
+        foreach (TitleKey title in titles)
+        {
+            ExternalId id = new(ExternalIdSource.Tmdb, title.TmdbId.ToString(CultureInfo.InvariantCulture));
+            if (this.items.TryGetValue((title.Kind, id), out List<MediaItem>? list))
+            {
+                found[title] = list;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?>(found);
     }
 }
 

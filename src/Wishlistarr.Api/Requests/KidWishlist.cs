@@ -1,5 +1,5 @@
-using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -19,7 +19,7 @@ public sealed record KidWishlistResponse(int? Remaining, DateTimeOffset? ResetsA
 
 public sealed record KidWishItem(int Id, MediaKind Kind, int TmdbId, string? Title, KidWishState State, string? Note, KidPlexLinks? Plex);
 
-public sealed record KidPlexLinks(string WebUrl, string AppUrl);
+public sealed record KidPlexLinks(string WebUrl);
 
 public sealed partial class KidWishlist(
     WishlistarrDbContext db,
@@ -48,20 +48,14 @@ public sealed partial class KidWishlist(
         });
 
         Dictionary<int, string> notes = await this.ParentNotesAsync(requests, ct);
-        string? serverId = requests.Any(request => ToWishState(request.State) == KidWishState.Ready)
-            ? await this.TryServerIdAsync(ct)
-            : null;
+        Dictionary<TitleKey, KidPlexLinks> links = await this.LinksForAsync(requests, ct);
 
         List<KidWishItem> items = [];
         foreach (MediaRequest request in requests)
         {
-            if (ToWishState(request.State) is not KidWishState state)
-            {
-                continue;
-            }
-
-            KidPlexLinks? plex = state == KidWishState.Ready
-                ? await this.LinksForAsync(request, serverId, ct)
+            KidWishState state = ToWishState(request.State);
+            KidPlexLinks? plex = state == KidWishState.Ready && links.TryGetValue(new TitleKey(request.Kind, request.TmdbId), out KidPlexLinks? found)
+                ? found
                 : null;
             items.Add(new KidWishItem(
                 request.Id,
@@ -77,13 +71,12 @@ public sealed partial class KidWishlist(
         return new KidWishlistResponse(allowance.Remaining, allowance.ResetsAt, items);
     }
 
-    internal static KidWishState? ToWishState(RequestState state) => state switch
+    public static KidWishState ToWishState(RequestState state) => state switch
     {
-        RequestState.Pending or RequestState.Failed => KidWishState.Waiting,
         RequestState.Approved or RequestState.Fulfilling => KidWishState.OnTheWay,
         RequestState.Available or RequestState.Labeled => KidWishState.Ready,
         RequestState.Denied => KidWishState.Denied,
-        _ => null,
+        _ => KidWishState.Waiting,
     };
 
     private async Task<Dictionary<int, string>> ParentNotesAsync(List<MediaRequest> requests, CancellationToken ct)
@@ -127,25 +120,29 @@ public sealed partial class KidWishlist(
         }
     }
 
-    private async Task<KidPlexLinks?> LinksForAsync(MediaRequest request, string? serverId, CancellationToken ct)
+    private async Task<Dictionary<TitleKey, KidPlexLinks>> LinksForAsync(List<MediaRequest> requests, CancellationToken ct)
     {
-        if (!PlexWatchLink.IsMachineId(serverId))
+        Dictionary<TitleKey, KidPlexLinks> links = [];
+        List<TitleKey> ready = [.. requests
+            .Where(request => ToWishState(request.State) == KidWishState.Ready)
+            .Select(request => new TitleKey(request.Kind, request.TmdbId))
+            .Distinct()];
+        if (ready.Count == 0 || await this.TryServerIdAsync(ct) is not string serverId || !PlexWatchLink.IsMachineId(serverId))
         {
-            return null;
+            return links;
         }
 
-        ExternalId id = new(ExternalIdSource.Tmdb, request.TmdbId.ToString(CultureInfo.InvariantCulture));
         foreach (ILibraryIndex index in indexes)
         {
-            IReadOnlyList<MediaItem>? found;
+            IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>? found;
             try
             {
-                found = await index.FindAsync(request.Kind, id, ct);
+                found = await index.FindManyByTmdbAsync(ready, ct);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                this.LogLookupFailed(ex, request.Kind, request.TmdbId);
-                return null;
+                this.LogLookupFailed(ex, ready.Count);
+                return links;
             }
 
             if (found is null)
@@ -153,20 +150,24 @@ public sealed partial class KidWishlist(
                 continue;
             }
 
-            foreach (MediaItem item in found)
+            foreach ((TitleKey title, IReadOnlyList<MediaItem> items) in found)
             {
-                if (item.Kind == request.Kind && PlexWatchLink.TryCreate(serverId, item.Id, request.Kind) is KidPlexLinks links)
+                foreach (MediaItem item in items)
                 {
-                    return links;
+                    if (item.Kind == title.Kind && PlexWatchLink.TryCreate(serverId, item.Id) is KidPlexLinks link)
+                    {
+                        links[title] = link;
+                        break;
+                    }
                 }
             }
 
-            return null;
+            return links;
         }
 
-        return null;
+        return links;
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Wishlist could not look up {Kind} {TmdbId}; no Plex link was added")]
-    private partial void LogLookupFailed(Exception ex, MediaKind kind, int tmdbId);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Wishlist could not look up {Count} ready titles; no Plex links were added")]
+    private partial void LogLookupFailed(Exception ex, int count);
 }
