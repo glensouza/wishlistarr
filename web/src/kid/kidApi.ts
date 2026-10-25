@@ -83,6 +83,7 @@ export type KidHistoryAction =
   | 'granted'
   | 'asked'
   | 'approved'
+  | 'autoApproved'
   | 'denied'
   | 'ready'
   | 'revoked'
@@ -99,7 +100,12 @@ export type KidHistoryEntry = {
   note: string | null
 }
 
-export const listKidHistory = () =>
-  request<KidHistoryEntry[]>('GET', '/api/v1/kid/requests/history')
+export const historyPageSize = 50
+
+export const listKidHistory = (limit = historyPageSize) =>
+  request<KidHistoryEntry[]>(
+    'GET',
+    `/api/v1/kid/requests/history?limit=${limit}`,
+  )
 
 export const pinLength = { min: 4, max: 8 }

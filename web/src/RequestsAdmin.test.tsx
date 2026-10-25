@@ -57,6 +57,8 @@ let labeled: ParentRequest[]
 let profiles: KidProfile[]
 let total: number | undefined
 let failing: number[]
+let notOwned: boolean
+let brokenProfiles: boolean
 
 beforeEach(() => {
   calls = []
@@ -65,6 +67,8 @@ beforeEach(() => {
   profiles = []
   total = undefined
   failing = []
+  notOwned = false
+  brokenProfiles = false
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
@@ -78,7 +82,25 @@ beforeEach(() => {
         body: init?.body ? JSON.parse(init.body as string) : undefined,
       })
       if (method === 'GET' && path.includes('/kid-profiles')) {
+        if (brokenProfiles) {
+          return Response.json({ title: 'Down' }, { status: 500 })
+        }
         return Response.json(profiles)
+      }
+      if (method === 'GET' && path.includes('/grant/preview')) {
+        return path.includes('tmdbId=603')
+          ? Response.json({
+              kind: 'movie',
+              tmdbId: 603,
+              title: 'The Matrix',
+              inLibrary: true,
+            })
+          : Response.json({
+              kind: 'movie',
+              tmdbId: 700,
+              title: 'Movie 700',
+              inLibrary: false,
+            })
       }
       if (method === 'GET') {
         const items = path.includes('state=labeled') ? labeled : rows
@@ -92,7 +114,15 @@ beforeEach(() => {
         })
       }
       if (path.endsWith('/grant')) {
-        return Response.json({ id: 9, state: 'labeled' })
+        return Response.json({
+          id: 9,
+          kidProfileId: 1,
+          kind: 'movie',
+          tmdbId: 603,
+          title: 'The Matrix',
+          state: 'labeled',
+          labelNotOwned: notOwned,
+        })
       }
       const ids = (JSON.parse(init?.body as string) as { ids: number[] }).ids
       return Response.json({
@@ -100,6 +130,7 @@ beforeEach(() => {
           id,
           status: failing.includes(id) ? 'failed' : 'succeeded',
           state: failing.includes(id) ? null : 'approved',
+          labelNotOwned: notOwned,
         })),
       })
     }),
@@ -168,21 +199,108 @@ it('denies the selected requests together', async () => {
 it('removes a labeled title', async () => {
   labeled = [{ ...waiting, id: 8, state: 'labeled', title: 'Spirited Away' }]
   render(<RequestsAdmin />)
-  fireEvent.click(await screen.findByRole('button', { name: 'Remove Spirited Away' }))
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Remove Spirited Away' }),
+  )
   await waitFor(() => expect(writes()).toHaveLength(1))
   expect(writes()[0].path).toBe('/api/v1/requests/revoke')
   expect(writes()[0].body).toEqual({ ids: [8], reason: null })
 })
 
-it('gives an in-library title to a profile', async () => {
+it('shows a notice when a revoked label was not added by the app', async () => {
+  labeled = [{ ...waiting, id: 8, state: 'labeled', title: 'Spirited Away' }]
+  notOwned = true
+  render(<RequestsAdmin />)
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Remove Spirited Away' }),
+  )
+  expect(
+    await screen.findByText(/its Plex label was not added by Wishlistarr/),
+  ).toBeTruthy()
+  expect(
+    screen.queryByText('Spirited Away was removed from their list.'),
+  ).toBeNull()
+})
+
+it('looks a title up and gives it after the parent sees its name', async () => {
   profiles = [ada]
   render(<RequestsAdmin />)
-  fireEvent.change(await screen.findByLabelText('Profile'), { target: { value: '1' } })
-  fireEvent.change(screen.getByLabelText('TMDB id'), { target: { value: '603' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Give this title' }))
+  fireEvent.change(await screen.findByLabelText('Profile'), {
+    target: { value: '1' },
+  })
+  fireEvent.change(screen.getByLabelText('TMDB id'), {
+    target: { value: '603' },
+  })
+  expect(screen.queryByRole('button', { name: /^Give / })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Look up title' }))
+  expect(await screen.findByText('The Matrix (Movie)')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Give The Matrix' }))
+
   await waitFor(() => expect(writes()).toHaveLength(1))
   expect(writes()[0].path).toBe('/api/v1/requests/grant')
-  expect(writes()[0].body).toEqual({ kidProfileId: 1, kind: 'movie', tmdbId: 603 })
+  expect(writes()[0].body).toEqual({
+    kidProfileId: 1,
+    kind: 'movie',
+    tmdbId: 603,
+  })
+  expect(await screen.findByText('The Matrix was given to Ada.')).toBeTruthy()
+})
+
+it('says when a granted label was already there', async () => {
+  profiles = [ada]
+  notOwned = true
+  render(<RequestsAdmin />)
+  fireEvent.change(await screen.findByLabelText('Profile'), {
+    target: { value: '1' },
+  })
+  fireEvent.change(screen.getByLabelText('TMDB id'), {
+    target: { value: '603' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Look up title' }))
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Give The Matrix' }),
+  )
+  expect(
+    await screen.findByText(/was not added by Wishlistarr, so removing it/),
+  ).toBeTruthy()
+})
+
+it('rejects an invalid TMDB id and a title that is not in the library', async () => {
+  profiles = [ada]
+  render(<RequestsAdmin />)
+  fireEvent.change(await screen.findByLabelText('TMDB id'), {
+    target: { value: '6.5' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Look up title' }))
+  expect(await screen.findByText(/Enter a TMDB id/)).toBeTruthy()
+  expect(calls.some((call) => call.path.includes('/grant/preview'))).toBe(false)
+
+  fireEvent.change(screen.getByLabelText('Profile'), {
+    target: { value: '1' },
+  })
+  fireEvent.change(screen.getByLabelText('TMDB id'), {
+    target: { value: '700' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Look up title' }))
+  expect(await screen.findByText(/Not in the library/)).toBeTruthy()
+  const give = screen.getByRole('button', { name: 'Give Movie 700' })
+  expect((give as HTMLButtonElement).disabled).toBe(true)
+  expect(writes()).toHaveLength(0)
+})
+
+it('still lists waiting requests when profiles fail to load, and retries', async () => {
+  brokenProfiles = true
+  render(<RequestsAdmin />)
+  expect(await screen.findByText('Movie 700')).toBeTruthy()
+  expect(
+    screen.getByText('Some of this page could not be loaded: profiles.'),
+  ).toBeTruthy()
+
+  brokenProfiles = false
+  profiles = [ada]
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByLabelText('Profile')).toBeTruthy()
+  expect(screen.queryByText(/could not be loaded/)).toBeNull()
 })
 
 it('splits a large selection into batches and lists what failed', async () => {

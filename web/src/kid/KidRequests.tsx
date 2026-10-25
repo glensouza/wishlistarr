@@ -39,6 +39,8 @@ const historyKey = (action: KidHistoryAction): MessageKey => {
       return 'kidRequests.asked'
     case 'approved':
       return 'kidRequests.historyApproved'
+    case 'autoApproved':
+      return 'kidRequests.historyAutoApproved'
     case 'denied':
       return 'kidRequests.historyDenied'
     case 'ready':
@@ -54,28 +56,42 @@ export default function KidRequests() {
   const t = useT()
   const [rows, setRows] = useState<KidRequest[] | null>(null)
   const [history, setHistory] = useState<KidHistoryEntry[] | null>(null)
-  const [error, setError] = useState(false)
+  const [rowsFailed, setRowsFailed] = useState(false)
+  const [historyFailed, setHistoryFailed] = useState(false)
+  const [version, setVersion] = useState(0)
 
   useEffect(() => {
     let current = true
-    Promise.all([listKidRequests(), listKidHistory()]).then(
+    void Promise.allSettled([listKidRequests(), listKidHistory()]).then(
       ([loaded, events]) => {
         if (!current) return
-        setRows(loaded)
-        setHistory(events)
+        if (loaded.status === 'fulfilled') setRows(loaded.value)
+        setRowsFailed(loaded.status === 'rejected')
+        if (events.status === 'fulfilled') setHistory(events.value)
+        setHistoryFailed(events.status === 'rejected')
       },
-      () => current && setError(true),
     )
     return () => {
       current = false
     }
-  }, [])
+  }, [version])
+
+  const retry = (
+    <button type="button" onClick={() => setVersion((value) => value + 1)}>
+      {t('kidRequests.retry')}
+    </button>
+  )
 
   return (
     <section aria-labelledby="kid-requests-heading">
       <h2 id="kid-requests-heading">{t('kidRequests.title')}</h2>
-      {error && <p role="alert">{t('app.somethingWrong')}</p>}
-      {rows === null && !error && <p role="status">{t('app.loading')}</p>}
+      {rowsFailed && (
+        <div role="alert">
+          <p>{t('kidRequests.listFailedToLoad')}</p>
+          {retry}
+        </div>
+      )}
+      {rows === null && !rowsFailed && <p role="status">{t('app.loading')}</p>}
       {rows !== null && rows.length === 0 && <p>{t('kidRequests.none')}</p>}
       {rows !== null && rows.length > 0 && (
         <ul>
@@ -91,6 +107,12 @@ export default function KidRequests() {
         </ul>
       )}
       <h3>{t('kidRequests.history')}</h3>
+      {historyFailed && (
+        <div role="alert">
+          <p>{t('kidRequests.historyFailedToLoad')}</p>
+          {retry}
+        </div>
+      )}
       {history !== null && history.length === 0 && (
         <p>{t('kidRequests.historyEmpty')}</p>
       )}

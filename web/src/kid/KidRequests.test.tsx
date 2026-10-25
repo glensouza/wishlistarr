@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import KidRequests from './KidRequests'
 import type { KidHistoryEntry, KidRequest } from './kidApi'
@@ -17,17 +17,23 @@ const denied: KidRequest = {
 
 let rows: KidRequest[]
 let history: KidHistoryEntry[]
+let historyDown: boolean
 
 beforeEach(() => {
   rows = [denied]
   history = []
+  historyDown = false
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string) => {
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
-      if (path === '/api/v1/kid/requests/history') return Response.json(history)
+      if (path.startsWith('/api/v1/kid/requests/history')) {
+        return historyDown
+          ? Response.json({ title: 'Down' }, { status: 500 })
+          : Response.json(history)
+      }
       return Response.json(rows)
     }),
   )
@@ -98,4 +104,50 @@ it('shows a grant and a revocation without a parent account', async () => {
   expect(screen.getAllByText('A parent removed this').length).toBeGreaterThan(0)
   expect(screen.queryByText('parent')).toBeNull()
   expect(container.innerHTML).not.toContain('actor')
+})
+
+it('words a system approval without mentioning a parent', async () => {
+  history = [
+    {
+      id: 2,
+      requestId: 8,
+      kind: 'movie',
+      tmdbId: 129,
+      title: 'Spirited Away',
+      action: 'autoApproved',
+      at: '2026-10-22T00:00:00Z',
+      note: null,
+    },
+  ]
+  render(<KidRequests />)
+
+  expect(await screen.findByText('Approved')).toBeTruthy()
+  expect(screen.queryByText('A parent said yes')).toBeNull()
+})
+
+it('shows the requests when the history fails and retries it', async () => {
+  historyDown = true
+  render(<KidRequests />)
+
+  expect(
+    await screen.findByText('What happened could not be loaded.'),
+  ).toBeTruthy()
+  expect(screen.getByText('Spirited Away')).toBeTruthy()
+
+  historyDown = false
+  history = [
+    {
+      id: 1,
+      requestId: 8,
+      kind: 'movie',
+      tmdbId: 129,
+      title: 'Spirited Away',
+      action: 'asked',
+      at: '2026-10-22T00:00:00Z',
+      note: null,
+    },
+  ]
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByText('You asked for this')).toBeTruthy()
+  expect(screen.queryByText('What happened could not be loaded.')).toBeNull()
 })

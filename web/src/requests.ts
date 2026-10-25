@@ -56,19 +56,40 @@ export const approveRequests = (ids: number[], reason: string | null) =>
 export const denyRequests = (ids: number[], reason: string | null) =>
   request<{ results: DecisionItem[] }>('POST', `${base}/deny`, { ids, reason })
 
+export type GrantResult = {
+  id: number
+  kidProfileId: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  state: RequestState
+  labelNotOwned: boolean
+}
+
 export const grantRequest = (
   kidProfileId: number,
   kind: 'movie' | 'show',
   tmdbId: number,
 ) =>
-  request<{ id: number; state: RequestState }>(
-    'POST',
-    `${base}/grant`,
-    { kidProfileId, kind, tmdbId },
+  request<GrantResult>('POST', `${base}/grant`, { kidProfileId, kind, tmdbId })
+
+export type GrantPreview = {
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  inLibrary: boolean | null
+}
+
+export const previewGrant = (kind: 'movie' | 'show', tmdbId: number) =>
+  request<GrantPreview>(
+    'GET',
+    `${base}/grant/preview?kind=${kind}&tmdbId=${tmdbId}`,
   )
 
+export type RevokeItem = DecisionItem & { labelNotOwned: boolean }
+
 export const revokeRequests = (ids: number[]) =>
-  request<{ results: DecisionItem[] }>('POST', `${base}/revoke`, {
+  request<{ results: RevokeItem[] }>('POST', `${base}/revoke`, {
     ids,
     reason: null,
   })
