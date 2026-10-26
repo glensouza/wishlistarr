@@ -34,7 +34,7 @@ public static class KidRequestEndpoints
         })
             .WithTags("Kid")
             .WithName("GetKidWishlist")
-            .WithSummary("Lists the signed-in profile's own requests. States are kid-friendly, a denial includes only the parent's note, and a ready title includes Plex links when the library index can name the item.")
+            .WithSummary("Lists the signed-in profile's own requests. States are kid-friendly, a denial includes only the parent's note, and a ready title includes a Plex link when the library index can name the item.")
             .Produces<KidWishlistResponse>();
 
         kid.MapPost("/requests", async (KidRequestBody? body, HttpContext context, KidRequestFlow flow, RequestTitles titles, CancellationToken ct) =>

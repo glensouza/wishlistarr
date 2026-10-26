@@ -317,6 +317,7 @@ public sealed class KidProfileTests
         HttpResponseMessage again = await parent.DeleteAsync($"/api/v1/kid-profiles/{id}");
         List<JsonElement> list = await parent.GetFromJsonAsync<List<JsonElement>>("/api/v1/kid-profiles") ?? [];
         HttpResponseMessage kidAfter = await kid.GetAsync("/api/v1/kid/me");
+        HttpResponseMessage wishlistAfter = await kid.GetAsync("/api/v1/kid/requests");
         HttpResponseMessage signIn = await KidApiFactory.SignInAsync(await factory.CreateDeviceAsync(), id, "3333");
         HttpResponseMessage reuse = await parent.PostAsJsonAsync(
             "/api/v1/kid-profiles",
@@ -326,6 +327,7 @@ public sealed class KidProfileTests
         Assert.Equal(HttpStatusCode.NotFound, again.StatusCode);
         Assert.Empty(list);
         Assert.Equal(HttpStatusCode.Unauthorized, kidAfter.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, wishlistAfter.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, signIn.StatusCode);
         Assert.Equal(HttpStatusCode.Created, reuse.StatusCode);
         using IServiceScope scope = factory.Services.CreateScope();
