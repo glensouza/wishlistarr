@@ -126,6 +126,9 @@ public sealed class KidProfiles(
         profile.TvAgeLimit = input.TvAgeLimit;
         profile.PlexUserId = input.PlexUserId;
         profile.WeeklyAllowance = input.WeeklyAllowance;
+        profile.AutoApprove = input.AutoApprove;
+        profile.AutoApproveMovieRating = input.AutoApproveMovieRating;
+        profile.AutoApproveTvRating = input.AutoApproveTvRating;
         profile.BlockedGenreIds = [.. input.BlockedGenreIds];
         profile.BlockedKeywordIds = [.. input.BlockedKeywordIds];
         profile.AllowedOriginalLanguages = [.. input.AllowedOriginalLanguages];
@@ -143,6 +146,8 @@ public sealed class KidProfiles(
         IReadOnlyList<int> keywords = [];
         IReadOnlyList<string> languages = [];
         IReadOnlyList<string> homeRows = [];
+        RatingLevel? movieRating = null;
+        RatingLevel? tvRating = null;
 
         if (name.Length is 0 or > MaxNameLength)
         {
@@ -194,6 +199,16 @@ public sealed class KidProfiles(
             TryNormalizeHomeRows(request.HomeRows, out homeRows, out error);
         }
 
+        if (error is null)
+        {
+            TryRating(request.AutoApproveMovieRating, out movieRating, out error);
+        }
+
+        if (error is null)
+        {
+            TryRating(request.AutoApproveTvRating, out tvRating, out error);
+        }
+
         return error is null
             ? new ValidatedProfile(
                 name,
@@ -204,6 +219,9 @@ public sealed class KidProfiles(
                 request.TvAgeLimit,
                 plexUserId,
                 request.WeeklyAllowance,
+                request.AutoApprove,
+                movieRating,
+                tvRating,
                 genres,
                 keywords,
                 languages,
@@ -267,10 +285,35 @@ public sealed class KidProfiles(
         int? TvAgeLimit,
         string? PlexUserId,
         int? WeeklyAllowance,
+        bool AutoApprove,
+        RatingLevel? AutoApproveMovieRating,
+        RatingLevel? AutoApproveTvRating,
         IReadOnlyList<int> BlockedGenreIds,
         IReadOnlyList<int> BlockedKeywordIds,
         IReadOnlyList<string> AllowedOriginalLanguages,
         IReadOnlyList<string> HomeRows);
+
+    private static bool TryRating(string? value, out RatingLevel? rating, out string? error)
+    {
+        rating = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        string text = value.Trim();
+        if (text.All(char.IsAsciiDigit)
+            || !Enum.TryParse(text, ignoreCase: true, out RatingLevel parsed)
+            || !Enum.IsDefined(parsed))
+        {
+            error = "Auto-approve ratings must be a rating level: preschool, general, children, parentalGuidance, teen, mature or adult.";
+            return false;
+        }
+
+        rating = parsed;
+        return true;
+    }
 
     private static void TryNormalizeIds(
         IReadOnlyList<int>? ids,
@@ -402,6 +445,9 @@ public sealed record KidProfileRequest(
     string? PlexLabel,
     string? PlexUserId,
     int? WeeklyAllowance,
+    bool AutoApprove = false,
+    string? AutoApproveMovieRating = null,
+    string? AutoApproveTvRating = null,
     IReadOnlyList<int>? BlockedGenreIds = null,
     IReadOnlyList<int>? BlockedKeywordIds = null,
     IReadOnlyList<string>? AllowedOriginalLanguages = null,

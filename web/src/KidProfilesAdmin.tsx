@@ -6,14 +6,16 @@ import {
   deleteKidProfile,
   getHomeOptions,
   listKidProfiles,
+  ratingLevels,
   unlockKidProfile,
   updateKidProfile,
   type HomeOptions,
   type KidProfile,
   type KidProfileInput,
   type PlexRestrictions,
+  type RatingLevel,
 } from './kidProfiles'
-import { useT } from './i18n'
+import { useT, type MessageKey } from './i18n'
 import PlexUserPicker from './PlexUserPicker'
 
 type FormState = {
@@ -26,6 +28,9 @@ type FormState = {
   plexLabel: string
   plexUserId: string
   weeklyAllowance: string
+  autoApprove: boolean
+  movieCeiling: string
+  tvCeiling: string
   blockedGenres: string
   blockedKeywords: string
   allowedLanguages: string
@@ -50,6 +55,16 @@ const homeChoices = (configured: string[], defaults: string[]) =>
     defaults,
   )
 
+const ratingKey: Record<RatingLevel, MessageKey> = {
+  preschool: 'rating.preschool',
+  general: 'rating.general',
+  children: 'rating.children',
+  parentalGuidance: 'rating.parentalGuidance',
+  teen: 'rating.teen',
+  mature: 'rating.mature',
+  adult: 'rating.adult',
+}
+
 const emptyForm = (defaults: string[]): FormState => ({
   name: '',
   avatar: avatars[0],
@@ -60,6 +75,9 @@ const emptyForm = (defaults: string[]): FormState => ({
   plexLabel: '',
   plexUserId: '',
   weeklyAllowance: '',
+  autoApprove: false,
+  movieCeiling: '',
+  tvCeiling: '',
   blockedGenres: '',
   blockedKeywords: '',
   allowedLanguages: '',
@@ -77,6 +95,9 @@ function toForm(profile: KidProfile, defaults: string[]): FormState {
     plexLabel: profile.plexLabel,
     plexUserId: profile.plexUserId ?? '',
     weeklyAllowance: profile.weeklyAllowance?.toString() ?? '',
+    autoApprove: profile.autoApprove,
+    movieCeiling: profile.autoApproveMovieRating ?? '',
+    tvCeiling: profile.autoApproveTvRating ?? '',
     blockedGenres: profile.blockedGenreIds.join(', '),
     blockedKeywords: profile.blockedKeywordIds.join(', '),
     allowedLanguages: profile.allowedOriginalLanguages.join(', '),
@@ -102,6 +123,10 @@ function parseIds(value: string): number[] | null {
 
 const toNumber = (value: string) => (value.trim() === '' ? null : Number(value))
 
+function ceiling(value: string): RatingLevel | null {
+  return ratingLevels.find((level) => level === value) ?? null
+}
+
 function toInput(form: FormState): KidProfileInput | null {
   const blockedGenreIds = parseIds(form.blockedGenres)
   const blockedKeywordIds = parseIds(form.blockedKeywords)
@@ -116,6 +141,9 @@ function toInput(form: FormState): KidProfileInput | null {
     plexLabel: form.plexLabel,
     plexUserId: form.plexUserId === '' ? null : form.plexUserId,
     weeklyAllowance: toNumber(form.weeklyAllowance),
+    autoApprove: form.autoApprove,
+    autoApproveMovieRating: ceiling(form.movieCeiling),
+    autoApproveTvRating: ceiling(form.tvCeiling),
     blockedGenreIds,
     blockedKeywordIds,
     allowedOriginalLanguages: parseTokens(form.allowedLanguages),
@@ -536,6 +564,43 @@ function ProfileForm({
           value={form.weeklyAllowance}
           onChange={(event) => set('weeklyAllowance', event.target.value)}
         />
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={form.autoApprove}
+          onChange={(event) => set('autoApprove', event.target.checked)}
+        />
+        {t('admin.autoApprove')}
+      </label>
+      <p className="muted">{t('admin.autoApproveHint')}</p>
+      <label>
+        {t('admin.movieCeiling')}
+        <select
+          value={form.movieCeiling}
+          onChange={(event) => set('movieCeiling', event.target.value)}
+        >
+          <option value="">{t('admin.ratingNone')}</option>
+          {ratingLevels.map((level) => (
+            <option key={level} value={level}>
+              {t(ratingKey[level])}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        {t('admin.tvCeiling')}
+        <select
+          value={form.tvCeiling}
+          onChange={(event) => set('tvCeiling', event.target.value)}
+        >
+          <option value="">{t('admin.ratingNone')}</option>
+          {ratingLevels.map((level) => (
+            <option key={level} value={level}>
+              {t(ratingKey[level])}
+            </option>
+          ))}
+        </select>
       </label>
       {error && <p role="alert">{error}</p>}
       <button type="submit" disabled={options === null}>

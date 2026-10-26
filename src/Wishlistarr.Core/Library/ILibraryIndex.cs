@@ -1,3 +1,4 @@
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 
 namespace Wishlistarr.Core.Library;
@@ -9,6 +10,11 @@ public interface ILibraryIndex
 
     // Null means the index cannot answer yet. An empty list means it can, and nothing matched.
     Task<IReadOnlyList<LibraryCatalogEntry>?> ListRecentAsync(int limit, CancellationToken ct = default);
+
+    // Null means the index cannot answer yet. Titles that are not in the library are left out.
+    Task<IndexedGuids?> FindGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default);
 }
+
+public sealed record IndexedGuids(string ServerId, IReadOnlyDictionary<TitleKey, IReadOnlyList<string>> Guids);
 
 public sealed record LibraryCatalogEntry(MediaKind Kind, int TmdbId);

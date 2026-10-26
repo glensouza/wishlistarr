@@ -1,4 +1,5 @@
 using Wishlistarr.Core.Kids;
+using Wishlistarr.Core.Content;
 
 namespace Wishlistarr.Data;
 
@@ -21,6 +22,12 @@ public sealed class KidProfile
     public string? PlexUserId { get; set; }
 
     public int? WeeklyAllowance { get; set; }
+
+    public bool AutoApprove { get; set; }
+
+    public RatingLevel? AutoApproveMovieRating { get; set; }
+
+    public RatingLevel? AutoApproveTvRating { get; set; }
 
     public List<int> BlockedGenreIds { get; set; } = [];
 

@@ -21,6 +21,9 @@ const ada: KidProfile = {
   plexLabel: 'Ada',
   plexUserId: null,
   weeklyAllowance: 3,
+  autoApprove: false,
+  autoApproveMovieRating: null,
+  autoApproveTvRating: null,
   isLocked: false,
   blockedGenreIds: [],
   blockedKeywordIds: [],
@@ -142,6 +145,9 @@ it('creates a profile and leaves the label empty so it defaults to the name', as
     tvAgeLimit: null,
     plexLabel: '',
     homeRows: ['popular', 'library', 'genre'],
+    autoApprove: false,
+    autoApproveMovieRating: null,
+    autoApproveTvRating: null,
   })
 })
 
@@ -391,6 +397,39 @@ it('adds a genre row from the picker and saves it', async () => {
   })
 })
 
+it('round-trips auto-approve rules when a profile is saved', async () => {
+  profiles = [
+    {
+      ...ada,
+      autoApprove: true,
+      autoApproveMovieRating: 'teen',
+      autoApproveTvRating: null,
+    },
+  ]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    (screen.getByLabelText('Auto-approve requests') as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  expect(
+    (screen.getByLabelText('Movie rating ceiling') as HTMLSelectElement).value,
+  ).toBe('teen')
+  fireEvent.change(screen.getByLabelText('TV rating ceiling'), {
+    target: { value: 'children' },
+  })
+  fireEvent.click(screen.getByLabelText('Auto-approve requests'))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    autoApprove: false,
+    autoApproveMovieRating: 'teen',
+    autoApproveTvRating: 'children',
+  })
+})
+
 it('shows a loading state and keeps Save off until the home row choices arrive', async () => {
   let release: () => void = () => {}
   optionsGate = new Promise<void>((resolve) => {
@@ -483,4 +522,17 @@ it('says which media types each genre in the picker applies to', async () => {
   )
   expect(labels).toContain('Comedy (movies and TV)')
   expect(labels).toContain('Western (TV)')
+})
+
+it('explains that a ceiling approves on its own and the switch alone approves any rated title', async () => {
+  profiles = [ada]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    screen.getByText(/ceiling alone approves titles at or below it/),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(/switch alone, with no ceiling, approves any allowed/),
+  ).toBeTruthy()
 })

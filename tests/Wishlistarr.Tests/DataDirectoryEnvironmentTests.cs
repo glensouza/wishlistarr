@@ -22,6 +22,10 @@ public sealed class DataDirectoryEnvironmentTests
             DataDirectory directory = DataDirectory.Resolve(configuration, Path.GetTempPath());
 
             Assert.Equal(path, directory.Root);
+            Assert.Equal(Path.Combine(path, "wishlistarr.db"), directory.DatabasePath);
+            Assert.Equal(Path.Combine(path, "keys"), directory.KeysPath);
+            Assert.Equal(Path.Combine(path, "backups"), directory.BackupsPath);
+            Assert.Equal(Path.Combine(path, "restore-pending"), directory.RestorePendingPath);
         }
         finally
         {

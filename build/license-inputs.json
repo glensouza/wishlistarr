@@ -1,0 +1,6 @@
+[
+  "src/Wishlistarr.Api/Wishlistarr.Api.csproj",
+  "src/Wishlistarr.Core/Wishlistarr.Core.csproj",
+  "src/Wishlistarr.Data/Wishlistarr.Data.csproj",
+  "src/Wishlistarr.Integrations/Wishlistarr.Integrations.csproj"
+]

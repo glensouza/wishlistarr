@@ -1,0 +1,27 @@
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - dependabot[bot]
+  categories:
+    - title: Security
+      labels:
+        - "area:security"
+    - title: Features
+      labels:
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+        - "area:docs"
+    - title: Maintenance
+      labels:
+        - "area:devops"
+        - "area:testing"
+        - dependencies
+    - title: Other changes
+      labels:
+        - "*"

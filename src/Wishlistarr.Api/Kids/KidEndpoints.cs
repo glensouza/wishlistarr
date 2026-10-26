@@ -6,6 +6,7 @@ using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Core.Kids;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
@@ -253,6 +254,8 @@ public static class KidEndpoints
             .WithSummary("Unlocks a locked kid profile and clears its failed PIN counts.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        profiles.MapRequestHistory();
     }
 
     public static async Task ValidateKidSessionAsync(CookieValidatePrincipalContext context)
@@ -338,6 +341,9 @@ public sealed record KidProfileSummary(
     IReadOnlyList<int> BlockedKeywordIds,
     IReadOnlyList<string> AllowedOriginalLanguages,
     IReadOnlyList<string> HomeRows,
+    bool AutoApprove,
+    RatingLevel? AutoApproveMovieRating,
+    RatingLevel? AutoApproveTvRating,
     ProfileRestrictions? PlexRestrictions = null)
 {
     public static KidProfileSummary From(KidProfile profile) => From(profile, null, null);
@@ -359,6 +365,9 @@ public sealed record KidProfileSummary(
         profile.BlockedKeywordIds,
         profile.AllowedOriginalLanguages,
         profile.HomeRows,
+        profile.AutoApprove,
+        profile.AutoApproveMovieRating,
+        profile.AutoApproveTvRating,
         restrictions);
 }
 

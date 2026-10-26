@@ -1,0 +1,34 @@
+<Project>
+
+  <PropertyGroup>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</RepoRoot>
+    <NuGetNoticeRaw>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'obj', 'licenses', 'nuget.raw.json'))</NuGetNoticeRaw>
+    <NuGetNotice>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'obj', 'licenses', 'nuget.json'))</NuGetNotice>
+    <NuGetNoticeDev>$([System.IO.Path]::Combine('$(RepoRoot)', 'web', 'public', 'licenses', 'nuget.json'))</NuGetNoticeDev>
+  </PropertyGroup>
+
+  <Target
+    Name="WriteLicenseNotices"
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipLicenseCheck)' != 'true' and '$(LicenseNoticesWritten)' != 'true'">
+    <Delete Files="$(NuGetNotice);$(NuGetNoticeRaw)" />
+    <MakeDir Directories="$([System.IO.Path]::GetDirectoryName('$(NuGetNotice)'))" />
+    <Exec WorkingDirectory="$(RepoRoot)" EnvironmentVariables="SkipLicenseCheck=true" Command="dotnet tool restore" />
+    <Exec
+      WorkingDirectory="$(RepoRoot)"
+      EnvironmentVariables="SkipLicenseCheck=true"
+      Command="dotnet tool run nuget-license -- -ji build/license-inputs.json -t --exclude-publish-false -a build/allowed-licenses.json -o Json -fo &quot;$(NuGetNoticeRaw)&quot;" />
+    <Exec
+      WorkingDirectory="$(RepoRoot)"
+      EnvironmentVariables="SkipLicenseCheck=true"
+      Command="dotnet run --file &quot;$(RepoRoot)/build/WriteNuGetNotices.cs&quot; -- &quot;$(NuGetNoticeRaw)&quot; &quot;$(NuGetNotice)&quot;" />
+    <Copy SourceFiles="$(NuGetNotice)" DestinationFiles="$(NuGetNoticeDev)" Condition="Exists('$(RepoRoot)/web')" />
+    <PropertyGroup>
+      <LicenseNoticesWritten>true</LicenseNoticesWritten>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="PublishLicenseNotice" AfterTargets="Publish" DependsOnTargets="WriteLicenseNotices" Condition="'$(DesignTimeBuild)' != 'true' and '$(SkipLicenseCheck)' != 'true'">
+    <Copy SourceFiles="$(NuGetNotice)" DestinationFiles="$(PublishDir)wwwroot/licenses/nuget.json" />
+  </Target>
+
+</Project>

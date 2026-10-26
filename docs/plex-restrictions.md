@@ -12,7 +12,7 @@ For every active profile with a Plex user, Wishlistarr reads the movie and TV fi
 
 `GET /api/v1/kid-profiles` includes `plexRestrictions: { movies: { state, mode }, television: { state, mode } }` for each profile that has a Plex user, and `null` for profiles without one. The profile list in the web app shows the same. Each list request asks plex.tv at most once, however many profiles there are, and the answer is cached in memory for 60 seconds so that reloading the list or the status does not call plex.tv every time. The cache is keyed by the linked account, so linking a different Plex account never reuses it. The read gives up after 10 seconds and reports `unknown`; failures are not cached. The create and update responses carry `plexRestrictions: null`; only the list reports it.
 
-`GET /api/v1/system/status` has a `warnings` list. A profile whose mapped user definitely does not enforce its label for movies, TV or both adds `{ code: "plex.label.not_enforced", message, profileId }`. The message names the types that are open. `GET /api/health` is unchanged and stays public, because the warnings name profiles.
+`GET /api/v1/system/status` has a `warnings` list. A profile whose mapped user definitely does not enforce its label for movies, TV or both adds `{ code: "plex.label.not_enforced", message, profileId }`. The message names the types that are open. The parent health report repeats that message on the Plex check when the connection itself is not an error; see [health.md](health.md). `GET /api/health` is unchanged and stays public, because the warnings name profiles.
 
 ## Allow-only and exclude
 

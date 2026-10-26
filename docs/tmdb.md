@@ -1,6 +1,6 @@
 # TMDB
 
-Wishlistarr reads titles, ratings and artwork from [The Movie Database](https://www.themoviedb.org/). You need your own TMDB API key (v3 key or v4 read access token). A key containing a `.` is treated as a v4 read access token and sent as a bearer credential; anything else is sent as a v3 `api_key`.
+Wishlistarr reads titles, ratings and artwork from [The Movie Database](https://www.themoviedb.org/). You need your own TMDB API key (v3 key or v4 read access token). A key containing a `.` is treated as a v4 read access token and sent as a bearer credential; anything else is sent as a v3 `api_key`. How to attribute TMDB, and the other services Wishlistarr uses, is in [Attribution](attribution.md).
 
 ## Configuration
 

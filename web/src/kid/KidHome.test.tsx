@@ -183,7 +183,9 @@ it('asks for a title from a home row', async () => {
       true,
     ),
   )
-  const posted = requests.find((call) => call.path === '/api/v1/kid/requests')
+  const posted = requests.find(
+    (call) => call.path === '/api/v1/kid/requests' && call.method === 'POST',
+  )
   expect(posted?.method).toBe('POST')
   expect(posted?.body).toEqual({ kind: 'movie', tmdbId: 800 })
   expect(posted?.headers.get('X-CSRF-TOKEN')).toBe('tok')

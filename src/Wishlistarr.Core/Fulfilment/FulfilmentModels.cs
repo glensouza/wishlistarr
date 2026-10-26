@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Wishlistarr.Core.MediaServers;
 
 namespace Wishlistarr.Core.Fulfilment;
@@ -36,7 +37,14 @@ public sealed record ArrRootFolder(string Path, long FreeSpace);
 
 public sealed record ArrTag(int Id, string Label);
 
-public sealed record ArrTestResult(bool Valid, string Message, string? Version = null);
+public enum ArrTestCode
+{
+    Failed,
+    Connected,
+    NotConfigured,
+}
+
+public sealed record ArrTestResult(bool Valid, string Message, string? Version = null, [property: JsonIgnore] ArrTestCode Code = ArrTestCode.Failed);
 
 public sealed record FulfilmentRequest(MediaKind Kind, int TmdbId, IReadOnlyList<int> Seasons);
 

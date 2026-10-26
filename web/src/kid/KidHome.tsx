@@ -2,6 +2,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useT } from '../i18n'
 import { useKidSession } from './KidSession'
 import HomeRows from './HomeRows'
+import KidRequests from './KidRequests'
 import Search from './Search'
 
 export default function KidHome() {
@@ -21,6 +22,7 @@ export default function KidHome() {
       <h1 id="home-title">{t('home.welcome', { name: session.name })}</h1>
       <p>{t('home.intro')}</p>
       <HomeRows />
+      <KidRequests />
       <Search />
       <button
         type="button"

@@ -102,6 +102,56 @@ a {
   outline: none;
 }
 
+.shell-footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 2px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.tmdb-logo {
+  display: block;
+  width: 7.5rem;
+  max-width: 100%;
+  height: auto;
+}
+
+.tmdb-notice {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 42rem;
+}
+
+.tmdb-notice p {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.about-credits {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 42rem;
+}
+
+.about-credits p {
+  margin: 0;
+}
+
+.license-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.watch-providers {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.watch-providers ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
 button,
 select,
 input {
@@ -153,6 +203,20 @@ label {
   color: var(--color-text-muted);
 }
 
+.notice {
+  max-width: 40rem;
+  padding: var(--space-3);
+  background: var(--color-surface-raised);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.backup-list {
+  list-style: none;
+  margin: var(--space-3) 0;
+  padding: 0;
+}
+
 fieldset {
   display: grid;
   gap: var(--space-2);
@@ -163,6 +227,22 @@ fieldset {
 }
 
 fieldset label:has(input[type='checkbox']) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.update-notice {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 28rem;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.check-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -464,4 +544,43 @@ fieldset label:has(input[type='checkbox']) {
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+}
+
+.observability {
+  margin-top: var(--space-5);
+}
+
+.health-banner {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.health-banner-error {
+  border-color: var(--color-danger);
+}
+
+.health-banner ul,
+.check-list,
+.log-list,
+.history-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-3);
+}
+
+.history-profile {
+  margin-top: var(--space-3);
 }

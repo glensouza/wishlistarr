@@ -1,5 +1,17 @@
 import { request } from './api'
 
+export const ratingLevels = [
+  'preschool',
+  'general',
+  'children',
+  'parentalGuidance',
+  'teen',
+  'mature',
+  'adult',
+] as const
+
+export type RatingLevel = (typeof ratingLevels)[number]
+
 export type KidProfile = {
   id: number
   name: string
@@ -10,6 +22,9 @@ export type KidProfile = {
   plexLabel: string
   plexUserId: string | null
   weeklyAllowance: number | null
+  autoApprove: boolean
+  autoApproveMovieRating: RatingLevel | null
+  autoApproveTvRating: RatingLevel | null
   isLocked: boolean
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
@@ -47,6 +62,9 @@ export type KidProfileInput = {
   plexLabel: string
   plexUserId: string | null
   weeklyAllowance: number | null
+  autoApprove: boolean
+  autoApproveMovieRating: RatingLevel | null
+  autoApproveTvRating: RatingLevel | null
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
   allowedOriginalLanguages: string[]

@@ -163,23 +163,23 @@ internal sealed partial class PlexMediaServer(
     {
         if (await settings.GetAsync(PlexSettingKeys.Token, ct) is not { Length: > 0 })
         {
-            return new MediaServerTestResult(false, "Plex is not linked.");
+            return new MediaServerTestResult(false, "Plex is not linked.", Code: MediaServerTestCode.NotLinked);
         }
 
         if (await settings.GetAsync(PlexSettingKeys.ServerId, ct) is not { Length: > 0 })
         {
-            return new MediaServerTestResult(false, "No Plex server is selected.");
+            return new MediaServerTestResult(false, "No Plex server is selected.", Code: MediaServerTestCode.NoServerSelected);
         }
 
         try
         {
             PlexContainer root = await this.WithServerAsync(servers.GetRootAsync, ct);
             string name = FirstNonEmpty(root.FriendlyName) ?? "the Plex server";
-            return new MediaServerTestResult(true, $"Connected to {name}.", name, root.Version);
+            return new MediaServerTestResult(true, $"Connected to {name}.", name, root.Version, MediaServerTestCode.Connected);
         }
         catch (MediaServerException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
-            return new MediaServerTestResult(false, "The Plex server rejected the saved sign-in.");
+            return new MediaServerTestResult(false, "The Plex server rejected the saved sign-in.", Code: MediaServerTestCode.Rejected);
         }
     }
 

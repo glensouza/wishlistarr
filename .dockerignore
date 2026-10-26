@@ -15,5 +15,6 @@ src/Wishlistarr.Api/wwwroot/
 *.db-wal
 *.log
 site/
+web/public/licenses/
 docs/
 tests/

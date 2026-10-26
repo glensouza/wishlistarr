@@ -1,13 +1,13 @@
 # Kid profiles
 
-A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, the home rows that profile sees, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
+A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, the home rows that profile sees, optional auto-approve rules, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
 
 ## Managing profiles
 
 All of these require the Parent role.
 
 - `GET /api/v1/kid-profiles` lists active profiles. PIN hashes are never returned, only `hasPin`.
-- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages, homeRows }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind. Omit `homeRows` and the profile goes back to the default rows; send `[]` to show none.
+- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages, homeRows, autoApprove, autoApproveMovieRating, autoApproveTvRating }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind. Omit `autoApprove` for off, and omit a rating for no ceiling. Omit `homeRows` and the profile goes back to the default rows; send `[]` to show none.
 - `DELETE /api/v1/kid-profiles/{id}?removeOwnedLabels=true|false` archives the profile.
 - `POST /api/v1/kid-profiles/{id}/unlock` unlocks a locked profile and clears its failed PIN counts.
 
@@ -22,6 +22,9 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 ### Home rows
 
 `homeRows` is the order of shelves on [home](kid-home.md). The default, used when the field is omitted, is `["popular", "library", "genre"]`. `popular` is popular for the profile's ages, `library` is new in the Plex library, and `genre` expands to Animation, Family and Comedy. `genre:<id>` adds one shelf for that TMDB genre id (`genre:016` is stored as `genre:16`). Blank entries are skipped, duplicates are stored once, and anything else is rejected. At most 10 entries are accepted. The picker and `GET /api/v1/kid/me` do not include this list. `GET /api/v1/kid-profiles/home-options` (parents only) returns `{ defaultRows, genres }`: the default list above and the TMDB genres (`id`, `name`) a parent can add as `genre:<id>` rows. `genres` is empty when TMDB cannot be reached.
+### Auto-approve
+
+`autoApprove` is a switch. `autoApproveMovieRating` and `autoApproveTvRating` are optional ceilings, each a rating level: `preschool`, `general`, `children`, `parentalGuidance`, `teen`, `mature` or `adult`. A blank value clears the ceiling. A ceiling, when set, always caps auto-approval, even with `autoApprove` on; with the switch on and no ceiling for that kind, any allowed rated title is approved. A number or any other word is rejected. The switch and the ceilings are stored on the profile and returned by the profile list. How they decide a request is described in [requests](requests.md#auto-approve).
 
 ### Plex label
 
