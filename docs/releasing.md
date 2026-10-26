@@ -25,7 +25,7 @@ Tags must be cut from commits on `main`; the workflow fails otherwise.
    git push origin v1.2.3
    ```
 
-3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create --generate-notes`. The release title is the tag name. The notes are the merged pull requests since the previous release, grouped by `.github/release.yml`.
+3. Watch the **Release** workflow. It builds `linux/amd64` and `linux/arm64`, pushes the image tags below, then runs `gh release create --generate-notes`. The release title is the tag name. The notes are the merged pull requests since the previous release, grouped by `.github/release.yml`. Before the image build it publishes the Api project to write the third-party license notices, uploads them as artifacts, and attaches `npm-licenses.json` and `nuget-licenses.json` to the GitHub release. The image serves the same notices at `/licenses/npm.json` and `/licenses/nuget.json`. See [Attribution](attribution.md).
 
 ## Release notes
 
@@ -88,7 +88,7 @@ The tags are multi-arch manifests, so Docker selects the matching architecture a
 ## If a release fails
 
 - If the workflow fails before the image is pushed, fix the cause and re-run the failed workflow from the Actions page.
-- If the image was pushed but the GitHub release step failed, re-run the failed job; or create the release manually with `gh release create v1.2.3 --title v1.2.3 --generate-notes`. That command uses `.github/release.yml` the same way the workflow does.
+- If the image was pushed but the GitHub release step failed, re-run the failed job; or create the release manually with `gh release create v1.2.3 --title v1.2.3 --generate-notes` and attach `npm-licenses.json` and `nuget-licenses.json`. That command uses `.github/release.yml` the same way the workflow does.
 - If the tag itself is wrong and nothing was published, delete it with `git push --delete origin v1.2.3` and `git tag -d v1.2.3`, then tag again.
 
 ## Withdraw a release

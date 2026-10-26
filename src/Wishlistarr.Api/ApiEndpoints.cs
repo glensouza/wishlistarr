@@ -30,6 +30,7 @@ public static class ApiEndpoints
         v1.MapParentAuth();
         v1.MapParentKidProfiles();
         v1.MapParentKidDevices();
+        v1.MapRequests();
         v1.MapTmdb();
         v1.MapMediaServer();
         v1.MapArr();
@@ -37,6 +38,7 @@ public static class ApiEndpoints
         v1.MapJobs();
         v1.MapUpdates();
         v1.MapWebhookSettings();
+        v1.MapObservability();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")

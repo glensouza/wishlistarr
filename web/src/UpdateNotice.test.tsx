@@ -60,7 +60,9 @@ function stubFetch(handler: (path: string, method: string) => unknown) {
         path,
         body: init?.body ? JSON.parse(init.body as string) : undefined,
       })
-      const body = handler(path, method)
+      const body = path.startsWith('/api/v1/requests')
+        ? { items: [], total: 0, limit: 100, offset: 0 }
+        : handler(path, method)
       if (body === undefined) return new Response(null, { status: 204 })
       return body === null
         ? Response.json({ title: 'Nope' }, { status: 401 })
@@ -145,6 +147,9 @@ it('keeps the server message off the page when saving fails', async () => {
         )
       }
       if (path === '/api/v1/updates') return Response.json(notice)
+      if (path.startsWith('/api/v1/requests')) {
+        return Response.json({ items: [], total: 0, limit: 100, offset: 0 })
+      }
       return Response.json([])
     }),
   )
@@ -440,6 +445,9 @@ it('ignores a retry that finishes after the page is left', async () => {
           release = resolve
         })
         return Response.json(notice)
+      }
+      if (path.startsWith('/api/v1/requests')) {
+        return Response.json({ items: [], total: 0, limit: 100, offset: 0 })
       }
       return Response.json([])
     }),
