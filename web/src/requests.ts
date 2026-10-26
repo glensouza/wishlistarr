@@ -21,6 +21,7 @@ export type ParentRequest = {
   requestCount: number
   createdAt: string
   denialReason: string | null
+  canRevoke: boolean
 }
 
 export type DecisionStatus =
@@ -49,8 +50,15 @@ export type RequestPage = {
 export const pageSize = 100
 export const maxBatch = 50
 
-export const listRequests = (state: RequestState, limit = pageSize) =>
-  request<RequestPage>('GET', `${base}?state=${state}&limit=${limit}`)
+export const listRequests = (
+  state: RequestState,
+  limit = pageSize,
+  offset = 0,
+) =>
+  request<RequestPage>(
+    'GET',
+    `${base}?state=${state}&limit=${limit}&offset=${offset}`,
+  )
 
 export const approveRequests = (ids: number[], reason: string | null) =>
   request<{ results: DecisionItem[] }>('POST', `${base}/approve`, {
@@ -91,7 +99,10 @@ export const previewGrant = (kind: 'movie' | 'show', tmdbId: number) =>
     `${base}/grant/preview?kind=${kind}&tmdbId=${tmdbId}`,
   )
 
-export type RevokeItem = DecisionItem & { labelNotOwned: boolean }
+export type RevokeItem = DecisionItem & {
+  labelNotOwned: boolean
+  labelInUse: boolean
+}
 
 export const revokeRequests = (ids: number[]) =>
   request<{ results: RevokeItem[] }>('POST', `${base}/revoke`, {

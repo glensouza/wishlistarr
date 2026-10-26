@@ -225,6 +225,12 @@ export const en = {
   'requests.revokeDone': '{title} was removed from their list.',
   'requests.revokeNotOwned':
     '{title} was removed from their list, but its Plex label was not added by Wishlistarr and was left in place. Remove it in Plex if they should lose access.',
+  'requests.revokeInUse':
+    '{title} was removed. Its Plex label now belongs to another profile, so it was left in place.',
+  'requests.showMore': 'Show more ({shown} of {total} shown)',
+  'requests.stuckHeading': 'Did not finish',
+  'requests.stuckHint':
+    'Giving these titles stopped part way. Removing one takes off any label Wishlistarr added, and you can give it again afterwards.',
   'requests.grantHeading': 'Give a title',
   'requests.grantKid': 'Profile',
   'requests.grantPickKid': 'Choose a profile',
@@ -247,6 +253,7 @@ export const en = {
   'requests.partPending': 'waiting requests',
   'requests.partLabeled': 'titles on their lists',
   'requests.partProfiles': 'profiles',
+  'requests.partStuck': 'titles that did not finish',
   'requests.retry': 'Try again',
 
   'kidRequests.title': 'Your requests',
@@ -265,6 +272,7 @@ export const en = {
   'kidRequests.historyFailedToLoad': 'What happened could not be loaded.',
   'kidRequests.listFailedToLoad': 'Your requests could not be loaded.',
   'kidRequests.retry': 'Try again',
+  'kidRequests.showMore': 'Show more',
   'kidRequests.granted': 'A parent added this for you',
   'kidRequests.asked': 'You asked for this',
   'kidRequests.historyApproved': 'A parent said yes',

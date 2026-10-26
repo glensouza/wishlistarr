@@ -7,6 +7,7 @@ import {
   grantRequest,
   listRequests,
   maxBatch,
+  pageSize,
   previewGrant,
   revokeRequests,
   type DecisionItem,
@@ -41,12 +42,13 @@ const statusKey: Record<Outcome, MessageKey> = {
 
 type Failure = { id: number; title: string; status: Outcome }
 
-type Part = 'pending' | 'labeled' | 'profiles'
+type Part = 'pending' | 'labeled' | 'profiles' | 'stuck'
 
 const partKey: Record<Part, MessageKey> = {
   pending: 'requests.partPending',
   labeled: 'requests.partLabeled',
   profiles: 'requests.partProfiles',
+  stuck: 'requests.partStuck',
 }
 
 const messageOf = (failure: unknown, fallback: string) =>
@@ -62,6 +64,8 @@ export default function RequestsAdmin() {
   const [rows, setRows] = useState<ParentRequest[] | null>(null)
   const [total, setTotal] = useState(0)
   const [labeled, setLabeled] = useState<ParentRequest[]>([])
+  const [labeledTotal, setLabeledTotal] = useState(0)
+  const [stuck, setStuck] = useState<ParentRequest[]>([])
   const [profiles, setProfiles] = useState<KidProfile[]>([])
   const [failedParts, setFailedParts] = useState<Part[]>([])
   const [selected, setSelected] = useState<number[]>([])
@@ -82,7 +86,9 @@ export default function RequestsAdmin() {
       listRequests('pending'),
       listRequests('labeled'),
       listKidProfiles(),
-    ]).then(([pending, ready, kids]) => {
+      listRequests('failed'),
+      listRequests('available'),
+    ]).then(([pending, ready, kids, failedRows, availableRows]) => {
       if (!current) return
       const failed: Part[] = []
       if (pending.status === 'fulfilled') {
@@ -91,10 +97,26 @@ export default function RequestsAdmin() {
       } else {
         failed.push('pending')
       }
-      if (ready.status === 'fulfilled') setLabeled(ready.value.items)
-      else failed.push('labeled')
+      if (ready.status === 'fulfilled') {
+        setLabeled(ready.value.items)
+        setLabeledTotal(ready.value.total)
+      } else {
+        failed.push('labeled')
+      }
       if (kids.status === 'fulfilled') setProfiles(kids.value)
       else failed.push('profiles')
+      if (
+        failedRows.status === 'fulfilled' &&
+        availableRows.status === 'fulfilled'
+      ) {
+        setStuck(
+          [...failedRows.value.items, ...availableRows.value.items].filter(
+            (row) => row.canRevoke,
+          ),
+        )
+      } else {
+        failed.push('stuck')
+      }
       setFailedParts(failed)
       setSelected([])
     })
@@ -167,6 +189,26 @@ export default function RequestsAdmin() {
     }
   }
 
+  async function loadMoreLabeled() {
+    if (busy) return
+    clearMessages()
+    setBusy(true)
+    try {
+      const page = await listRequests('labeled', pageSize, labeled.length)
+      setLabeled((current) => [
+        ...current,
+        ...page.items.filter(
+          (item) => !current.some((row) => row.id === item.id),
+        ),
+      ])
+      setLabeledTotal(page.total)
+    } catch (failure) {
+      setError(messageOf(failure, t('app.somethingWrong')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function revoke(row: ParentRequest) {
     if (busy) return
     clearMessages()
@@ -178,9 +220,11 @@ export default function RequestsAdmin() {
       else
         setNotice(
           t(
-            item.labelNotOwned
-              ? 'requests.revokeNotOwned'
-              : 'requests.revokeDone',
+            item.labelInUse
+              ? 'requests.revokeInUse'
+              : item.labelNotOwned
+                ? 'requests.revokeNotOwned'
+                : 'requests.revokeDone',
             {
               title: row.title,
             },
@@ -384,6 +428,47 @@ export default function RequestsAdmin() {
                     name: row.kidName,
                   })}
                 </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void revoke(row)}
+                >
+                  {t('requests.revokeTitle', { title: row.title })}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {labeled.length < labeledTotal && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void loadMoreLabeled()}
+            >
+              {t('requests.showMore', {
+                shown: String(labeled.length),
+                total: String(labeledTotal),
+              })}
+            </button>
+          )}
+        </>
+      )}
+      {stuck.length > 0 && (
+        <>
+          <h3>{t('requests.stuckHeading')}</h3>
+          <p>{t('requests.stuckHint')}</p>
+          <ul>
+            {stuck.map((row) => (
+              <li key={row.id}>
+                <strong>{row.title}</strong>
+                <span>
+                  {t('requests.forKid', {
+                    kind: t(
+                      row.kind === 'movie' ? 'requests.movie' : 'requests.show',
+                    ),
+                    name: row.kidName,
+                  })}
+                </span>
+                <span>{t(stateKey[row.state])}</span>
                 <button
                   type="button"
                   disabled={busy}

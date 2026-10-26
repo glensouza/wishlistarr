@@ -102,10 +102,10 @@ export type KidHistoryEntry = {
 
 export const historyPageSize = 50
 
-export const listKidHistory = (limit = historyPageSize) =>
+export const listKidHistory = (offset = 0, limit = historyPageSize) =>
   request<KidHistoryEntry[]>(
     'GET',
-    `/api/v1/kid/requests/history?limit=${limit}`,
+    `/api/v1/kid/requests/history?limit=${limit}&offset=${offset}`,
   )
 
 export const pinLength = { min: 4, max: 8 }

@@ -23,6 +23,7 @@ const waiting: ParentRequest = {
   requestCount: 1,
   createdAt: '2026-10-22T00:00:00Z',
   denialReason: null,
+  canRevoke: false,
 }
 
 const second: ParentRequest = {
@@ -54,6 +55,8 @@ const ada: KidProfile = {
 let calls: Call[]
 let rows: ParentRequest[]
 let labeled: ParentRequest[]
+let stuck: ParentRequest[]
+let inUse: boolean
 let profiles: KidProfile[]
 let total: number | undefined
 let failing: number[]
@@ -65,6 +68,8 @@ beforeEach(() => {
   calls = []
   rows = [waiting, second]
   labeled = []
+  stuck = []
+  inUse = false
   profiles = []
   total = undefined
   failing = []
@@ -105,12 +110,29 @@ beforeEach(() => {
             })
       }
       if (method === 'GET') {
-        const items = path.includes('state=labeled') ? labeled : rows
+        const query = new URL(path, 'http://localhost').searchParams
+        const state = query.get('state')
+        const offset = Number(query.get('offset') ?? '0')
+        if (state === 'labeled') {
+          return Response.json({
+            items: labeled.slice(offset, offset + 100),
+            total: labeled.length,
+            limit: 100,
+            offset,
+          })
+        }
+        if (state === 'failed' || state === 'available') {
+          const items = stuck.filter((row) => row.state === state)
+          return Response.json({
+            items,
+            total: items.length,
+            limit: 100,
+            offset: 0,
+          })
+        }
         return Response.json({
-          items,
-          total: path.includes('state=labeled')
-            ? items.length
-            : (total ?? items.length),
+          items: rows,
+          total: total ?? rows.length,
           limit: 100,
           offset: 0,
         })
@@ -136,6 +158,7 @@ beforeEach(() => {
           status: failing.includes(id) ? 'failed' : 'succeeded',
           state: failing.includes(id) ? null : 'approved',
           labelNotOwned: notOwned,
+          labelInUse: inUse,
         })),
       })
     }),
@@ -350,4 +373,79 @@ it('lists the requests that were never sent when a later batch throws', async ()
   expect(screen.getByText(/Movie 51: No answer/)).toBeTruthy()
   expect(screen.queryByText(/Movie 50: /)).toBeNull()
   expect(writes()).toHaveLength(2)
+})
+
+it('loads more titles on their lists past the first page', async () => {
+  labeled = Array.from({ length: 130 }, (_, index) => ({
+    ...waiting,
+    id: 1000 + index,
+    state: 'labeled' as const,
+    title: `Listed ${index + 1}`,
+    canRevoke: true,
+  }))
+  render(<RequestsAdmin />)
+  expect(await screen.findByText('Listed 100')).toBeTruthy()
+  expect(screen.queryByText('Listed 101')).toBeNull()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Show more (100 of 130 shown)' }),
+  )
+
+  expect(await screen.findByText('Listed 130')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /^Show more/ })).toBeNull()
+  expect(
+    calls.some((call) =>
+      call.path.includes('state=labeled&limit=100&offset=100'),
+    ),
+  ).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Listed 130' }))
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toEqual({ ids: [1129], reason: null })
+})
+
+it('offers to remove a title that did not finish only when it can be revoked', async () => {
+  stuck = [
+    {
+      ...waiting,
+      id: 20,
+      state: 'failed',
+      title: 'Kept label',
+      canRevoke: true,
+    },
+    {
+      ...waiting,
+      id: 21,
+      state: 'failed',
+      title: 'No label',
+      canRevoke: false,
+    },
+    { ...waiting, id: 22, state: 'available', title: 'Stuck', canRevoke: true },
+  ]
+  render(<RequestsAdmin />)
+  expect(await screen.findByText('Did not finish')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Remove Kept label' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Remove Stuck' })).toBeTruthy()
+  expect(screen.queryByText('No label')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Kept label' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].path).toBe('/api/v1/requests/revoke')
+  expect(writes()[0].body).toEqual({ ids: [20], reason: null })
+})
+
+it('says when a revoked label belongs to another profile now', async () => {
+  labeled = [
+    {
+      ...waiting,
+      id: 8,
+      state: 'labeled',
+      title: 'Spirited Away',
+      canRevoke: true,
+    },
+  ]
+  inUse = true
+  render(<RequestsAdmin />)
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Remove Spirited Away' }),
+  )
+  expect(await screen.findByText(/now belongs to another profile/)).toBeTruthy()
 })

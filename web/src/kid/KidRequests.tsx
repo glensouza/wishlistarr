@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useT, type MessageKey } from '../i18n'
 import {
+  historyPageSize,
   listKidHistory,
   listKidRequests,
   type KidHistoryAction,
@@ -58,6 +59,9 @@ export default function KidRequests() {
   const [history, setHistory] = useState<KidHistoryEntry[] | null>(null)
   const [rowsFailed, setRowsFailed] = useState(false)
   const [historyFailed, setHistoryFailed] = useState(false)
+  const [moreHistory, setMoreHistory] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [moreFailed, setMoreFailed] = useState(false)
   const [version, setVersion] = useState(0)
 
   useEffect(() => {
@@ -67,14 +71,38 @@ export default function KidRequests() {
         if (!current) return
         if (loaded.status === 'fulfilled') setRows(loaded.value)
         setRowsFailed(loaded.status === 'rejected')
-        if (events.status === 'fulfilled') setHistory(events.value)
+        if (events.status === 'fulfilled') {
+          setHistory(events.value)
+          setMoreHistory(events.value.length === historyPageSize)
+        }
         setHistoryFailed(events.status === 'rejected')
+        setMoreFailed(false)
       },
     )
     return () => {
       current = false
     }
   }, [version])
+
+  async function showMore() {
+    if (loadingMore || history === null) return
+    setLoadingMore(true)
+    setMoreFailed(false)
+    try {
+      const page = await listKidHistory(history.length)
+      setHistory((current) => [
+        ...(current ?? []),
+        ...page.filter(
+          (entry) => !(current ?? []).some((item) => item.id === entry.id),
+        ),
+      ])
+      setMoreHistory(page.length === historyPageSize)
+    } catch {
+      setMoreFailed(true)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const retry = (
     <button type="button" onClick={() => setVersion((value) => value + 1)}>
@@ -126,6 +154,16 @@ export default function KidRequests() {
             </li>
           ))}
         </ul>
+      )}
+      {moreFailed && <p role="alert">{t('kidRequests.historyFailedToLoad')}</p>}
+      {history !== null && moreHistory && (
+        <button
+          type="button"
+          disabled={loadingMore}
+          onClick={() => void showMore()}
+        >
+          {t('kidRequests.showMore')}
+        </button>
       )}
     </section>
   )

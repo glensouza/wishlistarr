@@ -30,9 +30,12 @@ beforeEach(() => {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
       if (path.startsWith('/api/v1/kid/requests/history')) {
+        const query = new URL(path, 'http://localhost').searchParams
+        const offset = Number(query.get('offset') ?? '0')
+        const limit = Number(query.get('limit') ?? '50')
         return historyDown
           ? Response.json({ title: 'Down' }, { status: 500 })
-          : Response.json(history)
+          : Response.json(history.slice(offset, offset + limit))
       }
       return Response.json(rows)
     }),
@@ -150,4 +153,42 @@ it('shows the requests when the history fails and retries it', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
   expect(await screen.findByText('You asked for this')).toBeTruthy()
   expect(screen.queryByText('What happened could not be loaded.')).toBeNull()
+})
+
+it('shows more history when the first page is full', async () => {
+  history = Array.from({ length: 60 }, (_, index) => ({
+    id: 100 - index,
+    requestId: 8,
+    kind: 'movie' as const,
+    tmdbId: 129,
+    title: `Title ${index + 1}`,
+    action: 'asked' as const,
+    at: '2026-10-22T00:00:00Z',
+    note: null,
+  }))
+  render(<KidRequests />)
+  expect(await screen.findByText('Title 50')).toBeTruthy()
+  expect(screen.queryByText('Title 51')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
+
+  expect(await screen.findByText('Title 60')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
+})
+
+it('does not offer more history when the first page is not full', async () => {
+  history = [
+    {
+      id: 1,
+      requestId: 8,
+      kind: 'movie',
+      tmdbId: 129,
+      title: 'Only one',
+      action: 'asked',
+      at: '2026-10-22T00:00:00Z',
+      note: null,
+    },
+  ]
+  render(<KidRequests />)
+  expect(await screen.findByText('Only one')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
 })
