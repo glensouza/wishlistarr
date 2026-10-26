@@ -5,8 +5,12 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
+using Wishlistarr.Api.Titles;
+using Wishlistarr.Core.Kids;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Kids;
 
@@ -158,6 +162,8 @@ public static class KidEndpoints
 
         signedIn.MapKidRequests();
         signedIn.MapKidSearch();
+        signedIn.MapKidTitles();
+        signedIn.MapKidHome();
     }
 
     public static void MapParentKidProfiles(this RouteGroupBuilder parent)
@@ -177,6 +183,24 @@ public static class KidEndpoints
             .WithName("ListKidProfiles")
             .WithSummary("Lists kid profiles. Archived profiles are not included and PIN hashes are never returned. Profiles mapped to a Plex user include whether that user enforces the label for movies and TV.")
             .Produces<IEnumerable<KidProfileSummary>>();
+
+        profiles.MapGet("/home-options", async (ITmdbClient tmdb, CancellationToken ct) =>
+        {
+            IReadOnlyList<TmdbListedGenre> genres;
+            try
+            {
+                genres = await tmdb.GetGenresAsync(ct: ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
+            {
+                genres = [];
+            }
+
+            return new HomeRowOptions(HomeRowTypes.Defaults, [.. genres.Select(genre => new HomeGenreOption(genre.Id, genre.Name, genre.Movie, genre.Tv))]);
+        })
+            .WithName("GetKidHomeOptions")
+            .WithSummary("Returns the default home rows and the TMDB genres a parent can add as rows. The genre list is empty when TMDB cannot be reached.")
+            .Produces<HomeRowOptions>();
 
         profiles.MapPost("/", async (KidProfileRequest? request, KidProfiles service, CancellationToken ct) =>
         {
@@ -232,6 +256,8 @@ public static class KidEndpoints
             .WithSummary("Unlocks a locked kid profile and clears its failed PIN counts.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        profiles.MapRequestHistory();
     }
 
     public static async Task ValidateKidSessionAsync(CookieValidatePrincipalContext context)
@@ -316,6 +342,10 @@ public sealed record KidProfileSummary(
     IReadOnlyList<int> BlockedGenreIds,
     IReadOnlyList<int> BlockedKeywordIds,
     IReadOnlyList<string> AllowedOriginalLanguages,
+    IReadOnlyList<string> HomeRows,
+    bool AutoApprove,
+    RatingLevel? AutoApproveMovieRating,
+    RatingLevel? AutoApproveTvRating,
     ProfileRestrictions? PlexRestrictions = null)
 {
     public static KidProfileSummary From(KidProfile profile) => From(profile, null, null);
@@ -336,5 +366,13 @@ public sealed record KidProfileSummary(
         profile.BlockedGenreIds,
         profile.BlockedKeywordIds,
         profile.AllowedOriginalLanguages,
+        profile.HomeRows,
+        profile.AutoApprove,
+        profile.AutoApproveMovieRating,
+        profile.AutoApproveTvRating,
         restrictions);
 }
+
+public sealed record HomeGenreOption(int Id, string Name, bool Movie, bool Tv);
+
+public sealed record HomeRowOptions(IReadOnlyList<string> DefaultRows, IReadOnlyList<HomeGenreOption> Genres);

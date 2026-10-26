@@ -83,6 +83,12 @@ Outside the US, a few letter ratings are recognized (`U` in GB and FR, `G` and `
 
 ## Profile configuration
 
-Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids and allowed original languages. `ContentPolicy.FromAgeLimits` turns each age limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on. `ContentPolicy.ForProfile` does the same and copies the three lists. See [kid profiles](kid-profiles.md) for how they are saved.
+Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids and allowed original languages. [Home](kid-home.md) shows a title only when the decision is `Allowed`, so a title that needs approval or whose lookup failed is left out rather than masked. `ContentPolicy.FromAgeLimits` turns each age limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on. `ContentPolicy.ForProfile` does the same and copies the three lists. See [kid profiles](kid-profiles.md) for how they are saved.
 
 `Preschool` cannot be reached from an age limit. TV-Y, G and TV-G are all suitable for every age, so no age separates them; a policy can still set `Preschool` as its max level directly to allow only TV-Y.
+
+## Auto-approve
+
+Auto-approve is not a content rule and it cannot turn a `Blocked` decision into an allowed one. It only decides whether a request that the policy left pending, or an allowed title that still has to be downloaded, can skip a parent. The profile stores a switch and an optional rating ceiling for movies and for TV. See [requests](requests.md#auto-approve) for the endpoints and the allowance.
+
+A ceiling compares the title's rating level, the same level `RatingRule` would report, with the ceiling for that kind. A title at or below the ceiling qualifies. An unrated title has no level, so it never qualifies, and the switch does not approve it either: unrated titles always wait for a parent, in or out of the library. The switch approves only titles the policy allows and that have a known rating. A ceiling, when set, always applies, with the switch on or off: with the switch on, a title above the ceiling for its kind is not approved. The switch on with no ceiling approves any such title. A missing genre list does not qualify either when the profile blocks genres, even when the switch is on, a rating is known, or the combined decision names another reason such as `Unrated`. A missing list is not evidence that no blocked genre is present. A lookup that fails is treated the same way and the request stays pending.

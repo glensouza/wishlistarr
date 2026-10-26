@@ -27,7 +27,7 @@ async function expectSignedOutAfter(signOutStatus: number) {
       calls.push(`${init?.method ?? 'GET'} ${url}`)
       if (url === '/api/v1/kid/me')
         return Response.json({ id: '1', name: 'Nia' })
-      if (url === '/api/v1/kid/requests') {
+      if (url === '/api/v1/kid/wishlist') {
         return Response.json({ title: 'Sign in' }, { status: 403 })
       }
       if (url === '/api/v1/auth/antiforgery') {
@@ -52,7 +52,7 @@ async function expectSignedOutAfter(signOutStatus: number) {
 it('ends the server session and the client session on a forbidden answer', async () => {
   const calls = await expectSignedOutAfter(204)
   expect(
-    calls.filter((call) => call === 'GET /api/v1/kid/requests'),
+    calls.filter((call) => call === 'GET /api/v1/kid/wishlist'),
   ).toHaveLength(1)
 })
 

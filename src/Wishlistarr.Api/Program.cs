@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
+using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
@@ -16,7 +17,9 @@ using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
+using Wishlistarr.Api.Titles;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core;
 using Wishlistarr.Data;
@@ -36,6 +39,8 @@ builder.Host.UseSerilog(
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
             .Enrich.With<WebhookTokenRedactor>()
+            .Enrich.With<LogEventRedactor>()
+            .WriteTo.Sink(services.GetRequiredService<LogBuffer>())
             .WriteTo.Console()
             .WriteTo.File(
                 Path.Combine(directory.LogsPath, "wishlistarr-.log"),
@@ -63,8 +68,13 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
         options.XmlRepository = new FileSystemXmlRepository(new DirectoryInfo(directory.KeysPath), loggerFactory));
 
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddLogBuffer(builder.Configuration);
+builder.Services.AddIntegrationHealthChecks(builder.Configuration);
+builder.AddWishlistarrMetrics();
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddBackgroundJobs(builder.Configuration);
+builder.Services.AddBackups(builder.Configuration);
+builder.Services.AddUpdateCheck();
 builder.Services.AddWebhooks(builder.Configuration);
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<SettingsStore>();
@@ -73,15 +83,26 @@ builder.Services.AddPlex<StoredAppSettings>();
 builder.Services.AddArr<StoredAppSettings>();
 builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
+builder.Services.AddSingleton<RequestLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
+builder.Services.AddOptions<ApprovalOptions>()
+    .Bind(builder.Configuration.GetSection(ApprovalOptions.SectionName))
+    .Validate(options => options.IsValid(), "The Approval configuration section is invalid.")
+    .ValidateOnStart();
+builder.Services.AddScoped<RequestLabeling>();
+builder.Services.AddScoped<RequestApproval>();
+builder.Services.AddScoped<RequestAccess>();
 builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();
 builder.Services.AddScoped<PlexEnforcement>();
 builder.Services.AddLibraryIndex();
+builder.Services.AddScoped<KidContentPipeline>();
+builder.Services.AddScoped<KidHome>();
 builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.AddScoped<KidWishlist>();
 builder.Services.AddScoped<KidSearch>();
+builder.Services.AddScoped<KidTitleDetails>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();
@@ -89,9 +110,14 @@ builder.Services.AddOpenApi(options => options.AddSecuritySchemes());
 
 WebApplication app = builder.Build();
 
+BackupService backups = app.Services.GetRequiredService<BackupService>();
+await backups.ApplyPendingRestoreAsync();
+
 using (IServiceScope scope = app.Services.CreateScope())
 {
-    await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Database.MigrateAsync();
+    WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+    await backups.BackupIfMigrationsPendingAsync(db);
+    await db.Database.MigrateAsync();
     await app.Services.GetRequiredService<ApiKeyService>()
         .EnsureAsync(scope.ServiceProvider.GetRequiredService<SettingsStore>());
     await scope.ServiceProvider.GetRequiredService<ParentAccounts>().LoadSetupStateAsync();
@@ -106,6 +132,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseWishlistarrSecurity();
 
+app.MapWishlistarrMetrics();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithTags("System")
     .WithName("GetHealth")

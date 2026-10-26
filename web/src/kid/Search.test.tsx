@@ -1,8 +1,16 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { axe } from '../test/axe'
 import Search, { searchDebounceMs, searchMaxPage } from './Search'
+
+const renderSearch = () =>
+  render(
+    <MemoryRouter>
+      <Search />
+    </MemoryRouter>,
+  )
 
 type Item = {
   kind: 'movie' | 'show'
@@ -105,7 +113,7 @@ const type = async (text: string) => {
 }
 
 it('waits for typing to pause and sends one request for the final text', async () => {
-  render(<Search />)
+  renderSearch()
   await type('matrix')
 
   expect(await screen.findByText('Tiny Tale (2019)')).toBeTruthy()
@@ -115,7 +123,7 @@ it('waits for typing to pause and sends one request for the final text', async (
 })
 
 it('does not search for a single letter and explains why', async () => {
-  render(<Search />)
+  renderSearch()
   await type('a')
 
   expect(screen.getByText('Type at least 2 letters.')).toBeTruthy()
@@ -132,7 +140,7 @@ it('cancels a stale request and shows only the latest answer', async () => {
           ),
         )
       : Promise.resolve(page([bluey]))
-  render(<Search />)
+  renderSearch()
   const user = await type('ab')
   await waitFor(() => expect(searches()).toHaveLength(1))
 
@@ -146,10 +154,13 @@ it('cancels a stale request and shows only the latest answer', async () => {
 })
 
 it('shows big results with availability when the library is known', async () => {
-  const { container } = render(<Search />)
+  const { container } = renderSearch()
   await type('tiny')
 
   await screen.findByText('Tiny Tale (2019)')
+  expect(
+    screen.getByRole('link', { name: 'Tiny Tale (2019)' }).getAttribute('href'),
+  ).toBe('/title/movie/800')
   expect(screen.getByText('Ready to watch')).toBeTruthy()
   expect(screen.getByText('Not here yet')).toBeTruthy()
   expect(container.querySelector('img')?.getAttribute('src')).toBe(
@@ -160,7 +171,7 @@ it('shows big results with availability when the library is known', async () => 
 
 it('omits availability when the library index cannot say', async () => {
   searchReply = async () => page([{ ...tiny, availability: null }])
-  render(<Search />)
+  renderSearch()
   await type('tiny')
 
   await screen.findByText('Tiny Tale (2019)')
@@ -170,7 +181,7 @@ it('omits availability when the library index cannot say', async () => {
 
 it('shows a friendly empty state', async () => {
   searchReply = async (call) => page([], false, 1, queryOf(call))
-  const { container } = render(<Search />)
+  const { container } = renderSearch()
   await type('zzzz')
 
   expect(
@@ -182,7 +193,7 @@ it('shows a friendly empty state', async () => {
 })
 
 it('sends the request and shows what happened', async () => {
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
@@ -202,7 +213,7 @@ it('sends the request and shows what happened', async () => {
 it('says so when the title went straight onto the list', async () => {
   requestReply = async () =>
     Response.json({ id: 1, state: 'labeled', requestCount: 1 }, { status: 201 })
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
@@ -214,7 +225,7 @@ it('says so when the title went straight onto the list', async () => {
 it('says so when the title was already asked for', async () => {
   requestReply = async () =>
     Response.json({ id: 1, state: 'pending', requestCount: 1 }, { status: 200 })
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
@@ -228,7 +239,7 @@ it('says so when the title was already asked for', async () => {
 it('shows a kind message when a request is turned down and lets the kid retry', async () => {
   requestReply = async () =>
     Response.json({ title: "That one isn't available." }, { status: 422 })
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
@@ -241,13 +252,17 @@ it('shows a kind message when a request is turned down and lets the kid retry', 
 })
 
 it('can be used from the keyboard alone', async () => {
-  render(<Search />)
+  renderSearch()
   const user = userEvent.setup()
   await user.tab()
   expect(document.activeElement).toBe(screen.getByRole('searchbox'))
   await user.keyboard('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
+  await user.tab()
+  expect(document.activeElement).toBe(
+    screen.getByRole('link', { name: 'Tiny Tale (2019)' }),
+  )
   await user.tab()
   expect(document.activeElement).toBe(
     screen.getByRole('button', { name: 'Ask for Tiny Tale' }),
@@ -264,7 +279,7 @@ it('can be used from the keyboard alone', async () => {
 })
 
 it('works with touch taps', async () => {
-  render(<Search />)
+  renderSearch()
   const user = userEvent.setup()
   await user.pointer({
     keys: '[TouchA]',
@@ -288,7 +303,7 @@ it('loads more results without repeating titles', async () => {
     call.path.endsWith('page=2')
       ? page([tiny, bluey], false, 2)
       : page([tiny], true)
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
@@ -303,7 +318,7 @@ it('reports a failed search and tries again on request', async () => {
   let fail = true
   searchReply = async () =>
     fail ? Response.json({ title: 'x' }, { status: 502 }) : page([tiny])
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   expect((await screen.findByRole('alert')).textContent).toContain(
     'Search is not working right now.',
@@ -317,7 +332,7 @@ it('reports a failed search and tries again on request', async () => {
 
 it('shows a masked title without poster or overview and still lets the kid ask', async () => {
   searchReply = async () => page([masked])
-  const { container } = render(<Search />)
+  const { container } = renderSearch()
   const user = await type('unrated')
 
   await screen.findByText('Unrated Short (2020)')
@@ -338,7 +353,7 @@ it('shows a masked title without poster or overview and still lets the kid ask',
 })
 
 it('does not mark ordinary titles as needing a parent', async () => {
-  render(<Search />)
+  renderSearch()
   await type('tiny')
 
   await screen.findByText('Tiny Tale (2019)')
@@ -352,7 +367,7 @@ it('keeps looking on the next page instead of calling an empty first page nothin
       : call.path.endsWith('page=2')
         ? page([], true, 2, queryOf(call))
         : page([tiny], false, 3, queryOf(call))
-  render(<Search />)
+  renderSearch()
   await type('tiny')
 
   expect(await screen.findByText('Tiny Tale (2019)')).toBeTruthy()
@@ -371,7 +386,7 @@ it('stops after the last page and then says nothing was found', async () => {
     )
     return page([], number < searchMaxPage, number, queryOf(call))
   }
-  render(<Search />)
+  renderSearch()
   await type('zzzz')
 
   expect(
@@ -386,7 +401,7 @@ it('words the empty state with the searched text, not what is typed since', asyn
     queryOf(call) === 'zzzz'
       ? page([], false, 1, 'zzzz')
       : new Promise<Response>(() => undefined)
-  render(<Search />)
+  renderSearch()
   const user = await type('zzzz')
   await screen.findByText(/We could not find anything for "zzzz"/)
 
@@ -397,7 +412,7 @@ it('words the empty state with the searched text, not what is typed since', asyn
 
 it('uses the singular when exactly one title is found', async () => {
   searchReply = async () => page([tiny])
-  render(<Search />)
+  renderSearch()
   await type('tiny')
 
   expect(await screen.findByText('Found 1 title')).toBeTruthy()
@@ -411,7 +426,7 @@ it('keeps loaded results when show more fails and retries only that page', async
         ? Response.json({ title: 'x' }, { status: 502 })
         : page([bluey], false, 2)
       : page([tiny], true)
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 
@@ -437,7 +452,7 @@ it('keeps loaded results when show more fails and retries only that page', async
 
 it('keeps the accessible name while a request is being sent', async () => {
   requestReply = () => new Promise<Response>(() => undefined)
-  render(<Search />)
+  renderSearch()
   const user = await type('tiny')
   await screen.findByText('Tiny Tale (2019)')
 

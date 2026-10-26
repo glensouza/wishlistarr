@@ -13,6 +13,8 @@ namespace Wishlistarr.Tests.Requests;
 
 public sealed class KidWishlistTests
 {
+    private const string WishlistPath = "/api/v1/kid/wishlist";
+
     private static readonly string[] ResponseFields = ["remaining", "resetsAt", "items"];
     private static readonly string[] ItemFields = ["id", "kind", "tmdbId", "title", "state", "note", "plex"];
     private static readonly string[] PlexFields = ["webUrl"];
@@ -27,7 +29,7 @@ public sealed class KidWishlistTests
         await AddRequestAsync(factory, beauId, 711, "Beau Secret Show", kind: MediaKind.Show);
         await AddRequestAsync(factory, adaId, 712, "Ada Newer");
 
-        HttpResponseMessage response = await ada.GetAsync(KidRequestApiFactory.RequestsPath + "?profileId=" + beauId);
+        HttpResponseMessage response = await ada.GetAsync(WishlistPath + "?profileId=" + beauId);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(response.Headers.CacheControl is { NoStore: true, Private: true });
@@ -38,7 +40,7 @@ public sealed class KidWishlistTests
         Assert.All(items, item => Assert.Equal(ItemFields, Names(item)));
         Assert.DoesNotContain("Beau Secret Show", body.GetRawText(), StringComparison.Ordinal);
 
-        JsonElement beauBody = await (await beau.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement beauBody = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(["Beau Secret Show"], beauBody.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("title").GetString()));
         Assert.DoesNotContain("Ada Movie", beauBody.GetRawText(), StringComparison.Ordinal);
     }
@@ -73,7 +75,7 @@ public sealed class KidWishlistTests
         int systemDenied = await AddRequestAsync(factory, adaId, 727, "System Said No");
         await MoveAsync(factory, systemDenied, RequestState.Denied, RequestActor.System("policy"), SystemReason);
 
-        JsonElement body = await (await ada.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement body = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         string text = body.GetRawText();
 
         Assert.Equal("waiting", Item(body, "Still Waiting").GetProperty("state").GetString());
@@ -115,7 +117,7 @@ public sealed class KidWishlistTests
         Assert.NotEmpty(token);
         Assert.NotEmpty(serverUrl);
 
-        HttpResponseMessage response = await ada.GetAsync(KidRequestApiFactory.RequestsPath);
+        HttpResponseMessage response = await ada.GetAsync(WishlistPath);
         string text = await response.Content.ReadAsStringAsync();
         JsonElement body = JsonSerializer.Deserialize<JsonElement>(text);
         string machine = FakePlexServer.MachineIdentifier;
@@ -153,7 +155,7 @@ public sealed class KidWishlistTests
         (HttpClient ada, int adaId) = await factory.SignInKidAsync();
         await ReachAsync(factory, adaId, 740, "Ready Film", RequestState.Labeled);
 
-        JsonElement body = await (await ada.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement body = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal("ready", Item(body, "Ready Film").GetProperty("state").GetString());
         Assert.Equal(JsonValueKind.Null, Item(body, "Ready Film").GetProperty("plex").ValueKind);
@@ -173,19 +175,19 @@ public sealed class KidWishlistTests
         await AddRequestAsync(factory, adaId, 752, "Already Here", counts: false);
         await AddRequestAsync(factory, beauId, 753, "Beaus Wish");
 
-        JsonElement usedUp = await (await ada.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement usedUp = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, usedUp.GetProperty("remaining").GetInt32());
         Assert.Equal(
             AllowanceWeek.NextStart(factory.Clock.GetUtcNow(), TimeZoneInfo.Utc),
             usedUp.GetProperty("resetsAt").GetDateTimeOffset());
-        JsonElement beauUsed = await (await beau.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement beauUsed = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, beauUsed.GetProperty("remaining").GetInt32());
 
         // Monday 26 October is the next allowance week and is still inside the seven-day kid session.
         factory.SetClock(new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.Zero));
-        JsonElement nextWeek = await (await ada.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement nextWeek = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, nextWeek.GetProperty("remaining").GetInt32());
-        JsonElement beauNext = await (await beau.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement beauNext = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, beauNext.GetProperty("remaining").GetInt32());
     }
 
@@ -196,11 +198,11 @@ public sealed class KidWishlistTests
         (HttpClient open, _) = await factory.SignInKidAsync("Ada");
         (HttpClient none, _) = await factory.SignInKidAsync("Beau", weeklyAllowance: 0);
 
-        JsonElement unlimited = await (await open.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement unlimited = await (await open.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(JsonValueKind.Null, unlimited.GetProperty("remaining").ValueKind);
         Assert.Equal(JsonValueKind.Null, unlimited.GetProperty("resetsAt").ValueKind);
 
-        JsonElement blocked = await (await none.GetAsync(KidRequestApiFactory.RequestsPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement blocked = await (await none.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, blocked.GetProperty("remaining").GetInt32());
         Assert.Equal(JsonValueKind.String, blocked.GetProperty("resetsAt").ValueKind);
     }
@@ -213,8 +215,8 @@ public sealed class KidWishlistTests
         HttpClient anonymous = factory.CreateClient();
         HttpClient parent = await factory.CreateAuthorizedClientAsync();
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(KidRequestApiFactory.RequestsPath)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await parent.GetAsync(KidRequestApiFactory.RequestsPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(WishlistPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await parent.GetAsync(WishlistPath)).StatusCode);
     }
 
     private static JsonElement Item(JsonElement body, string title) =>

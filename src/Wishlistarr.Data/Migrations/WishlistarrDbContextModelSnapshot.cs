@@ -181,6 +181,17 @@ namespace Wishlistarr.Data.Migrations
                     b.Property<DateTimeOffset?>("ArchivedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("AutoApprove")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AutoApproveMovieRating")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AutoApproveTvRating")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Avatar")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -199,6 +210,10 @@ namespace Wishlistarr.Data.Migrations
 
                     b.Property<int>("FailedPinCount")
                         .HasColumnType("INTEGER");
+
+                    b.PrimitiveCollection<string>("HomeRows")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("LastFailedPinAt")
                         .HasColumnType("TEXT");
@@ -349,6 +364,9 @@ namespace Wishlistarr.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
+
+                    b.Property<long?>("PlexAddedAtUnix")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset?>("PlexUpdatedAt")
                         .HasColumnType("TEXT");
@@ -514,7 +532,7 @@ namespace Wishlistarr.Data.Migrations
 
                     b.HasIndex("KidProfileId", "Kind", "TmdbId")
                         .IsUnique()
-                        .HasFilter("\"State\" <> 'Denied'");
+                        .HasFilter("\"State\" <> 'Denied' AND \"State\" <> 'Revoked'");
 
                     b.ToTable("MediaRequests");
                 });

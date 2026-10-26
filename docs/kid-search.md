@@ -1,6 +1,6 @@
 # Kid search
 
-Kids look for movies and shows with search as you type. `GET /api/v1/kid/search?q=<text>&page=<n>` needs a Kid session and always answers for the signed-in profile; there is no way to ask for another profile. Posters are served to kids from `GET /api/v1/kid/images/tmdb/{size}/{file}`, which uses the same proxy as the parent one (see [TMDB](tmdb.md#image-proxy)) but only for the search poster size (`w342`); any other size answers `400`.
+Kids look for movies and shows with search as you type. `GET /api/v1/kid/search?q=<text>&page=<n>` needs a Kid session and always answers for the signed-in profile; there is no way to ask for another profile. A result links to the title screen (see [Title details](title-details.md)). Posters are served to kids from `GET /api/v1/kid/images/tmdb/{size}/{file}`, which uses the same proxy as the parent one (see [TMDB](tmdb.md#image-proxy)). Kids can request `w342` (search and title posters), `w185` (people and season posters) and `w1280` (backdrops). Any other size answers `400`. For those sizes the proxy serves any file name that passes the name check, not only files that appeared in an allowed title's response. Restricting it would need a per-profile record of every file name handed out, kept across restarts and instances, and an allowed title that is masked as needing approval would still need its own exceptions. It is acceptable because the host is fixed, redirects are not followed, only JPEG and PNG up to 10 MB are returned, a signed-in kid is required, and TMDB images are public artwork that is not tied to a title the policy blocked: knowing a file name already requires finding it elsewhere.
 
 ## Query rules
 
@@ -18,7 +18,7 @@ Failures answer `502` (TMDB unreachable) or `503` (no API key) with a message th
 
 ## Filtering
 
-Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title). Search results supply TMDB genre ids (`genre_ids`) and the original language. When the profile blocks keywords, each title's keyword ids are read from `GET /movie/{id}/keywords` or `GET /tv/{id}/keywords` in the same lookup pass as its certification. A profile with no keyword blocks does not call that endpoint.
+Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title). [Home](kid-home.md) uses that same pipeline and keeps only titles the policy allows. Search results supply TMDB genre ids (`genre_ids`) and the original language. When the profile blocks keywords, each title's keyword ids are read from `GET /movie/{id}/keywords` or `GET /tv/{id}/keywords` in the same lookup pass as its certification. A profile with no keyword blocks does not call that endpoint.
 
 - `Blocked` titles are removed before anything is returned. A keyword id on the profile's list blocks the title. A successful keyword lookup that returns none does not.
 - Titles whose certification cannot be read, because TMDB failed for that title or the lookup did not finish within the budget below, are removed. The same applies to a keyword lookup when the profile has keyword blocks. Unknown never counts as allowed.

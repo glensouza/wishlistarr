@@ -44,6 +44,20 @@ export type RequestedTitle = {
   alreadyAsked: boolean
 }
 
+export type HomeItem = SearchItem
+
+export type HomeRow = {
+  id: string
+  genreId: number | null
+  genreName: string | null
+  items: HomeItem[]
+}
+
+export type HomeResponse = { rows: HomeRow[] }
+
+export const getHome = (signal?: AbortSignal) =>
+  request<HomeResponse>('GET', '/api/v1/kid/home', undefined, signal)
+
 export const searchTitles = (
   query: string,
   page: number,
@@ -89,6 +103,98 @@ export type KidWishlist = {
 }
 
 export const getWishlist = (signal?: AbortSignal) =>
-  request<KidWishlist>('GET', '/api/v1/kid/requests', undefined, signal)
+  request<KidWishlist>('GET', '/api/v1/kid/wishlist', undefined, signal)
+
+export type TitleCastMember = {
+  name: string
+  character: string | null
+  profileUrl: string | null
+}
+
+export type TitleSeason = {
+  number: number
+  name: string | null
+  overview: string | null
+  posterUrl: string | null
+  episodeCount: number
+  year: string | null
+}
+
+export type TitleRequestState = {
+  state: string
+  requestCount: number
+}
+
+export type TitleDetails = {
+  kind: SearchItem['kind']
+  tmdbId: number
+  title: string
+  year: string | null
+  overview: string | null
+  posterUrl: string | null
+  backdropUrl: string | null
+  runtimeMinutes: number | null
+  rating: string | null
+  availability: SearchItem['availability']
+  needsParent: boolean
+  trailerKey: string | null
+  cast: TitleCastMember[]
+  seasons: TitleSeason[]
+  request: TitleRequestState | null
+}
+
+export const getTitle = (
+  kind: SearchItem['kind'],
+  tmdbId: number,
+  signal: AbortSignal,
+) =>
+  request<TitleDetails>(
+    'GET',
+    `/api/v1/kid/titles/${kind}/${tmdbId}`,
+    undefined,
+    signal,
+  )
+
+export type KidRequest = {
+  id: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  state: string
+  requestCount: number
+  denialReason: string | null
+}
+
+export const listKidRequests = () =>
+  request<KidRequest[]>('GET', '/api/v1/kid/requests')
+
+export type KidHistoryAction =
+  | 'granted'
+  | 'asked'
+  | 'approved'
+  | 'autoApproved'
+  | 'denied'
+  | 'ready'
+  | 'revoked'
+  | 'failed'
+
+export type KidHistoryEntry = {
+  id: number
+  requestId: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  action: KidHistoryAction
+  at: string
+  note: string | null
+}
+
+export const historyPageSize = 50
+
+export const listKidHistory = (offset = 0, limit = historyPageSize) =>
+  request<KidHistoryEntry[]>(
+    'GET',
+    `/api/v1/kid/requests/history?limit=${limit}&offset=${offset}`,
+  )
 
 export const pinLength = { min: 4, max: 8 }

@@ -291,6 +291,7 @@ public sealed partial class LibraryRefresh(
             item.Title = Truncate(media.Title, 500);
             item.Year = media.Year;
             item.PlexUpdatedAt = entry.UpdatedAt;
+            item.PlexAddedAtUnix = entry.AddedAt?.ToUnixTimeSeconds();
             item.IndexedAt = now;
             if (entry.Labels is not null)
             {

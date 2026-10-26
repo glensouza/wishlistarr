@@ -1,3 +1,4 @@
+using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
@@ -6,7 +7,9 @@ using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
+using Wishlistarr.Api.Titles;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Arr;
@@ -29,12 +32,16 @@ public static class ApiEndpoints
         v1.MapParentAuth();
         v1.MapParentKidProfiles();
         v1.MapParentKidDevices();
+        v1.MapRequests();
         v1.MapTmdb();
         v1.MapMediaServer();
         v1.MapArr();
         v1.MapSeerr();
         v1.MapJobs();
+        v1.MapBackups();
+        v1.MapUpdates();
         v1.MapWebhookSettings();
+        v1.MapObservability();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")
@@ -91,6 +98,19 @@ public static class ApiEndpoints
                     title: "Keys starting with 'seerr.' are managed by the Seerr endpoints.");
             }
 
+            if (key == UpdateChecker.CheckSettingKey)
+            {
+                if (!UpdateChecker.TryParseCheckEnabled(update.Value, out bool enabled))
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "The update check must be true or false.");
+                }
+
+                await store.SetAsync(key, enabled ? "true" : "false", false, ct);
+                return Results.NoContent();
+            }
+
             if (key == KidRequestFlow.TimeZoneSetting && !KidRequestFlow.TryFindTimeZone(update.Value, out _))
             {
                 return Results.Problem(
@@ -103,6 +123,19 @@ public static class ApiEndpoints
                 return Results.Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: $"The retention is a whole number of days from 1 to {TmdbRetention.MaxDays}.");
+            }
+
+            if (key == YoutubeTrailers.SettingKey)
+            {
+                if (!YoutubeTrailers.TryParse(update.Value, out bool trailers))
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "YouTube trailers are either true or false.");
+                }
+
+                await store.SetAsync(key, trailers ? "true" : "false", false, ct);
+                return Results.NoContent();
             }
 
             if (key == TmdbOptions.ApiKeySetting && string.IsNullOrWhiteSpace(update.Value))
@@ -121,7 +154,7 @@ public static class ApiEndpoints
             return Results.NoContent();
         })
             .WithName("PutSetting")
-            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180.")
+            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180; kids.youtube_trailers accepts true or false.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)

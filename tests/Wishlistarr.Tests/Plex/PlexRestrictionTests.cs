@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -193,6 +194,47 @@ public sealed class PlexRestrictionTests
         IReadOnlyDictionary<string, UserContentFilters>? filters = await provider.GetRequiredService<IMediaServerRestrictions>().GetUserFiltersAsync();
 
         Assert.Null(filters);
+    }
+
+    [Fact]
+    public async Task Plex_health_is_ok_when_the_mapped_user_enforces_the_label()
+    {
+        using PlexApiFactory factory = new();
+        factory.Fake.UsersXml = Users();
+        HttpClient client = await LinkedClientAsync(factory);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/api/v1/plex/server", new { serverId = FakePlexServer.MachineIdentifier })).StatusCode);
+        await CreateProfileAsync(client, "Ada", Enforced);
+
+        JsonElement plex = await PlexCheckAsync(client);
+
+        Assert.Equal("ok", plex.GetProperty("status").GetString());
+        Assert.Contains("Connected", plex.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(plex.GetProperty("fix").GetString()));
+    }
+
+    [Fact]
+    public async Task Plex_health_warns_when_the_label_is_not_enforced_and_the_public_endpoint_stays_plain()
+    {
+        using PlexApiFactory factory = new();
+        factory.Fake.UsersXml = Users();
+        HttpClient client = await LinkedClientAsync(factory);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/api/v1/plex/server", new { serverId = FakePlexServer.MachineIdentifier })).StatusCode);
+        await CreateProfileAsync(client, "Cy", Open);
+
+        JsonElement plex = await PlexCheckAsync(client);
+        string publicHealth = await factory.CreateClient().GetStringAsync("/api/health");
+
+        Assert.Equal("warning", plex.GetProperty("status").GetString());
+        Assert.Contains("Cy", plex.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Allow only", plex.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(plex.GetProperty("fix").GetString()));
+        Assert.DoesNotContain("Cy", publicHealth, StringComparison.Ordinal);
+    }
+
+    private static async Task<JsonElement> PlexCheckAsync(HttpClient client)
+    {
+        using JsonDocument document = JsonDocument.Parse(await client.GetStringAsync("/api/v1/system/health"));
+        return document.RootElement.EnumerateArray().Single(item => item.GetProperty("integration").GetString() == "plex").Clone();
     }
 
     private static string MessageFor(List<JsonElement> warnings, string name) =>

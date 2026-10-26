@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError } from '../api'
 import { useT, type MessageKey } from '../i18n'
 import {
@@ -232,8 +233,13 @@ function ResultCard({
       )}
       <div className="result-body">
         <h3 id={titleId}>
-          {item.title}
-          {item.year ? ` (${item.year})` : ''}
+          <Link
+            className="title-link"
+            to={`/title/${item.kind}/${item.tmdbId}`}
+          >
+            {item.title}
+            {item.year ? ` (${item.year})` : ''}
+          </Link>
         </h3>
         <p className="muted">
           {item.kind === 'movie' ? t('search.movie') : t('search.show')}

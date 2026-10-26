@@ -1,5 +1,17 @@
 import { request } from './api'
 
+export const ratingLevels = [
+  'preschool',
+  'general',
+  'children',
+  'parentalGuidance',
+  'teen',
+  'mature',
+  'adult',
+] as const
+
+export type RatingLevel = (typeof ratingLevels)[number]
+
 export type KidProfile = {
   id: number
   name: string
@@ -10,10 +22,14 @@ export type KidProfile = {
   plexLabel: string
   plexUserId: string | null
   weeklyAllowance: number | null
+  autoApprove: boolean
+  autoApproveMovieRating: RatingLevel | null
+  autoApproveTvRating: RatingLevel | null
   isLocked: boolean
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
   allowedOriginalLanguages: string[]
+  homeRows: string[]
   plexRestrictions?: PlexRestrictions | null
 }
 
@@ -29,6 +45,13 @@ export type PlexRestrictions = {
   television: LabelRestriction
 }
 
+export const builtInHomeRows = ['popular', 'library', 'genre']
+
+export type HomeOptions = {
+  defaultRows: string[]
+  genres: { id: number; name: string; movie: boolean; tv: boolean }[]
+}
+
 export type KidProfileInput = {
   name: string
   avatar: string
@@ -39,12 +62,19 @@ export type KidProfileInput = {
   plexLabel: string
   plexUserId: string | null
   weeklyAllowance: number | null
+  autoApprove: boolean
+  autoApproveMovieRating: RatingLevel | null
+  autoApproveTvRating: RatingLevel | null
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
   allowedOriginalLanguages: string[]
+  homeRows: string[]
 }
 
 const base = '/api/v1/kid-profiles'
+
+export const getHomeOptions = () =>
+  request<HomeOptions>('GET', `${base}/home-options`)
 
 export const listKidProfiles = () => request<KidProfile[]>('GET', base)
 

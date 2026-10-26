@@ -21,19 +21,29 @@ const ada: KidProfile = {
   plexLabel: 'Ada',
   plexUserId: null,
   weeklyAllowance: 3,
+  autoApprove: false,
+  autoApproveMovieRating: null,
+  autoApproveTvRating: null,
   isLocked: false,
   blockedGenreIds: [],
   blockedKeywordIds: [],
   allowedOriginalLanguages: [],
+  homeRows: ['popular', 'library', 'genre'],
 }
 
 let calls: Call[]
 let profiles: KidProfile[]
 let failNext: { status: number; title: string } | null
 let plexUsers: { id: string; name: string }[] | null
+let optionsFail: number
+let optionsGate: Promise<void> | null
+let optionRequests: number
 
 beforeEach(() => {
   calls = []
+  optionsFail = 0
+  optionsGate = null
+  optionRequests = 0
   profiles = [ada]
   failNext = null
   plexUsers = [
@@ -46,6 +56,21 @@ beforeEach(() => {
       const method = init?.method ?? 'GET'
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
+      }
+      if (path === '/api/v1/kid-profiles/home-options') {
+        optionRequests++
+        if (optionsGate) await optionsGate
+        if (optionsFail > 0) {
+          optionsFail--
+          return Response.json({ title: 'TMDB is down' }, { status: 502 })
+        }
+        return Response.json({
+          defaultRows: ['popular', 'library', 'genre'],
+          genres: [
+            { id: 35, name: 'Comedy', movie: true, tv: true },
+            { id: 37, name: 'Western', movie: false, tv: true },
+          ],
+        })
       }
       if (path === '/api/v1/plex/users') {
         return plexUsers
@@ -119,6 +144,31 @@ it('creates a profile and leaves the label empty so it defaults to the name', as
     movieAgeLimit: 8,
     tvAgeLimit: null,
     plexLabel: '',
+    homeRows: ['popular', 'library', 'genre'],
+    autoApprove: false,
+    autoApproveMovieRating: null,
+    autoApproveTvRating: null,
+  })
+})
+
+it('sends home rows in the chosen order and keeps an extra genre row', async () => {
+  profiles = [{ ...ada, homeRows: ['genre:35', 'library', 'popular'] }]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    (screen.getByRole('checkbox', { name: 'Comedy' }) as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Move Popular for my age up' }),
+  )
+  fireEvent.click(screen.getByRole('checkbox', { name: 'New in our library' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    homeRows: ['genre:35', 'popular'],
   })
 })
 
@@ -326,4 +376,163 @@ it('shows what Plex enforces for a mapped profile and how to fix it', async () =
     ),
   ).toBeTruthy()
   expect(screen.getAllByLabelText('Plex label enforcement')).toHaveLength(2)
+})
+
+it('adds a genre row from the picker and saves it', async () => {
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  fireEvent.change(await screen.findByLabelText('Add a genre row'), {
+    target: { value: '37' },
+  })
+  expect(
+    (screen.getByRole('checkbox', { name: 'Western' }) as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    homeRows: ['popular', 'library', 'genre', 'genre:37'],
+  })
+})
+
+it('round-trips auto-approve rules when a profile is saved', async () => {
+  profiles = [
+    {
+      ...ada,
+      autoApprove: true,
+      autoApproveMovieRating: 'teen',
+      autoApproveTvRating: null,
+    },
+  ]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    (screen.getByLabelText('Auto-approve requests') as HTMLInputElement)
+      .checked,
+  ).toBe(true)
+  expect(
+    (screen.getByLabelText('Movie rating ceiling') as HTMLSelectElement).value,
+  ).toBe('teen')
+  fireEvent.change(screen.getByLabelText('TV rating ceiling'), {
+    target: { value: 'children' },
+  })
+  fireEvent.click(screen.getByLabelText('Auto-approve requests'))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    autoApprove: false,
+    autoApproveMovieRating: 'teen',
+    autoApproveTvRating: 'children',
+  })
+})
+
+it('shows a loading state and keeps Save off until the home row choices arrive', async () => {
+  let release: () => void = () => {}
+  optionsGate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(screen.getByText('Loading home row choices')).toBeTruthy()
+  expect(
+    (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true)
+  expect(screen.getByRole('checkbox', { name: 'By genre' })).toBeTruthy()
+
+  release()
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  )
+  expect(screen.queryByText('Loading home row choices')).toBeNull()
+})
+
+it('reports a failed home options load, blocks saving and recovers on retry', async () => {
+  profiles = [{ ...ada, homeRows: ['library'] }]
+  optionsFail = 1
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'The home row choices could not be loaded.',
+  )
+  expect(
+    (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true)
+  expect(
+    (
+      screen.getByRole('checkbox', {
+        name: 'Popular for my age',
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(false)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => expect(optionRequests).toBe(2))
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  )
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Popular for my age' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({ homeRows: ['library', 'popular'] })
+})
+
+it('does not save a new profile with no rows when the options cannot load', async () => {
+  profiles = []
+  optionsFail = 1
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Add profile' }))
+  await screen.findByRole('alert')
+
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Cy' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'New profile' }))
+
+  expect(writes()).toHaveLength(0)
+  expect(
+    (
+      screen.getByRole('checkbox', {
+        name: 'New in our library',
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true)
+})
+
+it('says which media types each genre in the picker applies to', async () => {
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  const picker = await screen.findByLabelText('Add a genre row')
+  const labels = Array.from(picker.querySelectorAll('option')).map(
+    (option) => option.textContent,
+  )
+  expect(labels).toContain('Comedy (movies and TV)')
+  expect(labels).toContain('Western (TV)')
+})
+
+it('explains that a ceiling approves on its own and the switch alone approves any rated title', async () => {
+  profiles = [ada]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    screen.getByText(/ceiling alone approves titles at or below it/),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(/switch alone, with no ceiling, approves any allowed/),
+  ).toBeTruthy()
 })

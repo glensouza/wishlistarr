@@ -17,7 +17,8 @@ Recurring work runs as named jobs inside the application. A hosted scheduler che
     "PollInterval": "00:00:15",
     "HistoryRetention": "30.00:00:00",
     "Schedules": {
-      "job-history-cleanup": { "Enabled": true, "Interval": "1.00:00:00" }
+      "job-history-cleanup": { "Enabled": true, "Interval": "1.00:00:00" },
+      "database-backup": { "Enabled": true, "Interval": "1.00:00:00" }
     }
   }
 }
@@ -41,4 +42,8 @@ Implement `IBackgroundJob` and register it with `AddBackgroundJob<TJob>(name, de
 
 The built-in `job-history-cleanup` job deletes finished runs older than `Jobs:HistoryRetention`.
 
+The `database-backup` job writes a consistent copy of the database and the data protection key ring, then keeps the newest `Backups:Retention` files. The zip contains secrets. See [backup.md](backup.md).
+
 The `tmdb-data-purge` job enforces the TMDB data retention described in [tmdb.md](tmdb.md).
+
+The `update-check` job asks GitHub whether a newer release exists. It runs once a day. See [upgrading.md](upgrading.md). It is the only call Wishlistarr makes to GitHub by itself.

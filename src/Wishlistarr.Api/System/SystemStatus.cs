@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
@@ -15,7 +14,7 @@ public sealed class SystemStatus(TimeProvider time, JobRunner jobs, IOptions<Job
     {
         using IServiceScope scope = scopes.CreateScope();
         return new StatusResponse(
-            GetVersion(),
+            AppVersion.Current,
             (long)(time.GetUtcNow() - this.startedAt).TotalSeconds,
             await jobs.ListJobsAsync(jobOptions.Value, ct),
             await scope.ServiceProvider.GetRequiredService<LibraryIndex>().GetStatusAsync(ct),
@@ -23,13 +22,6 @@ public sealed class SystemStatus(TimeProvider time, JobRunner jobs, IOptions<Job
                 scope.ServiceProvider.GetRequiredService<KidProfiles>(),
                 scope.ServiceProvider.GetRequiredService<PlexEnforcement>(),
                 ct));
-    }
-
-    private static string GetVersion()
-    {
-        string? version = typeof(SystemStatus).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        return version?.Split('+')[0] ?? "0.0.0";
     }
 }
 

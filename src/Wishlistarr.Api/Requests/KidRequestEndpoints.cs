@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -12,12 +13,65 @@ public static class KidRequestEndpoints
 {
     public const string NotAllowedCode = "notAllowed";
     public const string AllowanceUsedCode = "allowanceUsed";
+    public const int DefaultHistoryPage = 50;
+    public const int MaxHistoryPage = 200;
 
     public static void MapKidRequests(this RouteGroupBuilder kid)
     {
-        kid.MapGet("/requests", async (HttpContext context, KidWishlist wishlist, CancellationToken ct) =>
+        kid.MapGet("/requests/history", async (int? limit, int? offset, HttpContext context, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
         {
-            if (!int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), NumberStyles.None, CultureInfo.InvariantCulture, out int profileId))
+            if (!TryProfile(context, out int profileId))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
+            }
+
+            int take = limit ?? DefaultHistoryPage;
+            int skip = offset ?? 0;
+            if (take is < 1 or > MaxHistoryPage || skip < 0)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: $"The limit is 1 to {MaxHistoryPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.");
+            }
+
+            return Results.Ok(await RequestViews.KidHistoryAsync(db, profileId, titles, take, skip, ct));
+        })
+            .WithName("ListKidRequestHistory")
+            .WithSummary("Lists what happened to the signed-in profile's requests, newest first and in kid-friendly terms. limit (default 50, at most 200) and offset choose the page. Parent account details are not included.")
+            .Produces<IReadOnlyList<KidHistoryEntry>>()
+            .ProducesProblem(StatusCodes.Status400BadRequest);
+
+        kid.MapGet("/requests", async (HttpContext context, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
+        {
+            if (!TryProfile(context, out int profileId))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
+            }
+
+            List<MediaRequest> rows = await db.MediaRequests.AsNoTracking()
+                .Where(request => request.KidProfileId == profileId)
+                .OrderByDescending(request => request.Id)
+                .ToListAsync(ct);
+            Dictionary<int, string> reasons = await RequestViews.DenialReasonsAsync(db, [.. rows.Select(request => request.Id)], ct);
+            IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(rows, ct);
+            List<KidRequestResponse> body = [];
+            foreach (MediaRequest request in rows)
+            {
+                string? denial = request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason)
+                    ? reason
+                    : null;
+                body.Add(KidRequestResponse.From(request, names[request.Id], denial));
+            }
+
+            return Results.Ok(body);
+        })
+            .WithName("ListKidRequests")
+            .WithSummary("Lists the signed-in profile's own requests. A denial reason is plain text for that kid and is left out for every other state.")
+            .Produces<IReadOnlyList<KidRequestResponse>>();
+
+        kid.MapGet("/wishlist", async (HttpContext context, KidWishlist wishlist, CancellationToken ct) =>
+        {
+            if (!TryProfile(context, out int profileId))
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
             }
@@ -34,7 +88,7 @@ public static class KidRequestEndpoints
         })
             .WithTags("Kid")
             .WithName("GetKidWishlist")
-            .WithSummary("Lists the signed-in profile's own requests. States are kid-friendly, a denial includes only the parent's note, and a ready title includes a Plex link when the library index can name the item.")
+            .WithSummary("Lists the signed-in profile's own requests with the weekly allowance left. States are kid-friendly, a denial includes only the parent's note, and a ready title includes a Plex link when the library index can name the item.")
             .Produces<KidWishlistResponse>();
 
         kid.MapPost("/requests", async (KidRequestBody? body, HttpContext context, KidRequestFlow flow, RequestTitles titles, CancellationToken ct) =>
@@ -44,7 +98,7 @@ public static class KidRequestEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A kind and a TMDB id are required.");
             }
 
-            if (!int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), NumberStyles.None, CultureInfo.InvariantCulture, out int profileId))
+            if (!TryProfile(context, out int profileId))
             {
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
             }
@@ -65,8 +119,8 @@ public static class KidRequestEndpoints
 
             return result.Outcome switch
             {
-                KidRequestOutcome.Created => Results.Json(KidRequestResponse.From(result.Request!, await titles.GetAsync(result.Request!, ct)), statusCode: StatusCodes.Status201Created),
-                KidRequestOutcome.Merged => Results.Ok(KidRequestResponse.From(result.Request!, await titles.GetAsync(result.Request!, ct))),
+                KidRequestOutcome.Created => Results.Json(KidRequestResponse.From(result.Request!, await titles.GetAsync(result.Request!, ct), null), statusCode: StatusCodes.Status201Created),
+                KidRequestOutcome.Merged => Results.Ok(KidRequestResponse.From(result.Request!, await titles.GetAsync(result.Request!, ct), null)),
                 KidRequestOutcome.NotAllowed => Results.Problem(
                     statusCode: StatusCodes.Status422UnprocessableEntity,
                     title: "That one isn't available.",
@@ -83,7 +137,7 @@ public static class KidRequestEndpoints
         })
             .WithTags("Kid")
             .WithName("CreateKidRequest")
-            .WithSummary("Asks for a title for the signed-in profile. Allowed titles already in Plex are labeled right away; anything else waits for a parent.")
+            .WithSummary("Asks for a title for the signed-in profile. Allowed titles already in Plex are labeled right away. A profile auto-approve rule can approve the rest. Anything left waits for a parent.")
             .Produces<KidRequestResponse>(StatusCodes.Status201Created)
             .Produces<KidRequestResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -94,14 +148,17 @@ public static class KidRequestEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
+    private static bool TryProfile(HttpContext context, out int profileId) =>
+        int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), NumberStyles.None, CultureInfo.InvariantCulture, out profileId);
+
     private static IResult Unavailable(int status) =>
         Results.Problem(statusCode: status, title: "Requests aren't working right now.", detail: "Try again in a little while.");
 }
 
 public sealed record KidRequestBody(MediaKind? Kind, int? TmdbId);
 
-public sealed record KidRequestResponse(int Id, MediaKind Kind, int TmdbId, string Title, RequestState State, int RequestCount)
+public sealed record KidRequestResponse(int Id, MediaKind Kind, int TmdbId, string Title, RequestState State, int RequestCount, string? DenialReason)
 {
-    public static KidRequestResponse From(MediaRequest request, string title) =>
-        new(request.Id, request.Kind, request.TmdbId, title, request.State, request.RequestCount);
+    public static KidRequestResponse From(MediaRequest request, string title, string? denialReason) =>
+        new(request.Id, request.Kind, request.TmdbId, title, request.State, request.RequestCount, denialReason);
 }

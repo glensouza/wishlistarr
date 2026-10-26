@@ -22,6 +22,8 @@ public sealed class LibraryItem
 
     public DateTimeOffset? PlexUpdatedAt { get; set; }
 
+    public long? PlexAddedAtUnix { get; set; }
+
     public DateTimeOffset IndexedAt { get; set; }
 
     public int? TitleId { get; set; }

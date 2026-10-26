@@ -3,7 +3,7 @@ using Wishlistarr.Core.MediaServers;
 namespace Wishlistarr.Core.Library;
 
 // Labels is null when the source does not carry them, as in section listings, so the stored labels are left alone.
-public sealed record LibraryEntry(MediaItem Item, IReadOnlyList<string>? Labels, DateTimeOffset? UpdatedAt);
+public sealed record LibraryEntry(MediaItem Item, IReadOnlyList<string>? Labels, DateTimeOffset? UpdatedAt, DateTimeOffset? AddedAt = null);
 
 public sealed class LibraryScanReport
 {

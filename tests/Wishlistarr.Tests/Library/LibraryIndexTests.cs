@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Content;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
@@ -49,6 +50,29 @@ public sealed class LibraryIndexTests
         Assert.Empty(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "604") ?? throw new InvalidOperationException());
         Assert.Equal("201", Assert.Single(await harness.FindAsync(MediaKind.Show, ExternalIdSource.Tvdb, "353546") ?? []).Id);
         Assert.Equal("101", Assert.Single(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Imdb, "tt0133093") ?? []).Id);
+    }
+
+    [Fact]
+    public async Task Guids_for_many_titles_come_back_from_one_call_and_only_once_the_index_is_ready()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("301", MediaKind.Movie, "The Matrix (4K)", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("201", MediaKind.Show, "Bluey", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Spirited Away", [Tmdb("129")]));
+        TitleKey[] titles = [new(MediaKind.Movie, 603), new(MediaKind.Movie, 129), new(MediaKind.Movie, 700)];
+
+        Assert.Null(await harness.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindGuidsAsync(titles)));
+
+        await harness.FullAsync();
+        IndexedGuids found = await harness.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindGuidsAsync(titles))
+            ?? throw new InvalidOperationException();
+        Dictionary<string, string> guids = (await harness.GetItemsAsync()).ToDictionary(item => item.RatingKey, item => item.Guid);
+
+        Assert.Equal([guids["101"], guids["301"]], found.Guids[new TitleKey(MediaKind.Movie, 603)].Order());
+        Assert.Equal([guids["102"]], found.Guids[new TitleKey(MediaKind.Movie, 129)]);
+        Assert.False(found.Guids.ContainsKey(new TitleKey(MediaKind.Movie, 700)));
+        Assert.Equal(2, found.Guids.Count);
     }
 
     [Fact]
@@ -639,6 +663,80 @@ public sealed class LibraryIndexTests
         await harness.InScopeAsync(async services =>
         {
             Assert.Equal(300, await services.GetRequiredService<WishlistarrDbContext>().LibraryTitles.CountAsync());
+            return 0;
+        });
+    }
+
+    [Fact]
+    public async Task Recent_titles_are_the_newest_distinct_tmdb_items_on_the_ready_server()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        DateTimeOffset newest = Early.AddDays(3);
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "Old Copy", [Tmdb("603")], updatedAt: Early.AddDays(10), addedAt: Early));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "New Copy", [Tmdb("603")], updatedAt: Early, addedAt: newest));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("103", MediaKind.Movie, "Middle", [Tmdb("700")], updatedAt: Early.AddDays(20), addedAt: Early.AddDays(2)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("104", MediaKind.Show, "Bluey", [Tmdb("82728")], updatedAt: Early.AddDays(30), addedAt: Early.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("105", MediaKind.Movie, "No Tmdb", [Imdb("tt0000001")], updatedAt: newest.AddDays(1), addedAt: newest.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("106", MediaKind.Movie, "Never Added", [Tmdb("900")], updatedAt: Early.AddDays(40)));
+
+        Assert.Null(await harness.RecentAsync(10));
+
+        await harness.FullAsync();
+
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700)],
+            (await harness.RecentAsync(2) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
+            (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            LibraryTitle title = await db.LibraryTitles.SingleAsync(item => item.TmdbId == 603);
+            db.LibraryItems.Add(new LibraryItem
+            {
+                ServerId = "other-server",
+                RatingKey = "999",
+                Guid = "plex://movie/999",
+                Kind = MediaKind.Movie,
+                LibraryId = "1",
+                Title = "Foreign Server",
+                Year = 2001,
+                PlexAddedAtUnix = newest.AddDays(5).ToUnixTimeSeconds(),
+                IndexedAt = newest,
+                TitleId = title.Id,
+            });
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
+            (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+    }
+
+    [Fact]
+    public async Task A_caller_that_gives_up_while_the_ready_check_runs_does_not_poison_later_calls()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        await harness.FullAsync();
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Scanner.ServerIdGate = gate;
+
+        await harness.InScopeAsync(async services =>
+        {
+            ILibraryIndex index = services.GetRequiredService<ILibraryIndex>();
+            using CancellationTokenSource gaveUp = new();
+            Task<IReadOnlyList<MediaItem>?> abandoned = index.FindAsync(MediaKind.Movie, Tmdb("603"), gaveUp.Token);
+            await gaveUp.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
+
+            gate.SetResult();
+
+            Assert.NotNull(await index.FindAsync(MediaKind.Movie, Tmdb("603")));
+            Assert.NotNull(await index.ListRecentAsync(5));
             return 0;
         });
     }
