@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
@@ -16,6 +17,7 @@ public enum DecisionStatus
     NotFound,
     Failed,
     Conflict,
+    NotProcessed,
 }
 
 public sealed record DecisionItem(int Id, DecisionStatus Status, RequestState? State);
@@ -25,6 +27,8 @@ public sealed partial class RequestApproval(
     MediaRequests requests,
     LibraryLookup library,
     RequestLabeling labeling,
+    IOptions<ApprovalOptions> options,
+    TimeProvider time,
     ILogger<RequestApproval> logger)
 {
     public const int MaxBatch = 50;
@@ -44,38 +48,41 @@ public sealed partial class RequestApproval(
         return RequestActor.Parent(id, name);
     }
 
-    public async Task<IReadOnlyList<DecisionItem>> ApproveManyAsync(
+    public Task<IReadOnlyList<DecisionItem>> ApproveManyAsync(
         IReadOnlyList<int> ids,
         RequestActor actor,
         string? reason,
-        CancellationToken ct = default)
-    {
-        List<DecisionItem> results = new(ids.Count);
-        foreach (int id in ids)
-        {
-            results.Add(await this.DecideOneAsync(id, actor, reason, approving: true, ct));
-        }
+        CancellationToken ct = default) =>
+        this.DecideManyAsync(ids, actor, reason, approving: true, ct);
 
-        return results;
-    }
-
-    public async Task<IReadOnlyList<DecisionItem>> DenyManyAsync(
+    public Task<IReadOnlyList<DecisionItem>> DenyManyAsync(
         IReadOnlyList<int> ids,
         RequestActor actor,
         string? reason,
-        CancellationToken ct = default)
-    {
-        List<DecisionItem> results = new(ids.Count);
-        foreach (int id in ids)
-        {
-            results.Add(await this.DecideOneAsync(id, actor, reason, approving: false, ct));
-        }
-
-        return results;
-    }
+        CancellationToken ct = default) =>
+        this.DecideManyAsync(ids, actor, reason, approving: false, ct);
 
     public Task<DecisionItem> ApproveAsync(int requestId, RequestActor actor, string? reason = null, CancellationToken ct = default) =>
         this.DecideOneAsync(requestId, actor, reason, approving: true, ct);
+
+    private async Task<IReadOnlyList<DecisionItem>> DecideManyAsync(
+        IReadOnlyList<int> ids,
+        RequestActor actor,
+        string? reason,
+        bool approving,
+        CancellationToken ct)
+    {
+        DateTimeOffset deadline = time.GetUtcNow() + options.Value.BulkTimeout;
+        List<DecisionItem> results = new(ids.Count);
+        foreach (int id in ids)
+        {
+            results.Add(time.GetUtcNow() >= deadline
+                ? new DecisionItem(id, DecisionStatus.NotProcessed, null)
+                : await this.DecideOneAsync(id, actor, reason, approving, ct));
+        }
+
+        return results;
+    }
 
     private async Task<DecisionItem> DecideOneAsync(int id, RequestActor actor, string? reason, bool approving, CancellationToken ct)
     {
