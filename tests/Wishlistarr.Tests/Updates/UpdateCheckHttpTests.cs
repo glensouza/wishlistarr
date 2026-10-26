@@ -3,6 +3,8 @@ using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using Wishlistarr.Api.System;
@@ -116,19 +118,21 @@ public sealed class UpdateCheckHttpTests(LiveHandlerFixture fixture) : IClassFix
     }
 
     [Fact]
-    public async Task A_server_that_never_answers_is_abandoned_after_ten_seconds()
+    public async Task A_server_that_never_answers_is_abandoned_when_the_timeout_passes()
     {
         await fixture.ResetAsync();
         fixture.Server.Handle = context => Task.Delay(Timeout.Infinite, context.RequestAborted);
+        using ShortTimeoutFactory factory = new(fixture.Server.Address, TimeSpan.FromMilliseconds(200));
 
+        await factory.SettingAsync(UpdateChecker.TagKey);
         Stopwatch watch = Stopwatch.StartNew();
-        await fixture.Factory.RunAsync();
+        await factory.RunAsync();
         watch.Stop();
 
-        Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(9), TimeSpan.FromSeconds(30));
-        Assert.Contains("Update check failed.", fixture.Factory.Logs.Text(), StringComparison.Ordinal);
-        Assert.NotNull(await fixture.Factory.SettingAsync(UpdateChecker.CheckedAtKey));
-        HttpResponseMessage health = await fixture.Factory.CreateClient().GetAsync("/api/health");
+        Assert.InRange(watch.Elapsed, TimeSpan.FromMilliseconds(150), TimeSpan.FromSeconds(2));
+        Assert.Contains("Update check failed.", factory.Logs.Text(), StringComparison.Ordinal);
+        Assert.NotNull(await factory.SettingAsync(UpdateChecker.CheckedAtKey));
+        HttpResponseMessage health = await factory.CreateClient().GetAsync("/api/health");
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
     }
 
@@ -165,10 +169,21 @@ public sealed class LiveHandlerFixture : IAsyncLifetime
     }
 }
 
-public sealed class LiveHandlerFactory(Uri server) : UpdateApiFactory
+public class LiveHandlerFactory(Uri server) : UpdateApiFactory
 {
     protected override HttpMessageHandler CreateGitHubHandler() =>
         new RewriteToLocalHandler(server) { InnerHandler = UpdateEndpoints.CreateHandler() };
+}
+
+public sealed class ShortTimeoutFactory(Uri server, TimeSpan timeout) : LiveHandlerFactory(server)
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+        builder.ConfigureTestServices(services =>
+            services.AddHttpClient(UpdateChecker.HttpClientName)
+                .ConfigureHttpClient(client => UpdateEndpoints.ConfigureClient(client, timeout)));
+    }
 }
 
 public sealed class RewriteToLocalHandler(Uri server) : DelegatingHandler

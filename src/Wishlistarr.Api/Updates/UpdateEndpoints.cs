@@ -21,9 +21,11 @@ public static class UpdateEndpoints
         return services;
     }
 
-    private static void ConfigureClient(HttpClient client)
+    private static void ConfigureClient(HttpClient client) => ConfigureClient(client, UpdateChecker.Timeout);
+
+    internal static void ConfigureClient(HttpClient client, TimeSpan timeout)
     {
-        client.Timeout = UpdateChecker.Timeout;
+        client.Timeout = timeout;
         client.MaxResponseContentBufferSize = UpdateChecker.MaxResponseBytes;
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Wishlistarr", AppVersionHeader()));
         client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", UpdateChecker.AcceptMediaType);
