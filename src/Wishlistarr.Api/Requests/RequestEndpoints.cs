@@ -33,34 +33,36 @@ public static class RequestEndpoints
                     title: $"The limit is 1 to {MaxPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.");
             }
 
-            IQueryable<MediaRequest> matching = db.MediaRequests.AsNoTracking()
-                .Where(request => parsed == null || request.State == parsed);
-            int total = await matching.CountAsync(ct);
-            List<MediaRequest> rows = await matching
-                .OrderBy(request => request.Id)
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync(ct);
+            IQueryable<ListedRequest> matching = db.MediaRequests.AsNoTracking()
+                .Where(request => parsed == null || request.State == parsed)
+                .Join(
+                    db.KidProfiles.AsNoTracking(),
+                    request => request.KidProfileId,
+                    profile => profile.Id,
+                    (request, profile) => new ListedRequest { Request = request, KidName = profile.Name });
+            int total;
+            List<ListedRequest> listed;
+            await using (await db.Database.BeginTransactionAsync(ct))
+            {
+                total = await matching.CountAsync(ct);
+                listed = await matching
+                    .OrderBy(item => item.Request.Id)
+                    .Skip(skip)
+                    .Take(take)
+                    .ToListAsync(ct);
+            }
+
+            List<MediaRequest> rows = [.. listed.Select(item => item.Request)];
             IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(rows, ct);
-            int[] profileIds = [.. rows.Select(request => request.KidProfileId).Distinct()];
-            Dictionary<int, string> kids = profileIds.Length == 0
-                ? []
-                : await db.KidProfiles.AsNoTracking()
-                    .Where(profile => profileIds.Contains(profile.Id))
-                    .ToDictionaryAsync(profile => profile.Id, profile => profile.Name, ct);
             Dictionary<int, string> reasons = await RequestViews.DenialReasonsAsync(db, [.. rows.Select(request => request.Id)], ct);
             List<ParentRequestResponse> body = [];
-            foreach (MediaRequest request in rows)
+            foreach (ListedRequest item in listed)
             {
-                if (!kids.TryGetValue(request.KidProfileId, out string? kid))
-                {
-                    continue;
-                }
-
+                MediaRequest request = item.Request;
                 body.Add(new ParentRequestResponse(
                     request.Id,
                     request.KidProfileId,
-                    kid,
+                    item.KidName,
                     request.Kind,
                     request.TmdbId,
                     names[request.Id],
@@ -265,6 +267,13 @@ public static class RequestEndpoints
         parsed = value;
         return true;
     }
+}
+
+file sealed class ListedRequest
+{
+    public required MediaRequest Request { get; init; }
+
+    public required string KidName { get; init; }
 }
 
 public sealed record DecisionBody(IReadOnlyList<int>? Ids, string? Reason);

@@ -21,7 +21,7 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 
 ### Auto-approve
 
-`autoApprove` is a switch. `autoApproveMovieRating` and `autoApproveTvRating` are optional ceilings, each a rating level: `preschool`, `general`, `children`, `parentalGuidance`, `teen`, `mature` or `adult`. A blank value clears the ceiling. A number or any other word is rejected. The switch and the ceilings are stored on the profile and returned by the profile list. How they decide a request is described in [requests](requests.md#auto-approve).
+`autoApprove` is a switch. `autoApproveMovieRating` and `autoApproveTvRating` are optional ceilings, each a rating level: `preschool`, `general`, `children`, `parentalGuidance`, `teen`, `mature` or `adult`. A blank value clears the ceiling. A ceiling, when set, always caps auto-approval, even with `autoApprove` on; with the switch on and no ceiling for that kind, any allowed rated title is approved. A number or any other word is rejected. The switch and the ceilings are stored on the profile and returned by the profile list. How they decide a request is described in [requests](requests.md#auto-approve).
 
 ### Plex label
 

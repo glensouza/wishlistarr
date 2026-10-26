@@ -5,10 +5,12 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
+using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Tmdb;
@@ -22,6 +24,8 @@ public sealed class Rendezvous(int parties)
     private readonly TaskCompletionSource all = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int arrived;
 
+    public int Arrived => Volatile.Read(ref this.arrived);
+
     public async Task ArriveAsync()
     {
         if (Interlocked.Increment(ref this.arrived) == parties)
@@ -30,6 +34,28 @@ public sealed class Rendezvous(int parties)
         }
 
         await this.all.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+}
+
+public sealed class DecisionSaveGate : SaveChangesInterceptor
+{
+    public Func<Task>? Gate { get; set; }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        bool decision = eventData.Context!.ChangeTracker.Entries<MediaRequestEvent>().Any(entry =>
+            entry.State == EntityState.Added
+            && entry.Entity.FromState == RequestState.Pending
+            && entry.Entity.ToState is RequestState.Approved or RequestState.Denied);
+        if (decision && this.Gate is not null)
+        {
+            await this.Gate();
+        }
+
+        return result;
     }
 }
 
@@ -100,6 +126,8 @@ public class KidRequestApiFactory : AuthApiFactory
     public FakeTmdbServer Tmdb { get; }
 
     public TestClock Clock { get; } = new();
+
+    public DecisionSaveGate Saves { get; } = new();
 
     public int LabelWrites => this.Plex.Requests.Count(request => request.Method == "PUT");
 
@@ -209,6 +237,7 @@ public class KidRequestApiFactory : AuthApiFactory
             });
             services.RemoveAll<ITmdbApiKeyProvider>();
             services.AddSingleton<ITmdbApiKeyProvider>(new FixedKeyProvider());
+            services.AddDbContext<WishlistarrDbContext>(options => options.AddInterceptors(this.Saves));
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(this.Clock);
             if (this.Index is not null)

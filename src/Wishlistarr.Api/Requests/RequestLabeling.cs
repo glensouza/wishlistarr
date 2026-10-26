@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -7,7 +8,12 @@ namespace Wishlistarr.Api.Requests;
 
 public sealed record RequestLabelResult(RequestResult Result, bool LabelNotOwned);
 
-public sealed partial class RequestLabeling(MediaRequests requests, LabelWriter labels, ILogger<RequestLabeling> logger)
+public sealed partial class RequestLabeling(
+    MediaRequests requests,
+    LabelWriter labels,
+    IOptions<ApprovalOptions> options,
+    TimeProvider time,
+    ILogger<RequestLabeling> logger)
 {
     public const string LabelSource = "request";
 
@@ -18,8 +24,9 @@ public sealed partial class RequestLabeling(MediaRequests requests, LabelWriter 
         RequestActor actor,
         string source = LabelSource)
     {
-        // The request is already stored as available, so labeling finishes even if the caller goes away.
-        CancellationToken ct = CancellationToken.None;
+        // The request is already stored as available, so the caller going away does not stop labeling, but the deadline does.
+        using CancellationTokenSource deadline = new(options.Value.LabelTimeout, time);
+        CancellationToken ct = deadline.Token;
         string? failure = null;
         bool notOwned = false;
         try
@@ -48,7 +55,9 @@ public sealed partial class RequestLabeling(MediaRequests requests, LabelWriter 
         catch (Exception ex)
         {
             this.LogLabelFailed(ex, requestId);
-            failure = "The Plex label could not be written.";
+            failure = deadline.IsCancellationRequested
+                ? "Plex did not answer in time."
+                : "The Plex label could not be written.";
         }
 
         RequestResult moved = await requests.TransitionAsync(
@@ -56,7 +65,7 @@ public sealed partial class RequestLabeling(MediaRequests requests, LabelWriter 
             failure is null ? RequestState.Labeled : RequestState.Failed,
             actor,
             failure,
-            ct,
+            CancellationToken.None,
             RequestState.Available);
         return new RequestLabelResult(moved, failure is null && notOwned);
     }

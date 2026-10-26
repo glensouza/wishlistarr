@@ -26,15 +26,20 @@ const stateKey: Record<ParentRequest['state'], MessageKey> = {
   revoked: 'requests.revoked',
 }
 
-const statusKey: Record<DecisionStatus, MessageKey> = {
+type Outcome = DecisionStatus | 'unsent' | 'unknown'
+
+const statusKey: Record<Outcome, MessageKey> = {
   succeeded: 'requests.result.succeeded',
   alreadyDecided: 'requests.result.alreadyDecided',
   notFound: 'requests.result.notFound',
   failed: 'requests.result.failed',
   conflict: 'requests.result.conflict',
+  notProcessed: 'requests.result.notProcessed',
+  unsent: 'requests.result.unsent',
+  unknown: 'requests.result.unknown',
 }
 
-type Failure = { id: number; title: string; status: DecisionStatus }
+type Failure = { id: number; title: string; status: Outcome }
 
 type Part = 'pending' | 'labeled' | 'profiles'
 
@@ -129,9 +134,21 @@ export default function RequestsAdmin() {
     const note = noteOf(reason)
     const titles = new Map(rows?.map((row) => [row.id, row.title]))
     const collected: DecisionItem[] = []
+    const stranded: { id: number; status: Outcome }[] = []
     try {
       for (let start = 0; start < ids.length; start += maxBatch) {
-        const body = await send(ids.slice(start, start + maxBatch), note)
+        let body
+        try {
+          body = await send(ids.slice(start, start + maxBatch), note)
+        } catch (failure) {
+          ids
+            .slice(start, start + maxBatch)
+            .forEach((id) => stranded.push({ id, status: 'unknown' }))
+          ids
+            .slice(start + maxBatch)
+            .forEach((id) => stranded.push({ id, status: 'unsent' }))
+          throw failure
+        }
         collected.push(...body.results)
       }
       setReason('')
@@ -139,7 +156,7 @@ export default function RequestsAdmin() {
       setError(messageOf(failure, t('app.somethingWrong')))
     } finally {
       setResults(
-        collected.filter(unresolved).map((item) => ({
+        [...collected.filter(unresolved), ...stranded].map((item) => ({
           id: item.id,
           title: titles.get(item.id) ?? `#${item.id}`,
           status: item.status,

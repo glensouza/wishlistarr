@@ -12,12 +12,12 @@ public sealed record AutoApproveRule(bool Enabled, RatingLevel? MaxMovieRating, 
             return false;
         }
 
-        if (this.Enabled)
+        RatingLevel? ceiling = kind == MediaKind.Movie ? this.MaxMovieRating : this.MaxTvRating;
+        if (ceiling is RatingLevel max)
         {
-            return true;
+            return level <= max;
         }
 
-        RatingLevel? ceiling = kind == MediaKind.Movie ? this.MaxMovieRating : this.MaxTvRating;
-        return ceiling is RatingLevel max && level <= max;
+        return this.Enabled;
     }
 }
