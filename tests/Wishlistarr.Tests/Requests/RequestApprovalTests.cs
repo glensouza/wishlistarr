@@ -300,40 +300,7 @@ public sealed class RequestApprovalTests
     }
 
     [Fact]
-    public async Task A_deny_that_lands_while_an_approval_is_looking_up_the_library_wins()
-    {
-        FakeLibraryIndex index = LibraryWithSpiritedAway();
-        using KidRequestApiFactory factory = new(index);
-        await factory.LinkPlexAsync();
-        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
-        HttpClient first = await factory.CreateSignedInClientAsync();
-        HttpClient second = await factory.CreateSignedInClientAsync();
-        int id = await AskAsync(kid, 129);
-        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        index.Gate = async () =>
-        {
-            entered.TrySetResult();
-            await release.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        };
-
-        Task<JsonElement> approve = DecideAsync(first, "approve", new { ids = new[] { id } });
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        JsonElement denied = await DecideAsync(second, "deny", new { ids = new[] { id }, reason = "No" });
-        release.SetResult();
-        JsonElement approved = await approve;
-
-        Assert.Equal("succeeded", Item(denied, id).GetProperty("status").GetString());
-        Assert.Equal("conflict", Item(approved, id).GetProperty("status").GetString());
-        Assert.Equal("denied", Item(approved, id).GetProperty("state").GetString());
-        Assert.Equal(RequestState.Denied, Assert.Single(await factory.GetRequestsAsync()).State);
-        Assert.Empty(await factory.GetLedgerAsync());
-        Assert.Empty(factory.Plex.Item("102").Labels);
-        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Approved);
-    }
-
-    [Fact]
-    public async Task Two_approvals_that_reach_the_decision_together_label_once()
+    public async Task A_deny_and_an_approval_that_meet_at_the_save_leave_one_winner()
     {
         FakeLibraryIndex index = LibraryWithSpiritedAway();
         using KidRequestApiFactory factory = new(index);
@@ -343,12 +310,55 @@ public sealed class RequestApprovalTests
         HttpClient second = await factory.CreateSignedInClientAsync();
         int id = await AskAsync(kid, 129);
         Rendezvous both = new(2);
-        index.Gate = both.ArriveAsync;
+        factory.Saves.Gate = both.ArriveAsync;
+
+        JsonElement[] results = await Task.WhenAll(
+            DecideAsync(first, "approve", new { ids = new[] { id } }),
+            DecideAsync(second, "deny", new { ids = new[] { id }, reason = "No" }));
+        Assert.Equal(2, both.Arrived);
+        JsonElement approved = results[0];
+        JsonElement denied = results[1];
+
+        MediaRequest request = Assert.Single(await factory.GetRequestsAsync());
+        List<MediaRequestEvent> history = await factory.GetHistoryAsync(id);
+        bool approveWon = Item(approved, id).GetProperty("status").GetString() == "succeeded";
+        bool denyWon = Item(denied, id).GetProperty("status").GetString() == "succeeded";
+        Assert.NotEqual(approveWon, denyWon);
+        if (approveWon)
+        {
+            Assert.Equal(RequestState.Labeled, request.State);
+            Assert.Equal("conflict", Item(denied, id).GetProperty("status").GetString());
+            Assert.Single(await factory.GetLedgerAsync());
+            Assert.DoesNotContain(history, item => item.ToState == RequestState.Denied);
+        }
+        else
+        {
+            Assert.Equal(RequestState.Denied, request.State);
+            Assert.Equal("conflict", Item(approved, id).GetProperty("status").GetString());
+            Assert.Empty(await factory.GetLedgerAsync());
+            Assert.Empty(factory.Plex.Item("102").Labels);
+            Assert.DoesNotContain(history, item => item.ToState == RequestState.Approved);
+        }
+    }
+
+    [Fact]
+    public async Task Two_approvals_that_meet_at_the_save_label_once()
+    {
+        FakeLibraryIndex index = LibraryWithSpiritedAway();
+        using KidRequestApiFactory factory = new(index);
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient first = await factory.CreateSignedInClientAsync();
+        HttpClient second = await factory.CreateSignedInClientAsync();
+        int id = await AskAsync(kid, 129);
+        Rendezvous both = new(2);
+        factory.Saves.Gate = both.ArriveAsync;
 
         JsonElement[] results = await Task.WhenAll(
             DecideAsync(first, "approve", new { ids = new[] { id } }),
             DecideAsync(second, "approve", new { ids = new[] { id } }));
 
+        Assert.Equal(2, both.Arrived);
         Assert.Single(results, body => Item(body, id).GetProperty("status").GetString() == "succeeded");
         Assert.All(
             results.Where(body => Item(body, id).GetProperty("status").GetString() != "succeeded"),
@@ -359,6 +369,71 @@ public sealed class RequestApprovalTests
         List<MediaRequestEvent> history = await factory.GetHistoryAsync(id);
         Assert.Single(history, item => item.ToState == RequestState.Approved);
         Assert.Single(history, item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task A_label_write_that_hangs_ends_that_request_as_failed()
+    {
+        FakeLibraryIndex index = LibraryWithSpiritedAway();
+        using DeadlineFactory factory = new(index, TimeSpan.FromMilliseconds(300), TimeSpan.FromMinutes(5));
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskAsync(kid, 129);
+        TaskCompletionSource hang = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Plex.Delay = request => request.Method == "PUT" ? hang.Task : Task.CompletedTask;
+
+        try
+        {
+            JsonElement body = await DecideAsync(parent, "approve", new { ids = new[] { id } });
+
+            Assert.Equal("failed", Item(body, id).GetProperty("status").GetString());
+            Assert.Equal("failed", Item(body, id).GetProperty("state").GetString());
+            Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+            Assert.Empty(await factory.GetLedgerAsync());
+            MediaRequestEvent last = (await factory.GetHistoryAsync(id))[^1];
+            Assert.Equal(RequestState.Available, last.FromState);
+            Assert.Equal("Plex did not answer in time.", last.Reason);
+        }
+        finally
+        {
+            hang.SetResult();
+        }
+    }
+
+    [Fact]
+    public async Task A_bulk_call_past_its_deadline_reports_the_rest_as_not_processed()
+    {
+        FakeLibraryIndex index = LibraryWithSpiritedAway();
+        using DeadlineFactory factory = new(index, TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(5));
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int labeled = await AskAsync(kid, 129);
+        int skipped = await AskAsync(kid, 700);
+        int alsoSkipped = await AskAsync(kid, 701);
+        factory.Plex.Delay = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                factory.Clock.Advance(TimeSpan.FromMinutes(6));
+            }
+
+            return Task.CompletedTask;
+        };
+
+        JsonElement body = await DecideAsync(parent, "approve", new { ids = new[] { labeled, skipped, alsoSkipped } });
+
+        Assert.Equal("succeeded", Item(body, labeled).GetProperty("status").GetString());
+        foreach (int id in new[] { skipped, alsoSkipped })
+        {
+            Assert.Equal("notProcessed", Item(body, id).GetProperty("status").GetString());
+        }
+
+        Assert.Equal(3, body.GetProperty("results").GetArrayLength());
+        List<MediaRequest> requests = await factory.GetRequestsAsync();
+        Assert.Equal(RequestState.Labeled, requests.Single(request => request.Id == labeled).State);
+        Assert.All(requests.Where(request => request.Id != labeled), request => Assert.Equal(RequestState.Pending, request.State));
     }
 
     [Fact]
@@ -513,6 +588,19 @@ public sealed class RequestApprovalTests
     }
 
     [Fact]
+    public async Task A_ceiling_still_caps_the_profile_switch()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync(autoApprove: true, autoApproveMovieRating: "general");
+
+        HttpResponseMessage above = await KidRequestApiFactory.RequestAsync(kid, "movie", 700);
+
+        Assert.Equal("pending", (await above.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        Assert.Equal(RequestState.Pending, Assert.Single(await factory.GetRequestsAsync()).State);
+    }
+
+    [Fact]
     public async Task Unrated_titles_stay_pending_with_the_switch_on_in_or_out_of_the_library()
     {
         using KidRequestApiFactory factory = new();
@@ -658,6 +746,29 @@ public sealed class RequestApprovalTests
         }
     }
 
+    [Fact]
+    public async Task The_parent_list_total_matches_the_rows_it_can_show()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient ada, int adaId) = await factory.SignInKidAsync();
+        (HttpClient bea, _) = await factory.SignInKidAsync("Bea");
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        await AskAsync(ada, 700);
+        int kept = await AskAsync(bea, 701);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            await db.Database.OpenConnectionAsync();
+            await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF");
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM KidProfiles WHERE Id = {0}", adaId);
+        }
+
+        JsonElement page = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests");
+
+        Assert.Equal(1, page.GetProperty("total").GetInt32());
+        Assert.Equal([kept], page.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetInt32()));
+    }
+
     private static FakeLibraryIndex LibraryWithSpiritedAway()
     {
         FakeLibraryIndex index = new();
@@ -669,6 +780,19 @@ public sealed class RequestApprovalTests
         factory.Tmdb.SetBody(
             $"/3/movie/{tmdbId}/release_dates",
             $$"""{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"{{rating}}","type":3}]}]}""");
+
+    private sealed class DeadlineFactory(FakeLibraryIndex index, TimeSpan labelTimeout, TimeSpan bulkTimeout) : KidRequestApiFactory(index)
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureTestServices(services => services.Configure<ApprovalOptions>(options =>
+            {
+                options.LabelTimeout = labelTimeout;
+                options.BulkTimeout = bulkTimeout;
+            }));
+        }
+    }
 
     private sealed class ThrowingLabelFactory : KidRequestApiFactory
     {

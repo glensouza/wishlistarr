@@ -356,6 +356,27 @@ public sealed class MediaRequestTests
     }
 
     [Fact]
+    public async Task The_approved_to_available_guard_does_not_move_a_failed_request()
+    {
+        using RequestApiFactory factory = new();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int id = (await factory.CreateAsync(ada)).Request!.Id;
+        await factory.MoveAsync(id, RequestState.Approved, RequestApiFactory.Parent);
+        await factory.MoveAsync(id, RequestState.Failed, RequestApiFactory.Dispatch);
+
+        RequestResult guarded = await factory.WithRequestsAsync(requests => requests.TransitionAsync(
+            id,
+            RequestState.Available,
+            RequestApiFactory.Dispatch,
+            expectedFrom: RequestState.Approved));
+        RequestResult unguarded = await factory.MoveAsync(id, RequestState.Available, RequestApiFactory.Dispatch);
+
+        Assert.Equal(RequestOutcome.Rejected, guarded.Outcome);
+        Assert.Equal(RequestState.Failed, guarded.Request!.State);
+        Assert.Equal(RequestOutcome.Changed, unguarded.Outcome);
+    }
+
+    [Fact]
     public async Task Competing_decisions_let_exactly_one_win()
     {
         using RequestApiFactory factory = new();
