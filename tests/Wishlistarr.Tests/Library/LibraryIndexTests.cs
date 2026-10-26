@@ -2,6 +2,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Library;
+using Wishlistarr.Core.Content;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
@@ -48,6 +50,29 @@ public sealed class LibraryIndexTests
         Assert.Empty(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Tmdb, "604") ?? throw new InvalidOperationException());
         Assert.Equal("201", Assert.Single(await harness.FindAsync(MediaKind.Show, ExternalIdSource.Tvdb, "353546") ?? []).Id);
         Assert.Equal("101", Assert.Single(await harness.FindAsync(MediaKind.Movie, ExternalIdSource.Imdb, "tt0133093") ?? []).Id);
+    }
+
+    [Fact]
+    public async Task Guids_for_many_titles_come_back_from_one_call_and_only_once_the_index_is_ready()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("301", MediaKind.Movie, "The Matrix (4K)", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("201", MediaKind.Show, "Bluey", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Spirited Away", [Tmdb("129")]));
+        TitleKey[] titles = [new(MediaKind.Movie, 603), new(MediaKind.Movie, 129), new(MediaKind.Movie, 700)];
+
+        Assert.Null(await harness.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindGuidsAsync(titles)));
+
+        await harness.FullAsync();
+        IndexedGuids found = await harness.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindGuidsAsync(titles))
+            ?? throw new InvalidOperationException();
+        Dictionary<string, string> guids = (await harness.GetItemsAsync()).ToDictionary(item => item.RatingKey, item => item.Guid);
+
+        Assert.Equal([guids["101"], guids["301"]], found.Guids[new TitleKey(MediaKind.Movie, 603)].Order());
+        Assert.Equal([guids["102"]], found.Guids[new TitleKey(MediaKind.Movie, 129)]);
+        Assert.False(found.Guids.ContainsKey(new TitleKey(MediaKind.Movie, 700)));
+        Assert.Equal(2, found.Guids.Count);
     }
 
     [Fact]

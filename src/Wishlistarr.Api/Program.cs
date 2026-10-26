@@ -73,6 +73,7 @@ builder.Services.AddPlex<StoredAppSettings>();
 builder.Services.AddArr<StoredAppSettings>();
 builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
+builder.Services.AddSingleton<RequestLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
 builder.Services.AddOptions<ApprovalOptions>()
@@ -81,6 +82,7 @@ builder.Services.AddOptions<ApprovalOptions>()
     .ValidateOnStart();
 builder.Services.AddScoped<RequestLabeling>();
 builder.Services.AddScoped<RequestApproval>();
+builder.Services.AddScoped<RequestAccess>();
 builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();
 builder.Services.AddScoped<PlexEnforcement>();

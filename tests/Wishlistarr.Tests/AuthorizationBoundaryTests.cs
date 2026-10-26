@@ -54,6 +54,9 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         Assert.Contains(("GET", "/api/v1/requests/"), routes);
         Assert.Contains(("POST", "/api/v1/requests/approve"), routes);
         Assert.Contains(("POST", "/api/v1/requests/deny"), routes);
+        Assert.Contains(("POST", "/api/v1/requests/grant"), routes);
+        Assert.Contains(("GET", "/api/v1/requests/grant/preview"), routes);
+        Assert.Contains(("POST", "/api/v1/requests/revoke"), routes);
         Assert.Empty(leaks);
     }
 

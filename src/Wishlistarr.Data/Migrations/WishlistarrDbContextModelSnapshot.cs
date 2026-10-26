@@ -525,7 +525,7 @@ namespace Wishlistarr.Data.Migrations
 
                     b.HasIndex("KidProfileId", "Kind", "TmdbId")
                         .IsUnique()
-                        .HasFilter("\"State\" <> 'Denied'");
+                        .HasFilter("\"State\" <> 'Denied' AND \"State\" <> 'Revoked'");
 
                     b.ToTable("MediaRequests");
                 });

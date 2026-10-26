@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
@@ -49,6 +50,30 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         }
 
         return [.. items.Select(ToMediaItem)];
+    }
+
+    public async Task<IndexedGuids?> FindGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        if (await this.GetReadyServerAsync(ct) is not string serverId)
+        {
+            return null;
+        }
+
+        int[] tmdbIds = [.. titles.Select(title => title.TmdbId).Distinct()];
+        var rows = await db.LibraryTitles
+            .Where(title => tmdbIds.Contains(title.TmdbId))
+            .SelectMany(
+                title => title.Items.Where(item => item.ServerId == serverId && item.Kind == title.Kind),
+                (title, item) => new { title.Kind, title.TmdbId, item.Guid })
+            .AsNoTracking()
+            .ToListAsync(ct);
+        HashSet<TitleKey> wanted = [.. titles];
+        Dictionary<TitleKey, IReadOnlyList<string>> guids = rows
+            .Select(row => (Key: new TitleKey(row.Kind, row.TmdbId), row.Guid))
+            .Where(row => wanted.Contains(row.Key) && !string.IsNullOrEmpty(row.Guid))
+            .GroupBy(row => row.Key, row => row.Guid)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<string>)[.. group.Distinct(StringComparer.Ordinal)]);
+        return new IndexedGuids(serverId, guids);
     }
 
     public async Task<LibraryStatus> GetStatusAsync(CancellationToken ct = default)

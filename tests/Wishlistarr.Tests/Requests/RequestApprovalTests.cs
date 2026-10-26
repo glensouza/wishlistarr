@@ -802,11 +802,19 @@ public sealed class RequestApprovalTests
     public void Approval_timeouts_are_bounded()
     {
         Assert.True(new ApprovalOptions().IsValid());
-        Assert.True(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(10), BulkTimeout = TimeSpan.FromHours(24) }.IsValid());
-        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1), BulkTimeout = TimeSpan.FromHours(1) }.IsValid());
-        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromDays(60), BulkTimeout = TimeSpan.FromDays(61) }.IsValid());
+        Assert.True(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(10), BulkTimeout = TimeSpan.FromHours(24), StuckAfter = TimeSpan.FromMinutes(20) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1), BulkTimeout = TimeSpan.FromHours(1), StuckAfter = TimeSpan.FromHours(1) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromDays(60), BulkTimeout = TimeSpan.FromDays(61), StuckAfter = TimeSpan.FromDays(200) }.IsValid());
         Assert.False(new ApprovalOptions { BulkTimeout = TimeSpan.FromHours(24) + TimeSpan.FromTicks(1) }.IsValid());
         Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.Zero }.IsValid());
+    }
+
+    [Fact]
+    public void A_request_counts_as_stuck_only_after_twice_the_label_deadline()
+    {
+        Assert.True(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(5), StuckAfter = TimeSpan.FromMinutes(10) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(5), StuckAfter = TimeSpan.FromMinutes(10) - TimeSpan.FromTicks(1) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(6), StuckAfter = TimeSpan.FromMinutes(10) }.IsValid());
     }
 
     private static FakeLibraryIndex LibraryWithSpiritedAway()

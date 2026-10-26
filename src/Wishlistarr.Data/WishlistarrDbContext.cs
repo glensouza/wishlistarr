@@ -161,7 +161,7 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(request => request.Version).IsConcurrencyToken();
             entity.HasIndex(request => new { request.KidProfileId, request.Kind, request.TmdbId })
                 .IsUnique()
-                .HasFilter("\"State\" <> 'Denied'");
+                .HasFilter("\"State\" <> 'Denied' AND \"State\" <> 'Revoked'");
             entity.HasIndex(request => request.State);
             entity.HasOne(request => request.KidProfile)
                 .WithMany()

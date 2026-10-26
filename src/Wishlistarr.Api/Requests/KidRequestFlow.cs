@@ -106,7 +106,8 @@ public sealed partial class KidRequestFlow(
             profile.BlockedKeywordIds,
             profile.AllowedOriginalLanguages);
         ContentDecision decision = ContentPolicyEngine.Default.Evaluate(content, policy);
-        if (decision.Outcome == ContentOutcome.Blocked)
+        bool revokedBefore = await this.WasRevokedAsync(profile.Id, title, ct);
+        if (decision.Outcome == ContentOutcome.Blocked && !revokedBefore)
         {
             this.LogBlocked(profile.Id, title.Kind, title.TmdbId, decision.Reason.Code);
             return new KidRequestResult(KidRequestOutcome.NotAllowed);
@@ -118,7 +119,10 @@ public sealed partial class KidRequestFlow(
             profile.AutoApprove,
             profile.AutoApproveMovieRating,
             profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
-        (IReadOnlyList<MediaItem> matches, bool libraryKnown) = decision.Outcome == ContentOutcome.Allowed
+
+        // Both the instant label and auto-approval need a library answer, so not looking up a revoked title keeps it waiting for a parent.
+        bool inspectLibrary = !revokedBefore && decision.Outcome == ContentOutcome.Allowed;
+        (IReadOnlyList<MediaItem> matches, bool libraryKnown) = inspectLibrary
             ? await this.FindInLibraryAsync(title, ct)
             : ([], false);
         bool inLibrary = libraryKnown && matches.Count > 0;
@@ -129,11 +133,20 @@ public sealed partial class KidRequestFlow(
         RequestResult result;
         await using (IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct))
         {
+            if (!revokedBefore && await this.WasRevokedAsync(profile.Id, title, ct))
+            {
+                // A parent revoked the title after the checks above, so this request waits for a parent too.
+                instant = false;
+                autoNow = false;
+                counts = true;
+            }
+
             bool open = await db.MediaRequests.AnyAsync(
                 request => request.KidProfileId == profile.Id
                     && request.Kind == title.Kind
                     && request.TmdbId == title.TmdbId
-                    && request.State != RequestState.Denied,
+                    && request.State != RequestState.Denied
+                    && request.State != RequestState.Revoked,
                 ct);
             if (!open && counts && profile.WeeklyAllowance is int allowance)
             {
@@ -173,7 +186,7 @@ public sealed partial class KidRequestFlow(
 
         if (instant)
         {
-            RequestResult labeled = await labeling.LabelAsync(request.Id, matches, profile, InstantLabelActor);
+            RequestResult labeled = (await labeling.LabelAsync(request.Id, matches, profile, InstantLabelActor, ct)).Result;
             return new KidRequestResult(KidRequestOutcome.Created, labeled.Request ?? request);
         }
 
@@ -198,6 +211,14 @@ public sealed partial class KidRequestFlow(
             return ([], false);
         }
     }
+
+    private Task<bool> WasRevokedAsync(int kidProfileId, TitleKey title, CancellationToken ct) =>
+        db.MediaRequests.AnyAsync(
+            request => request.KidProfileId == kidProfileId
+                && request.Kind == title.Kind
+                && request.TmdbId == title.TmdbId
+                && request.State == RequestState.Revoked,
+            ct);
 
     private async Task<TimeZoneInfo> GetTimeZoneAsync(CancellationToken ct) =>
         TryFindTimeZone(await settings.GetAsync(TimeZoneSetting, ct), out TimeZoneInfo? zone) ? zone : time.LocalTimeZone;

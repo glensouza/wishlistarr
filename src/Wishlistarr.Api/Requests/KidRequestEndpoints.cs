@@ -13,9 +13,34 @@ public static class KidRequestEndpoints
 {
     public const string NotAllowedCode = "notAllowed";
     public const string AllowanceUsedCode = "allowanceUsed";
+    public const int DefaultHistoryPage = 50;
+    public const int MaxHistoryPage = 200;
 
     public static void MapKidRequests(this RouteGroupBuilder kid)
     {
+        kid.MapGet("/requests/history", async (int? limit, int? offset, HttpContext context, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
+        {
+            if (!TryProfile(context, out int profileId))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
+            }
+
+            int take = limit ?? DefaultHistoryPage;
+            int skip = offset ?? 0;
+            if (take is < 1 or > MaxHistoryPage || skip < 0)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: $"The limit is 1 to {MaxHistoryPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.");
+            }
+
+            return Results.Ok(await RequestViews.KidHistoryAsync(db, profileId, titles, take, skip, ct));
+        })
+            .WithName("ListKidRequestHistory")
+            .WithSummary("Lists what happened to the signed-in profile's requests, newest first and in kid-friendly terms. limit (default 50, at most 200) and offset choose the page. Parent account details are not included.")
+            .Produces<IReadOnlyList<KidHistoryEntry>>()
+            .ProducesProblem(StatusCodes.Status400BadRequest);
+
         kid.MapGet("/requests", async (HttpContext context, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
         {
             if (!TryProfile(context, out int profileId))

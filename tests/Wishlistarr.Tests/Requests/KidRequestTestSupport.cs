@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -41,18 +42,26 @@ public sealed class DecisionSaveGate : SaveChangesInterceptor
 {
     public Func<Task>? Gate { get; set; }
 
+    public Func<Task>? GrantCreateGate { get; set; }
+
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData,
         InterceptionResult<int> result,
         CancellationToken cancellationToken = default)
     {
-        bool decision = eventData.Context!.ChangeTracker.Entries<MediaRequestEvent>().Any(entry =>
-            entry.State == EntityState.Added
-            && entry.Entity.FromState == RequestState.Pending
-            && entry.Entity.ToState is RequestState.Approved or RequestState.Denied);
+        List<MediaRequestEvent> added = [.. eventData.Context!.ChangeTracker.Entries<MediaRequestEvent>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity)];
+        bool decision = added.Any(item => item.FromState == RequestState.Pending && item.ToState is RequestState.Approved or RequestState.Denied);
         if (decision && this.Gate is not null)
         {
             await this.Gate();
+        }
+
+        bool grantCreated = added.Any(item => item.FromState is null && item.ActorKind == RequestActorKind.Parent);
+        if (grantCreated && this.GrantCreateGate is not null)
+        {
+            await this.GrantCreateGate();
         }
 
         return result;
@@ -69,6 +78,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
     public Func<Task>? Gate { get; set; }
 
+    public int GuidCalls { get; private set; }
+
     public void Add(MediaKind kind, int tmdbId, MediaItem item)
     {
         ExternalId id = new(ExternalIdSource.Tmdb, tmdbId.ToString(CultureInfo.InvariantCulture));
@@ -79,6 +90,9 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
         list.Add(item);
     }
+
+    public void Remove(MediaKind kind, int tmdbId) =>
+        this.items.Remove((kind, new ExternalId(ExternalIdSource.Tmdb, tmdbId.ToString(CultureInfo.InvariantCulture))));
 
     public async Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
     {
@@ -94,6 +108,27 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         }
 
         return this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : [];
+    }
+
+    public Task<IndexedGuids?> FindGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        this.GuidCalls++;
+        if (!this.Ready)
+        {
+            return Task.FromResult<IndexedGuids?>(null);
+        }
+
+        Dictionary<TitleKey, IReadOnlyList<string>> guids = [];
+        foreach (TitleKey title in titles)
+        {
+            ExternalId id = new(ExternalIdSource.Tmdb, title.TmdbId.ToString(CultureInfo.InvariantCulture));
+            if (this.items.TryGetValue((title.Kind, id), out List<MediaItem>? list) && list.Count > 0)
+            {
+                guids[title] = [.. list.Select(item => item.Guid)];
+            }
+        }
+
+        return Task.FromResult<IndexedGuids?>(new IndexedGuids(FakePlexServer.MachineIdentifier, guids));
     }
 }
 

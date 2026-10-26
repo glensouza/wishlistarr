@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.MediaServers;
@@ -16,6 +17,8 @@ public enum LabelWriteOutcome
 }
 
 public sealed record LabelWriteResult(LabelWriteOutcome Outcome, MediaItemLabels? Item = null);
+
+public sealed record ProfileLabels(MediaItemLabels Item, IReadOnlyList<OwnedLabel> Owned);
 
 public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, ItemLocks locks, TimeProvider time)
 {
@@ -93,6 +96,32 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         return result;
     }
 
+    public async Task<ProfileLabels?> FindProfileLabelsAsync(string itemId, int kidProfileId, CancellationToken ct = default)
+    {
+        MediaItemLabels? item = await server.GetLabelsAsync(itemId, ct);
+        if (item is null)
+        {
+            return null;
+        }
+
+        List<OwnedLabel> owned = await db.OwnedLabels.AsNoTracking()
+            .Where(OwnedOn(item))
+            .Where(row => row.KidProfileId == kidProfileId)
+            .OrderBy(row => row.Id)
+            .ToListAsync(ct);
+        return new ProfileLabels(item, owned);
+    }
+
+    public async Task<bool> OwnsAsync(MediaItemLabels item, string label, CancellationToken ct = default) =>
+        await this.FindOwnedAsync(item, label, ct) is not null;
+
+    private static Expression<Func<OwnedLabel, bool>> OwnedOn(MediaItemLabels item)
+    {
+        string serverId = item.ServerId;
+        string guid = item.Guid;
+        return owned => owned.ServerId == serverId && owned.Guid == guid;
+    }
+
     private async Task<LabelWriteResult> WriteAsync(
         string itemId,
         Func<MediaItemLabels, CancellationToken, Task<IReadOnlyList<string>?>> plan,
@@ -165,9 +194,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
     }
 
     private Task<OwnedLabel?> FindOwnedAsync(MediaItemLabels item, string label, CancellationToken ct) =>
-        db.OwnedLabels.FirstOrDefaultAsync(
-            owned => owned.ServerId == item.ServerId && owned.Guid == item.Guid && owned.Label == label,
-            ct);
+        db.OwnedLabels.Where(OwnedOn(item)).FirstOrDefaultAsync(owned => owned.Label == label, ct);
 
     private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source)
     {
