@@ -80,6 +80,56 @@ export async function requestTitle(
   return { ...body, alreadyAsked: status !== 201 }
 }
 
+export type TitleCastMember = {
+  name: string
+  character: string | null
+  profileUrl: string | null
+}
+
+export type TitleSeason = {
+  number: number
+  name: string | null
+  overview: string | null
+  posterUrl: string | null
+  episodeCount: number
+  year: string | null
+}
+
+export type TitleRequestState = {
+  state: string
+  requestCount: number
+}
+
+export type TitleDetails = {
+  kind: SearchItem['kind']
+  tmdbId: number
+  title: string
+  year: string | null
+  overview: string | null
+  posterUrl: string | null
+  backdropUrl: string | null
+  runtimeMinutes: number | null
+  rating: string | null
+  availability: SearchItem['availability']
+  needsParent: boolean
+  trailerKey: string | null
+  cast: TitleCastMember[]
+  seasons: TitleSeason[]
+  request: TitleRequestState | null
+}
+
+export const getTitle = (
+  kind: SearchItem['kind'],
+  tmdbId: number,
+  signal: AbortSignal,
+) =>
+  request<TitleDetails>(
+    'GET',
+    `/api/v1/kid/titles/${kind}/${tmdbId}`,
+    undefined,
+    signal,
+  )
+
 export type KidRequest = {
   id: number
   kind: 'movie' | 'show'

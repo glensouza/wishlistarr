@@ -51,7 +51,18 @@ public sealed record TmdbDetails(
     [property: JsonPropertyName("status")] string? Status,
     [property: JsonPropertyName("genres")] IReadOnlyList<TmdbGenre>? Genres,
     [property: JsonPropertyName("vote_average")] double VoteAverage,
-    [property: JsonPropertyName("original_language")] string? OriginalLanguage = null);
+    [property: JsonPropertyName("original_language")] string? OriginalLanguage = null,
+    [property: JsonPropertyName("adult")] bool Adult = false,
+    [property: JsonPropertyName("episode_run_time")] IReadOnlyList<int>? EpisodeRunTime = null,
+    [property: JsonPropertyName("seasons")] IReadOnlyList<TmdbSeason>? Seasons = null);
+
+public sealed record TmdbSeason(
+    [property: JsonPropertyName("season_number")] int SeasonNumber,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("overview")] string? Overview,
+    [property: JsonPropertyName("poster_path")] string? PosterPath,
+    [property: JsonPropertyName("episode_count")] int EpisodeCount,
+    [property: JsonPropertyName("air_date")] string? AirDate);
 
 public sealed record TmdbCastMember(
     [property: JsonPropertyName("id")] int Id,

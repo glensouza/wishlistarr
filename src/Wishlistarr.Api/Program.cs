@@ -17,6 +17,7 @@ using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
+using Wishlistarr.Api.Titles;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
@@ -100,6 +101,7 @@ builder.Services.AddScoped<KidContentPipeline>();
 builder.Services.AddScoped<KidHome>();
 builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.AddScoped<KidSearch>();
+builder.Services.AddScoped<KidTitleDetails>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 builder.Services.AddProblemDetails();

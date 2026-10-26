@@ -7,6 +7,7 @@ using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
+using Wishlistarr.Api.Titles;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
@@ -124,6 +125,19 @@ public static class ApiEndpoints
                     title: $"The retention is a whole number of days from 1 to {TmdbRetention.MaxDays}.");
             }
 
+            if (key == YoutubeTrailers.SettingKey)
+            {
+                if (!YoutubeTrailers.TryParse(update.Value, out bool trailers))
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "YouTube trailers are either true or false.");
+                }
+
+                await store.SetAsync(key, trailers ? "true" : "false", false, ct);
+                return Results.NoContent();
+            }
+
             if (key == TmdbOptions.ApiKeySetting && string.IsNullOrWhiteSpace(update.Value))
             {
                 await store.DeleteAsync(key, ct);
@@ -140,7 +154,7 @@ public static class ApiEndpoints
             return Results.NoContent();
         })
             .WithName("PutSetting")
-            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180.")
+            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180; kids.youtube_trailers accepts true or false.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)

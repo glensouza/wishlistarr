@@ -16,6 +16,10 @@ public sealed class KidSearch(
     public const int MinQueryLength = 2;
     public const int MaxQueryLength = 100;
     public const int MaxPage = 10;
+    public const string ProfileSize = "w185";
+    public const string BackdropSize = "w1280";
+
+    public static bool IsImageSize(string size) => size is KidContentPipeline.PosterSize or ProfileSize or BackdropSize;
 
     public static bool TryNormalize(string? query, out string normalized)
     {

@@ -413,10 +413,11 @@ public sealed class KidSearchTests
     }
 
     [Theory]
-    [InlineData("w185")]
+    [InlineData("w45")]
     [InlineData("w500")]
+    [InlineData("w780")]
     [InlineData("original")]
-    public async Task Only_the_search_poster_size_is_served_to_kids(string size)
+    public async Task Sizes_outside_the_kid_artwork_set_are_rejected(string size)
     {
         using KidRequestApiFactory factory = CreateFactory();
         (HttpClient kid, _) = await factory.SignInKidAsync();

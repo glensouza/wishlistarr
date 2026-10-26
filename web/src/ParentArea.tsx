@@ -13,6 +13,7 @@ import LogViewer from './LogViewer'
 import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
+import TrailerSetting from './TrailerSetting'
 import UpdateNotice from './UpdateNotice'
 import RequestHistoryPanel from './RequestHistoryPanel'
 
@@ -53,6 +54,7 @@ export default function ParentArea() {
           <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
+          <TrailerSetting />
           <BackupsAdmin />
           <RequestHistoryPanel />
           <LogViewer />

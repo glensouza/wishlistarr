@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
+using Wishlistarr.Api.Titles;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
@@ -161,6 +162,7 @@ public static class KidEndpoints
 
         signedIn.MapKidRequests();
         signedIn.MapKidSearch();
+        signedIn.MapKidTitles();
         signedIn.MapKidHome();
     }
 

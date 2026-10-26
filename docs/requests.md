@@ -93,6 +93,8 @@ Parents can read one profile's events, newest first, with `GET /api/v1/kid-profi
 
 A new request answers `201` and asking again for a title that already has a request answers `200`; both return `{ id, kind, tmdbId, title, state, requestCount }`. Unknown titles answer `404`, and when TMDB cannot be reached the answer is `502` (or `503` without an API key) with a message that is safe to show a kid.
 
+The title screen shows the open request and asks through this same endpoint (see [Title details](title-details.md)). A kid cannot move a request to another state. Choosing a season on a show does not change what is asked for: access is for the whole show.
+
 ### Library lookup
 
 The library is checked through `LibraryLookup`, which asks each registered `ILibraryIndex` first. An index returns the matching items, or `null` when it cannot answer yet, for example before its first sync. With no index, or when none can answer, the flow falls back to a live lookup on the Plex server (`IMediaServer.FindByExternalIdAsync`). If Plex is not connected or cannot be reached, the title is treated as not in the library, so it becomes a pending request and is never labeled.
