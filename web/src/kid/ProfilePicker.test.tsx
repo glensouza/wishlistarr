@@ -210,6 +210,48 @@ it('goes back to the picker with Not me', async () => {
   ).toBeTruthy()
 })
 
+function place(
+  element: HTMLElement,
+  left: number,
+  top: number,
+  width = 160,
+  height = 48,
+) {
+  const rect = {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON() {
+      return rect
+    },
+  }
+  element.getBoundingClientRect = () => rect
+}
+
+it('moves between profiles with the arrow keys and signs in with Enter', async () => {
+  const user = userEvent.setup()
+  signInResponse = () => Response.json(profiles[1])
+  renderApp()
+  const ada = await screen.findByRole('button', { name: 'Sign in as Ada' })
+  const bo = screen.getByRole('button', { name: 'Sign in as Bo' })
+  place(ada, 0, 0)
+  place(bo, 220, 0)
+  ada.focus()
+  await user.keyboard('{ArrowRight}')
+  expect(document.activeElement).toBe(bo)
+  await user.keyboard('{Enter}')
+  expect(
+    await screen.findByRole('heading', { name: 'Welcome, Bo!' }),
+  ).toBeTruthy()
+  const signIn = calls.find((call) => call.path === '/api/v1/kid/signin')
+  expect(signIn?.body).toEqual({ profileId: 2 })
+})
+
 it('signs out back to the picker', async () => {
   const user = userEvent.setup()
   signedInAs = 'Ada'

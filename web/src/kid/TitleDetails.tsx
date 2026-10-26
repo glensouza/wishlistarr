@@ -1,10 +1,11 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api'
 import { useT, type MessageKey } from '../i18n'
 import Artwork from './Artwork'
 import { useKidSession } from './KidSession'
 import Trailer from './Trailer'
+import { useKidSpatialNav } from './useKidSpatialNav'
 import {
   getTitle,
   requestTitle,
@@ -269,6 +270,12 @@ function TitleScreen() {
 }
 
 export default function TitleDetails() {
+  const rootRef = useRef<HTMLDivElement>(null)
+  useKidSpatialNav(rootRef)
   const { kind, tmdbId } = useParams()
-  return <TitleScreen key={`${kind ?? ''}:${tmdbId ?? ''}`} />
+  return (
+    <div ref={rootRef}>
+      <TitleScreen key={`${kind ?? ''}:${tmdbId ?? ''}`} />
+    </div>
+  )
 }

@@ -116,6 +116,38 @@ function renderHome() {
   )
 }
 
+function place(
+  element: HTMLElement,
+  left: number,
+  top: number,
+  width = 160,
+  height = 48,
+) {
+  const rect = {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON() {
+      return rect
+    },
+  }
+  element.getBoundingClientRect = () => rect
+}
+
+function placeHomeCards() {
+  const rows = document.querySelectorAll('.home-row')
+  rows.forEach((row, rowIndex) => {
+    row.querySelectorAll<HTMLElement>('.home-ask').forEach((button, column) => {
+      place(button, column * 200, rowIndex * 240)
+    })
+  })
+}
+
 it('shows allowed rows with lazy posters, a reserved frame and a library badge', async () => {
   const { container } = renderHome()
 
@@ -164,6 +196,8 @@ it('moves focus across a row and between rows with the arrow keys', async () => 
     await screen.findAllByRole('button', { name: 'Ask for Tiny Tale' })
   )[0]
   const second = screen.getAllByRole('button', { name: 'Ask for Bluey' })[0]
+  placeHomeCards()
+  expect(document.documentElement.getAttribute('data-kid-scale')).toBe('')
   first.focus()
   fireEvent.keyDown(first, { key: 'ArrowRight' })
   expect(document.activeElement).toBe(second)
@@ -174,6 +208,49 @@ it('moves focus across a row and between rows with the arrow keys', async () => 
   expect(document.activeElement).toBe(animationAsk)
   fireEvent.keyDown(animationAsk, { key: 'ArrowLeft' })
   expect(document.activeElement).toBe(animationAsk)
+})
+
+it('moves from the last title to sign out when that control is the nearest one below', async () => {
+  renderHome()
+  const last = (
+    await screen.findAllByRole('button', { name: 'Ask for Bluey' })
+  ).at(-1)
+  const signOut = screen.getByRole('button', { name: 'Switch profile' })
+  const search = screen.getByRole('searchbox')
+  if (!last) throw new Error('missing row button')
+  place(last, 0, 0)
+  place(search, 400, 0)
+  place(signOut, 0, 160)
+  last.focus()
+  fireEvent.keyDown(last, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(signOut)
+  fireEvent.keyDown(signOut, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(last)
+})
+
+it('keeps horizontal arrows inside the search field and leaves it vertically', async () => {
+  renderHome()
+  const search = await screen.findByRole('searchbox')
+  const signOut = screen.getByRole('button', { name: 'Switch profile' })
+  place(search, 0, 0, 280, 48)
+  place(signOut, 0, 160)
+  search.focus()
+  const right = new KeyboardEvent('keydown', {
+    key: 'ArrowRight',
+    bubbles: true,
+    cancelable: true,
+  })
+  search.dispatchEvent(right)
+  expect(right.defaultPrevented).toBe(false)
+  expect(document.activeElement).toBe(search)
+  const down = new KeyboardEvent('keydown', {
+    key: 'ArrowDown',
+    bubbles: true,
+    cancelable: true,
+  })
+  search.dispatchEvent(down)
+  expect(down.defaultPrevented).toBe(true)
+  expect(document.activeElement).toBe(signOut)
 })
 
 it('asks for a title from a home row', async () => {

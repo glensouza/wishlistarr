@@ -178,6 +178,56 @@ function renderAt(path: string) {
 const requests = () =>
   calls.filter((call) => call.path === '/api/v1/kid/requests')
 
+function place(
+  element: HTMLElement,
+  left: number,
+  top: number,
+  width = 160,
+  height = 48,
+) {
+  const rect = {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON() {
+      return rect
+    },
+  }
+  element.getBoundingClientRect = () => rect
+}
+
+it('moves between the back link and the trailer with the arrow keys', async () => {
+  renderAt('/title/movie/800')
+  const back = await screen.findByRole('link', { name: 'Back' })
+  const play = screen.getByRole('button', { name: 'Play trailer' })
+  const ask = screen.getByRole('button', { name: 'Ask' })
+  place(back, 0, 0)
+  place(ask, 320, 0)
+  place(play, 0, 140)
+  back.focus()
+  back.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'ArrowDown',
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+  expect(document.activeElement).toBe(play)
+  play.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'ArrowUp',
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+  expect(document.activeElement).toBe(back)
+})
+
 it('shows the title and loads a trailer only after play is clicked', async () => {
   const user = userEvent.setup()
   const { container } = renderAt('/title/movie/800')
