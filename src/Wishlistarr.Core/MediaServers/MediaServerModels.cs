@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text.Json.Serialization;
 
 namespace Wishlistarr.Core.MediaServers;
 
@@ -79,7 +80,21 @@ public sealed record MediaItemLabels(
     IReadOnlyList<string> Labels,
     bool Locked);
 
-public sealed record MediaServerTestResult(bool Valid, string Message, string? ServerName = null, string? Version = null);
+public enum MediaServerTestCode
+{
+    Failed,
+    Connected,
+    NotLinked,
+    NoServerSelected,
+    Rejected,
+}
+
+public sealed record MediaServerTestResult(
+    bool Valid,
+    string Message,
+    string? ServerName = null,
+    string? Version = null,
+    [property: JsonIgnore] MediaServerTestCode Code = MediaServerTestCode.Failed);
 
 public sealed record MediaServerLinkStart(string Id, string Code, Uri AuthUrl, DateTimeOffset ExpiresAt);
 

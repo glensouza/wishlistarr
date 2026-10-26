@@ -27,12 +27,31 @@ public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, Tmd
         }
     }
 
-    public async Task<string> GetAsync(MediaRequest request, CancellationToken ct)
+    public async Task<string> GetAsync(MediaRequest request, CancellationToken ct) =>
+        await this.ResolveAsync(request, time.GetUtcNow() - await retention.GetAsync(ct), ct);
+
+    public async Task<IReadOnlyDictionary<int, string>> GetManyAsync(IReadOnlyCollection<MediaRequest> requests, CancellationToken ct)
     {
-        DateTimeOffset now = time.GetUtcNow();
+        Dictionary<int, string> names = [];
+        if (requests.Count == 0)
+        {
+            return names;
+        }
+
+        DateTimeOffset staleBefore = time.GetUtcNow() - await retention.GetAsync(ct);
+        foreach (MediaRequest request in requests)
+        {
+            names[request.Id] = await this.ResolveAsync(request, staleBefore, ct);
+        }
+
+        return names;
+    }
+
+    private async Task<string> ResolveAsync(MediaRequest request, DateTimeOffset staleBefore, CancellationToken ct)
+    {
         if (request.Title is { Length: > 0 } stored
             && request.TitleFetchedAt is DateTimeOffset fetchedAt
-            && fetchedAt >= now - await retention.GetAsync(ct))
+            && fetchedAt >= staleBefore)
         {
             return stored;
         }
@@ -44,6 +63,7 @@ public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, Tmd
                 return string.Empty;
             }
 
+            DateTimeOffset now = time.GetUtcNow();
             await db.MediaRequests.Where(row => row.Id == request.Id).ExecuteUpdateAsync(
                 setters => setters.SetProperty(row => row.Title, name).SetProperty(row => row.TitleFetchedAt, now),
                 ct);

@@ -6,6 +6,7 @@ import KidHome from './kid/KidHome'
 import { KidSessionProvider } from './kid/KidSession'
 import ProfilePicker from './kid/ProfilePicker'
 import TitleDetails from './kid/TitleDetails'
+import About from './about/About'
 import ParentArea from './ParentArea'
 import Shell from './Shell'
 
@@ -50,6 +51,7 @@ export default function App() {
                 </KidGate>
               }
             />
+            <Route path="about" element={<About />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
