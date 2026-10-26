@@ -87,6 +87,9 @@ beforeEach(() => {
         body: init?.body ? JSON.parse(init.body as string) : undefined,
         headers: new Headers(init?.headers),
       })
+      if (path === '/api/v1/kid/wishlist') {
+        return Response.json({ remaining: null, resetsAt: null, items: [] })
+      }
       if (path === '/api/v1/kid/home') {
         return Response.json(homeBody, { status: homeStatus })
       }

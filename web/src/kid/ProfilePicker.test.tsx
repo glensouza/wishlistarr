@@ -56,6 +56,9 @@ beforeEach(() => {
         signedInAs = null
         return new Response(null, { status: 204 })
       }
+      if (path === '/api/v1/kid/wishlist' && method === 'GET') {
+        return Response.json({ remaining: null, resetsAt: null, items: [] })
+      }
       return Response.json({}, { status: 404 })
     }),
   )

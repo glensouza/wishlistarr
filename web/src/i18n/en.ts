@@ -34,7 +34,6 @@ export const en = {
 
   'home.welcome': 'Welcome, {name}!',
   'home.intro': 'Here are some ideas, or search for something else.',
-
   'home.signOut': 'Switch profile',
   'home.loading': 'Loading ideas',
   'home.failed':
@@ -47,6 +46,29 @@ export const en = {
   'home.genreComedy': 'Comedy',
   'home.genreOther': 'Genre {id}',
   'home.libraryBadge': '{title} is ready to watch',
+
+  'wishlist.title': 'Your wishlist',
+  'wishlist.empty':
+    'Nothing here yet. Find a movie or a show you would love, and ask for it.',
+  'wishlist.loading': 'Loading your wishlist',
+  'wishlist.failed': 'We could not load your wishlist.',
+  'wishlist.retry': 'Try again',
+  'wishlist.waiting': 'Waiting for a parent',
+  'wishlist.onTheWay': 'On its way',
+  'wishlist.ready': 'Ready to watch',
+  'wishlist.denied': 'Not this time',
+  'wishlist.unknown': 'Checking on it',
+  'wishlist.refreshFailed': 'We could not check for updates.',
+  'wishlist.changed': '{title}: {state}',
+  'wishlist.remaining': '{count} wishes left this week',
+  'wishlist.remainingOne': '1 wish left this week',
+  'wishlist.noneLeft':
+    'You have used your wishes for this week. A new week brings more.',
+  'wishlist.noneLeftWhen':
+    'You have used your wishes for this week. More wishes start on {when}.',
+  'wishlist.unlimited': 'You can ask for as many as you like.',
+  'wishlist.watch': 'Watch {title} in Plex',
+  'wishlist.untitled': 'Something you asked for',
 
   'search.title': 'Find something to watch',
   'search.label': 'Search movies and shows',
@@ -434,21 +456,9 @@ export const en = {
   'requests.partStuck': 'titles that did not finish',
   'requests.retry': 'Try again',
 
-  'kidRequests.title': 'Your requests',
-  'kidRequests.none': 'You have not asked for anything yet.',
-  'kidRequests.pending': 'Waiting for a parent',
-  'kidRequests.approved': 'Approved',
-  'kidRequests.denied': 'Not this time',
-  'kidRequests.fulfilling': 'On the way',
-  'kidRequests.available': 'Almost ready',
-  'kidRequests.labeled': 'Ready to watch',
-  'kidRequests.failed': 'Something went wrong',
-  'kidRequests.revoked': 'A parent removed this',
-  'kidRequests.unknown': 'Waiting for a parent',
   'kidRequests.history': 'What happened',
   'kidRequests.historyEmpty': 'Nothing has happened yet.',
   'kidRequests.historyFailedToLoad': 'What happened could not be loaded.',
-  'kidRequests.listFailedToLoad': 'Your requests could not be loaded.',
   'kidRequests.retry': 'Try again',
   'kidRequests.showMore': 'Show more',
   'kidRequests.granted': 'A parent added this for you',

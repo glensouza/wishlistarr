@@ -44,7 +44,7 @@ Deleting archives the profile instead of removing it: the row stays so request h
 
 - `GET /api/v1/kid/profiles` needs a paired device and returns `{ id, name, avatar, requiresPin }` for each active profile assigned to it, for the picker.
 - `POST /api/v1/kid/signin` needs a paired device and takes `{ profileId, pin }`. Success returns the picker entry and sets the `wishlistarr.kid` cookie (HttpOnly, `SameSite=Strict`). The session is stored in the database, belongs to the device and lasts 7 days (`Kids:SessionLifetime`).
-- `GET /api/v1/kid/me` and `POST /api/v1/kid/signout` need a Kid session. Kid sessions are rejected on every parent endpoint. Writes made with a Kid cookie, including signing in again from a signed-in device, need the antiforgery token like parent writes.
+- `GET /api/v1/kid/me` and `POST /api/v1/kid/signout` need a Kid session. A session ends when its profile is archived or locked, so `GET /api/v1/kid/me` answers `401` with a stale cookie. The app ends a session the server has refused by calling sign-out, resetting the antiforgery token and clearing its own state. Kid sessions are rejected on every parent endpoint. Writes made with a Kid cookie, including signing in again from a signed-in device, need the antiforgery token like parent writes.
 
 Unknown, archived, not assigned to the device and wrong-PIN attempts all answer `401 Invalid PIN.` with the same body, and an unknown profile still costs a password hash. Sign-in shares the per-address rate limit used by parent login.
 

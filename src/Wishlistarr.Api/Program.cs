@@ -100,6 +100,7 @@ builder.Services.AddLibraryIndex();
 builder.Services.AddScoped<KidContentPipeline>();
 builder.Services.AddScoped<KidHome>();
 builder.Services.AddScoped<KidRequestFlow>();
+builder.Services.AddScoped<KidWishlist>();
 builder.Services.AddScoped<KidSearch>();
 builder.Services.AddScoped<KidTitleDetails>();
 builder.Services.ConfigureHttpJsonOptions(options =>

@@ -50,6 +50,7 @@ it('keeps visible text out of the picker and shell components', () => {
     'kid/KidHome.tsx',
     'about/About.tsx',
     'about/WatchProviders.tsx',
+    'kid/Wishlist.tsx',
   ]) {
     const text = readFileSync(join(__dirname, '..', name), 'utf8')
     expect(text, name).not.toMatch(/(?<![=-])>\s*[A-Z][a-z][A-Za-z ,.!?']*<\//)

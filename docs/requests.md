@@ -1,6 +1,6 @@
 # Requests
 
-A request is a kid profile asking for a movie or show. Requests are stored in the `MediaRequests` table and every change of state is recorded in `MediaRequestEvents`. `MediaRequests` in `Wishlistarr.Api.Requests` creates requests and moves them between states; the transition table itself is `RequestStateMachine` in `Wishlistarr.Core.Requests` and does no I/O. Kids ask for titles through `POST /api/v1/kid/requests` (see [Asking for a title](#asking-for-a-title)).
+A request is a kid profile asking for a movie or show. Requests are stored in the `MediaRequests` table and every change of state is recorded in `MediaRequestEvents`. `MediaRequests` in `Wishlistarr.Api.Requests` creates requests and moves them between states; the transition table itself is `RequestStateMachine` in `Wishlistarr.Core.Requests` and does no I/O. Kids ask for titles through `POST /api/v1/kid/requests` (see [Asking for a title](#asking-for-a-title)) and see their own list through `GET /api/v1/kid/requests` and the wishlist with the weekly allowance left through `GET /api/v1/kid/wishlist` (see [Kid wishlist](#kid-wishlist)).
 
 ## States
 
@@ -184,3 +184,62 @@ A kid can ask again for a revoked title. The new request is `Pending` and waits 
 ## Kid history
 
 `GET /api/v1/kid/requests/history` needs a Kid session. It lists the signed-in profile's own request events, newest first, one page at a time: `limit` is 1 to 200 (default 50) and `offset` is not negative. Each entry is `{ id, requestId, kind, tmdbId, title, action, at, note }`. `action` is one of `granted`, `asked`, `approved`, `autoApproved`, `denied`, `ready`, `revoked` or `failed`. A parent grant is `granted` ("a parent added this") and a revocation is `revoked`. `approved` is a parent's yes. `autoApproved` is a yes from the system, such as an auto-approve rule or an allowed title that was already in the library, and is worded without mentioning a parent. `note` is the denial reason, and only on a denial. The parent's account id, username and the stored actor name are not included. Another profile's events are not included.
+
+## Kid wishlist
+
+`GET /api/v1/kid/wishlist` needs a Kid session. It answers for the signed-in profile only. There is no profile id to pass, and a query string is ignored. A kid never receives another profile's requests. A parent session is rejected with `403`, and a caller who is not signed in as a kid with `401`. The response is `Cache-Control: private, no-store`.
+
+```json
+{
+  "remaining": 2,
+  "resetsAt": "2026-10-26T05:00:00+00:00",
+  "items": [
+    {
+      "id": 1,
+      "kind": "movie",
+      "tmdbId": 700,
+      "title": "Movie 700",
+      "state": "waiting",
+      "note": null,
+      "plex": null
+    }
+  ]
+}
+```
+
+`remaining` is how many new requests the profile can still make this week, using the same week and the same `CountsTowardAllowance` count as [Weekly allowance](#weekly-allowance). It is `null` when the profile has no `weeklyAllowance` (no limit). `resetsAt` is the start of the next week when there is a limit, and `null` otherwise. `0` wishes left means the allowance is used up or was set to `0`.
+
+Items are the profile's own requests, newest first. A request a parent has revoked is left out, because the title was taken off the kid's list. The [kid history](#kid-history) still says it was removed. The stored title is returned as text. Nothing is read from TMDB for this list.
+
+### Friendly states
+
+The internal state is not returned. Each item has one of four labels:
+
+| Internal state | `state` | What the kid sees |
+| --- | --- | --- |
+| `Pending`, `Failed` | `waiting` | Waiting for a parent |
+| `Approved`, `Fulfilling` | `onTheWay` | On its way |
+| `Available`, `Labeled` | `ready` | Ready to watch |
+| `Denied` | `denied` | Not this time |
+
+`Failed` is shown as waiting for a parent because a parent is who can retry it or decide it is not this time. A state the server does not recognise is shown as `waiting`, so a request never disappears from the list. If the web app is given a `state` it does not know, it shows a neutral "Checking on it" badge.
+
+### Denial note
+
+When the request was denied by a parent, `note` is that parent's reason, trimmed, as plain text. The web app renders it as text and never as HTML. A denial by the system, a blank reason, or any reason on a request that is not denied is not included. Other event reasons, actor names, and the internal state are not in the response.
+
+### Opening a ready title in Plex
+
+A ready item has `plex` only when the selected server's machine identifier is known and the library index can name the item. The identifier and the rating key must be a short token of letters, digits, `_` and `-` (the same limits as the stored server id and rating key). If the index cannot answer yet, the item is not in the index, the lookup fails, or either value is not that shape, `plex` is `null`. The list does not ask Plex itself, and it never includes a server address or a token.
+
+`plex.webUrl` opens the item in the hosted Plex Web app. [Opening Plex Web App](https://support.plex.tv/articles/200288666-opening-plex-web-app/) documents `https://app.plex.tv/desktop` as that app. The item path is the one Plex Web puts in the address bar, `#!/server/<machineIdentifier>/details?key=/library/metadata/<ratingKey>`, with the key percent-encoded so the whole thing is one URL. That shape is what the web app uses, as described in the Plex forum thread [Supported deep link to a specific library item's detail page](https://forums.plex.tv/t/supported-deep-link-to-a-specific-library-items-detail-page-on-android-mobile-and-windows-desktop/944608) (October 2026).
+
+The link does not carry `X-Plex-Token` or the server's own address. It only works when the browser is signed in to a Plex account that can reach the server. The machine identifier is part of the link and is exposed to kids; it is not a secret. There is no link for the Plex apps, because the `plex://` links are not supported consistently and the desktop app does not take them.
+
+The page uses the URL from this response as the link target. It accepts a link only when it starts with `https://app.plex.tv/`, and it drops one that contains `X-Plex-Token` or a `:32400` port. A ready title with no accepted link still shows "Ready to watch". The library lookups for all ready items in a list are made in one query.
+
+### Keeping the list current
+
+The kid home polls `GET /api/v1/kid/wishlist` every 15 seconds while the tab is visible. A failed load waits 30 seconds, then 60, and stays at 60 until a load works again. After the first load, a failed refresh keeps the list on screen and shows a notice with a retry button until a load works. A `401` or `403` stops polling and ends the kid session: the page calls `POST /api/v1/kid/signout` (a failure is ignored), resets the antiforgery token, clears the signed-in state and shows the profile picker. A profile that a parent archived is already rejected with `401` by the session check on every request, so a stale cookie cannot sign back in after a reload. The notice for a failed refresh is announced to screen readers, and a changed state is announced once and cleared a few seconds later so the same change can be announced again. While the tab is hidden the timer is cleared, and showing the tab loads the list at once. The page does not reload.
+
+Polling is the fit for this app. The wishlist is one small JSON document behind the cookie session the kid already has, and a parent decision or a download is not second-critical. Server-sent events would hold a connection open, and nothing else in the API streams. Polling stops in the background and slows down when the server is unhappy, without a second way to authenticate.

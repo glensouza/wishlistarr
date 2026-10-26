@@ -13,6 +13,9 @@ public interface ILibraryIndex
 
     // Null means the index cannot answer yet. Titles that are not in the library are left out.
     Task<IndexedGuids?> FindGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default);
+
+    // Null means the index cannot answer yet. A title the index does not hold is missing from the dictionary.
+    Task<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?> FindManyByTmdbAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default);
 }
 
 public sealed record IndexedGuids(string ServerId, IReadOnlyDictionary<TitleKey, IReadOnlyList<string>> Guids);

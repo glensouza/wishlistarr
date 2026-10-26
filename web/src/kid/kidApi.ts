@@ -80,6 +80,31 @@ export async function requestTitle(
   return { ...body, alreadyAsked: status !== 201 }
 }
 
+export type KidWishState = 'waiting' | 'onTheWay' | 'ready' | 'denied'
+
+export type KidPlexLinks = {
+  webUrl: string
+}
+
+export type KidWish = {
+  id: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string | null
+  state: KidWishState
+  note: string | null
+  plex: KidPlexLinks | null
+}
+
+export type KidWishlist = {
+  remaining: number | null
+  resetsAt: string | null
+  items: KidWish[]
+}
+
+export const getWishlist = (signal?: AbortSignal) =>
+  request<KidWishlist>('GET', '/api/v1/kid/wishlist', undefined, signal)
+
 export type TitleCastMember = {
   name: string
   character: string | null
@@ -129,19 +154,6 @@ export const getTitle = (
     undefined,
     signal,
   )
-
-export type KidRequest = {
-  id: number
-  kind: 'movie' | 'show'
-  tmdbId: number
-  title: string
-  state: string
-  requestCount: number
-  denialReason: string | null
-}
-
-export const listKidRequests = () =>
-  request<KidRequest[]>('GET', '/api/v1/kid/requests')
 
 export type KidHistoryAction =
   | 'granted'

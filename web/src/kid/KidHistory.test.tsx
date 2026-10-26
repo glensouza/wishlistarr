@@ -1,26 +1,12 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import KidRequests from './KidRequests'
-import type { KidHistoryEntry, KidRequest } from './kidApi'
+import KidHistory from './KidHistory'
+import type { KidHistoryEntry } from './kidApi'
 
-const reason = '<img src=x onerror=alert(1)>'
-
-const denied: KidRequest = {
-  id: 8,
-  kind: 'movie',
-  tmdbId: 129,
-  title: 'Spirited Away',
-  state: 'denied',
-  requestCount: 1,
-  denialReason: reason,
-}
-
-let rows: KidRequest[]
 let history: KidHistoryEntry[]
 let historyDown: boolean
 
 beforeEach(() => {
-  rows = [denied]
   history = []
   historyDown = false
   vi.stubGlobal(
@@ -37,7 +23,7 @@ beforeEach(() => {
           ? Response.json({ title: 'Down' }, { status: 500 })
           : Response.json(history.slice(offset, offset + limit))
       }
-      return Response.json(rows)
+      return Response.json([])
     }),
   )
 })
@@ -47,38 +33,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('shows a denial reason as text and does not build elements from it', async () => {
-  const { container } = render(<KidRequests />)
-
-  expect(await screen.findByText(reason)).toBeTruthy()
-  expect(screen.getByText('Not this time')).toBeTruthy()
-  expect(container.querySelector('img')).toBeNull()
-  expect(container.innerHTML).not.toContain('<img')
-})
-
-it('does not show a failure explanation to the kid', async () => {
-  rows = [
-    {
-      ...denied,
-      state: 'failed',
-      denialReason: 'The title is no longer in the library.',
-    },
-  ]
-  render(<KidRequests />)
-
-  expect(await screen.findByText('Something went wrong')).toBeTruthy()
-  expect(screen.queryByText(/library/i)).toBeNull()
-  expect(screen.queryByText(/label/i)).toBeNull()
-})
-
 it('shows a grant and a revocation without a parent account', async () => {
-  rows = [
-    {
-      ...denied,
-      state: 'revoked',
-      denialReason: null,
-    },
-  ]
   history = [
     {
       id: 3,
@@ -101,7 +56,7 @@ it('shows a grant and a revocation without a parent account', async () => {
       note: 'parent',
     },
   ]
-  const { container } = render(<KidRequests />)
+  const { container } = render(<KidHistory />)
 
   expect(await screen.findByText('A parent added this for you')).toBeTruthy()
   expect(screen.getAllByText('A parent removed this').length).toBeGreaterThan(0)
@@ -122,20 +77,19 @@ it('words a system approval without mentioning a parent', async () => {
       note: null,
     },
   ]
-  render(<KidRequests />)
+  render(<KidHistory />)
 
   expect(await screen.findByText('Approved')).toBeTruthy()
   expect(screen.queryByText('A parent said yes')).toBeNull()
 })
 
-it('shows the requests when the history fails and retries it', async () => {
+it('shows an error when the history fails and retries it', async () => {
   historyDown = true
-  render(<KidRequests />)
+  render(<KidHistory />)
 
   expect(
     await screen.findByText('What happened could not be loaded.'),
   ).toBeTruthy()
-  expect(screen.getByText('Spirited Away')).toBeTruthy()
 
   historyDown = false
   history = [
@@ -166,7 +120,7 @@ it('shows more history when the first page is full', async () => {
     at: '2026-10-22T00:00:00Z',
     note: null,
   }))
-  render(<KidRequests />)
+  render(<KidHistory />)
   expect(await screen.findByText('Title 50')).toBeTruthy()
   expect(screen.queryByText('Title 51')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Show more' }))
@@ -188,7 +142,7 @@ it('does not offer more history when the first page is not full', async () => {
       note: null,
     },
   ]
-  render(<KidRequests />)
+  render(<KidHistory />)
   expect(await screen.findByText('Only one')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
 })

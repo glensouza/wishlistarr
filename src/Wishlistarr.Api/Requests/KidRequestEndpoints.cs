@@ -69,6 +69,28 @@ public static class KidRequestEndpoints
             .WithSummary("Lists the signed-in profile's own requests. A denial reason is plain text for that kid and is left out for every other state.")
             .Produces<IReadOnlyList<KidRequestResponse>>();
 
+        kid.MapGet("/wishlist", async (HttpContext context, KidWishlist wishlist, CancellationToken ct) =>
+        {
+            if (!TryProfile(context, out int profileId))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
+            }
+
+            KidWishlistResponse? response = await wishlist.ListAsync(profileId, ct);
+
+            if (response is null)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
+            }
+
+            context.Response.Headers.CacheControl = "private, no-store";
+            return Results.Ok(response);
+        })
+            .WithTags("Kid")
+            .WithName("GetKidWishlist")
+            .WithSummary("Lists the signed-in profile's own requests with the weekly allowance left. States are kid-friendly, a denial includes only the parent's note, and a ready title includes a Plex link when the library index can name the item.")
+            .Produces<KidWishlistResponse>();
+
         kid.MapPost("/requests", async (KidRequestBody? body, HttpContext context, KidRequestFlow flow, RequestTitles titles, CancellationToken ct) =>
         {
             if (body is not { Kind: MediaKind kind, TmdbId: > 0 and int tmdbId })

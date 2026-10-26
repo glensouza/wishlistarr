@@ -106,6 +106,38 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         return new IndexedGuids(serverId, guids);
     }
 
+    public async Task<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?> FindManyByTmdbAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        if (await this.GetReadyServerAsync(ct) is not string serverId)
+        {
+            return null;
+        }
+
+        Dictionary<TitleKey, IReadOnlyList<MediaItem>> found = [];
+        if (titles.Count == 0)
+        {
+            return found;
+        }
+
+        int[] tmdbIds = [.. titles.Select(title => title.TmdbId).Distinct()];
+        List<LibraryTitle> rows = await db.LibraryTitles
+            .Where(title => tmdbIds.Contains(title.TmdbId))
+            .AsNoTracking()
+            .Include(title => title.Items.Where(item => item.ServerId == serverId).OrderBy(item => item.Id))
+            .ThenInclude(item => item.ExternalIds)
+            .ToListAsync(ct);
+        foreach (LibraryTitle row in rows)
+        {
+            TitleKey key = new(row.Kind, row.TmdbId);
+            if (titles.Contains(key) && row.Items.Count > 0)
+            {
+                found[key] = [.. row.Items.Select(ToMediaItem)];
+            }
+        }
+
+        return found;
+    }
+
     public async Task<LibraryStatus> GetStatusAsync(CancellationToken ct = default)
     {
         LibraryRefreshState? state = await db.LibraryRefreshStates.AsNoTracking().SingleOrDefaultAsync(ct);

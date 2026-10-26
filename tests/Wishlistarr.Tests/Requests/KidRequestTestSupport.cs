@@ -78,6 +78,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
     public int Calls { get; private set; }
 
+    public int ManyCalls { get; private set; }
+
     public Func<Task>? Gate { get; set; }
 
     public int GuidCalls { get; private set; }
@@ -147,6 +149,27 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
         IReadOnlyList<LibraryCatalogEntry> recent = this.Recent ?? [];
         return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>(recent.Take(limit).ToList());
+    }
+
+    public Task<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?> FindManyByTmdbAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        this.ManyCalls++;
+        if (!this.Ready)
+        {
+            return Task.FromResult<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?>(null);
+        }
+
+        Dictionary<TitleKey, IReadOnlyList<MediaItem>> found = [];
+        foreach (TitleKey title in titles)
+        {
+            ExternalId id = new(ExternalIdSource.Tmdb, title.TmdbId.ToString(CultureInfo.InvariantCulture));
+            if (this.items.TryGetValue((title.Kind, id), out List<MediaItem>? list))
+            {
+                found[title] = list;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?>(found);
     }
 }
 

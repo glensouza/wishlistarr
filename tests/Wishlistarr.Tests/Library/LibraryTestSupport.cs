@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Library;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
@@ -280,6 +281,9 @@ public sealed class LibraryHarness : IAsyncDisposable
 
     public Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalIdSource source, string value) =>
         this.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindAsync(kind, new ExternalId(source, value)));
+
+    public Task<IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>>?> FindManyByTmdbAsync(params TitleKey[] titles) =>
+        this.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().FindManyByTmdbAsync(titles));
 
     public Task<IReadOnlyList<LibraryCatalogEntry>?> RecentAsync(int limit) =>
         this.InScopeAsync(services => services.GetRequiredService<ILibraryIndex>().ListRecentAsync(limit));

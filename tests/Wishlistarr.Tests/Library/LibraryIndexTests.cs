@@ -313,6 +313,90 @@ public sealed class LibraryIndexTests
         Assert.Equal("server-b", Assert.Single(await harness.GetItemsAsync()).ServerId);
     }
 
+    [Fact]
+    public async Task A_batch_lookup_keeps_a_movie_and_a_show_with_the_same_tmdb_id_apart()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603"), Imdb("tt0133093")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "The Matrix (4K)", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("201", MediaKind.Show, "Bluey", [Tmdb("603"), Tvdb("353546")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("202", MediaKind.Show, "Other", [Tmdb("604")]));
+        await harness.FullAsync();
+
+        IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>> found =
+            await harness.FindManyByTmdbAsync(new TitleKey(MediaKind.Movie, 603), new TitleKey(MediaKind.Show, 603), new TitleKey(MediaKind.Movie, 999))
+            ?? throw new InvalidOperationException();
+
+        Assert.Equal(2, found.Count);
+        IReadOnlyList<MediaItem> movies = found[new TitleKey(MediaKind.Movie, 603)];
+        Assert.Equal(["101", "102"], movies.Select(item => item.Id));
+        Assert.All(movies, item => Assert.Equal(MediaKind.Movie, item.Kind));
+        Assert.Contains(new ExternalId(ExternalIdSource.Imdb, "tt0133093"), movies[0].ExternalIds);
+        MediaItem show = Assert.Single(found[new TitleKey(MediaKind.Show, 603)]);
+        Assert.Equal(("201", MediaKind.Show), (show.Id, show.Kind));
+        Assert.Contains(new ExternalId(ExternalIdSource.Tvdb, "353546"), show.ExternalIds);
+        Assert.False(found.ContainsKey(new TitleKey(MediaKind.Movie, 999)));
+        Assert.False(found.ContainsKey(new TitleKey(MediaKind.Show, 604)));
+    }
+
+    [Fact]
+    public async Task A_batch_lookup_ignores_items_of_another_server()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "Only here", [Tmdb("604")]));
+        await harness.FullAsync();
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            LibraryItem matrix = await db.LibraryItems.SingleAsync(item => item.RatingKey == "101");
+            LibraryItem only = await db.LibraryItems.SingleAsync(item => item.RatingKey == "102");
+            db.LibraryItems.Add(new LibraryItem
+            {
+                ServerId = "server-old",
+                RatingKey = "999",
+                Guid = "plex://movie/old",
+                LibraryId = "1",
+                Title = "Old server copy",
+                Kind = MediaKind.Movie,
+                TitleId = matrix.TitleId,
+            });
+            db.LibraryItems.Remove(only);
+            db.LibraryItems.Add(new LibraryItem
+            {
+                ServerId = "server-old",
+                RatingKey = "998",
+                Guid = "plex://movie/old-only",
+                LibraryId = "1",
+                Title = "Old only",
+                Kind = MediaKind.Movie,
+                TitleId = only.TitleId,
+            });
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        IReadOnlyDictionary<TitleKey, IReadOnlyList<MediaItem>> found =
+            await harness.FindManyByTmdbAsync(new TitleKey(MediaKind.Movie, 603), new TitleKey(MediaKind.Movie, 604))
+            ?? throw new InvalidOperationException();
+
+        Assert.Equal("101", Assert.Single(Assert.Single(found).Value).Id);
+    }
+
+    [Fact]
+    public async Task A_batch_lookup_of_no_titles_is_empty_and_without_a_ready_server_is_unknown()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+
+        Assert.Null(await harness.FindManyByTmdbAsync(new TitleKey(MediaKind.Movie, 603)));
+        Assert.Null(await harness.FindManyByTmdbAsync());
+
+        await harness.FullAsync();
+
+        Assert.Empty(await harness.FindManyByTmdbAsync() ?? throw new InvalidOperationException());
+    }
+
     [Theory]
     [InlineData(ExternalIdSource.Tmdb, "603", "IX_LibraryTitles_Kind_TmdbId")]
     [InlineData(ExternalIdSource.Tvdb, "74852", "IX_LibraryExternalIds_Source_Value")]
