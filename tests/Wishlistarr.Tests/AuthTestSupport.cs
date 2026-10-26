@@ -17,6 +17,15 @@ namespace Wishlistarr.Tests;
 
 public class AuthApiFactory : ApiFactory
 {
+    public AuthApiFactory()
+    {
+    }
+
+    protected AuthApiFactory(string dataPath, bool deleteData)
+        : base(dataPath, deleteData)
+    {
+    }
+
     public const string RemoteIpHeader = "X-Test-Remote-Ip";
     public const string KidHeader = "X-Test-Kid";
     public const string KidScheme = "TestKid";

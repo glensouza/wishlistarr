@@ -187,6 +187,26 @@ export const en = {
   'plex.unavailable': 'Plex users are unavailable. Plex may not be connected.',
   'plex.empty': 'No Plex users found.',
 
+  'backups.title': 'Backups',
+  'backups.warning':
+    'A backup file contains the database and the keys that unlock saved secrets. Store it like a password and do not share it.',
+  'backups.retention': 'The newest {count} backups are kept.',
+  'backups.none': 'No backups yet.',
+  'backups.now': 'Back up now',
+  'backups.working': 'Working',
+  'backups.failed': 'The backup did not finish.',
+  'backups.download': 'Download',
+  'backups.restore': 'Restore on next restart',
+  'backups.file': 'Backup file',
+  'backups.pending':
+    'This backup replaces the current data the next time Wishlistarr starts. The current data is kept as a backup.',
+  'backups.restoreFailed': 'That backup could not be used.',
+  'backups.confirmTitle': 'Confirm restore',
+  'backups.confirmQuestion':
+    'Restore {name}? This replaces all current data, including kids, requests, settings and saved secrets, the next time Wishlistarr restarts. The current data is saved as a backup first.',
+  'backups.confirmRestore': 'Replace all data on restart',
+  'backups.cancelRestore': 'Cancel',
+
   'health.title': 'Health',
   'health.passed': 'All checks passed.',
   'health.loadFailed': 'Health checks could not be loaded.',

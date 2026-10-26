@@ -5,6 +5,7 @@ import { useAuthStatus } from './authStatus'
 import { useT } from './i18n'
 import { useKidSession } from './kid/KidSession'
 import { parentSignOut } from './kidDevices'
+import BackupsAdmin from './BackupsAdmin'
 import HealthBanner from './HealthBanner'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
@@ -52,6 +53,7 @@ export default function ParentArea() {
           <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
+          <BackupsAdmin />
           <RequestHistoryPanel />
           <LogViewer />
           {error && <p role="alert">{error}</p>}

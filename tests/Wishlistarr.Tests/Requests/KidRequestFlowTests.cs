@@ -200,7 +200,7 @@ public sealed class KidRequestFlowTests
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, blocked.StatusCode);
         Assert.Equal("notAllowed", JsonDocument.Parse(blockedText).RootElement.GetProperty("code").GetString());
-        Assert.DoesNotContain("1721", blockedText, StringComparison.Ordinal);
+        Assert.DoesNotContain("1721", WithoutTrace(blockedText), StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.Created, empty.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, failed.StatusCode);
         Assert.Equal([700], (await movies.GetRequestsAsync()).Select(request => request.TmdbId));
@@ -425,5 +425,16 @@ public sealed class KidRequestFlowTests
 
         Assert.Equal(HttpStatusCode.Forbidden, asParent.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, asNobody.StatusCode);
+    }
+
+    private static string WithoutTrace(string json)
+    {
+        JsonNode? node = JsonNode.Parse(json);
+        if (node is JsonObject problem)
+        {
+            problem.Remove("traceId");
+        }
+
+        return node?.ToJsonString() ?? json;
     }
 }

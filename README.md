@@ -34,7 +34,7 @@ The image is published as `ghcr.io/glensouza/wishlistarr` for `linux/amd64` and 
 | --- | --- | --- |
 | `PUID` / `PGID` | `1000` / `1000` | User and group the app runs as. The data volume is chowned to them at start. Must not be `0`; the app never runs as root. |
 | `TZ` | `UTC` | Time zone, for example `America/Los_Angeles`. |
-| `/data` | | Volume holding the database, keys and logs. Back it up. |
+| `/data` | | Volume holding the database, keys, backups and logs. See [docs/backup.md](docs/backup.md). |
 | `8080` | | Port the web interface and API listen on. |
 
 The container must start as root (do not set `--user`, `user:` or `runAsNonRoot`): the entrypoint applies `PUID`/`PGID` and then drops privileges, so the app itself never runs as root.
@@ -75,7 +75,7 @@ dotnet run --project src/Wishlistarr.AppHost
 
 The AppHost is a contributor tool only. It is not needed to run or build Wishlistarr, and it is not part of any release. Vite reads the API address from `WISHLISTARR_API_URL`, which the AppHost sets; it defaults to `http://localhost:5082`.
 
-On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in, and [docs/kid-devices.md](docs/kid-devices.md) for pairing kid devices. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server. See [docs/requests.md](docs/requests.md) for how requests move from pending to labeled. See [docs/kid-search.md](docs/kid-search.md) for kid search and its latency budget. See [docs/webhooks.md](docs/webhooks.md) for inbound Plex, Sonarr, Radarr and Seerr webhooks. See [docs/library.md](docs/library.md) for the local Plex library index. See [docs/health.md](docs/health.md) for health checks, the log viewer, request history and the optional metrics endpoint.
+On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in, and [docs/kid-devices.md](docs/kid-devices.md) for pairing kid devices. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server. See [docs/requests.md](docs/requests.md) for how requests move from pending to labeled. See [docs/kid-search.md](docs/kid-search.md) for kid search and its latency budget. See [docs/webhooks.md](docs/webhooks.md) for inbound Plex, Sonarr, Radarr and Seerr webhooks. See [docs/library.md](docs/library.md) for the local Plex library index. See [docs/backup.md](docs/backup.md) for backups, retention and restore. See [docs/health.md](docs/health.md) for health checks, the log viewer, request history and the optional metrics endpoint.
 
 ## Test
 

@@ -36,6 +36,13 @@ function stubFetch(handler: (path: string, method: string) => unknown) {
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
+      if (path === '/api/v1/backups' && method === 'GET') {
+        return Response.json({
+          retention: 7,
+          restorePending: false,
+          backups: [],
+        })
+      }
       calls.push({
         method,
         path,

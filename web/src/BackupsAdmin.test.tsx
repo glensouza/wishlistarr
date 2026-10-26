@@ -1,0 +1,241 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { resetAntiforgery } from './api'
+import BackupsAdmin from './BackupsAdmin'
+import { axe } from './test/axe'
+
+type Call = { method: string; path: string; body: unknown; headers: Headers }
+
+let calls: Call[]
+let restorePending = false
+
+let antiforgeryFetches = 0
+
+beforeEach(() => {
+  calls = []
+  antiforgeryFetches = 0
+  resetAntiforgery()
+  restorePending = false
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (path === '/api/v1/auth/antiforgery') {
+        antiforgeryFetches++
+        return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
+      }
+      calls.push({
+        method,
+        path,
+        body: init?.body instanceof FormData ? init.body : init?.body,
+        headers: new Headers(init?.headers),
+      })
+      if (path === '/api/v1/backups' && method === 'GET') {
+        return Response.json({
+          retention: 7,
+          restorePending,
+          backups: [
+            {
+              name: 'wishlistarr-20261022T153045123Z-000001.zip',
+              createdAt: '2026-10-22T15:30:45.123Z',
+              sizeBytes: 1200,
+            },
+          ],
+        })
+      }
+      if (path === '/api/v1/jobs/database-backup/run') {
+        return Response.json({ runId: 4 }, { status: 202 })
+      }
+      if (path.startsWith('/api/v1/jobs/database-backup/runs')) {
+        return Response.json([{ id: 4, outcome: 'succeeded' }])
+      }
+      if (path === '/api/v1/backups/restore') {
+        restorePending = true
+        return Response.json({ restorePending: true }, { status: 202 })
+      }
+      return new Response(null, { status: 404 })
+    }),
+  )
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+it('warns that a backup contains secrets and can download one', async () => {
+  const { container } = render(<BackupsAdmin />)
+  expect(
+    await screen.findByText(/keys that unlock saved secrets/i),
+  ).toBeTruthy()
+  expect(screen.getByText(/newest 7 backups/i)).toBeTruthy()
+  const download = await screen.findByRole('link', { name: 'Download' })
+  expect(download.getAttribute('href')).toBe(
+    '/api/v1/backups/wishlistarr-20261022T153045123Z-000001.zip/download',
+  )
+  expect(await axe(container)).toHaveNoViolations()
+})
+
+it('starts a backup with the antiforgery token', async () => {
+  render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  fireEvent.click(screen.getByRole('button', { name: 'Back up now' }))
+  await waitFor(() =>
+    expect(
+      calls.some((call) => call.path === '/api/v1/jobs/database-backup/run'),
+    ).toBe(true),
+  )
+  const run = calls.find(
+    (call) => call.path === '/api/v1/jobs/database-backup/run',
+  )
+  expect(run?.method).toBe('POST')
+  expect(run?.headers.get('X-CSRF-TOKEN')).toBe('tok')
+})
+
+function chooseBackup() {
+  const input = screen.getByLabelText('Backup file')
+  const file = new File(['zip'], 'backup.zip', { type: 'application/zip' })
+  fireEvent.change(input, { target: { files: [file] } })
+  fireEvent.submit(input.closest('form')!)
+}
+
+it('asks for confirmation and uploads nothing when the restore is cancelled', async () => {
+  const { container } = render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  chooseBackup()
+
+  const dialog = await screen.findByRole('alertdialog', {
+    name: 'Confirm restore',
+  })
+  expect(dialog.textContent).toMatch(/replaces all current data/i)
+  expect(dialog.textContent).toMatch(/next time Wishlistarr restarts/i)
+  expect(await axe(container)).toHaveNoViolations()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+    false,
+  )
+})
+
+it('uploads a confirmed restore with the cached antiforgery token and no json body', async () => {
+  render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  fireEvent.click(screen.getByRole('button', { name: 'Back up now' }))
+  await waitFor(() =>
+    expect(
+      calls.some((call) => call.path === '/api/v1/jobs/database-backup/run'),
+    ).toBe(true),
+  )
+  chooseBackup()
+  expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+    false,
+  )
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Replace all data on restart' }),
+  )
+  await waitFor(() =>
+    expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+      true,
+    ),
+  )
+  const restore = calls.find((call) => call.path === '/api/v1/backups/restore')
+  expect(restore?.method).toBe('POST')
+  expect(restore?.headers.get('X-CSRF-TOKEN')).toBe('tok')
+  expect(restore?.headers.get('Content-Type')).toBeNull()
+  expect(restore?.body).toBeInstanceOf(FormData)
+  expect(antiforgeryFetches).toBe(1)
+  expect(await screen.findByText(/next time Wishlistarr starts/i)).toBeTruthy()
+})
+
+async function openDialog() {
+  render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  chooseBackup()
+  await screen.findByRole('alertdialog', { name: 'Confirm restore' })
+}
+
+it('moves focus to Cancel when the confirmation opens', async () => {
+  await openDialog()
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Cancel' }),
+  )
+})
+
+it('keeps Tab and Shift+Tab inside the confirmation', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+  const confirm = screen.getByRole('button', {
+    name: 'Replace all data on restart',
+  })
+  const cancel = screen.getByRole('button', { name: 'Cancel' })
+
+  await user.tab({ shift: true })
+  expect(document.activeElement).toBe(confirm)
+  await user.tab()
+  expect(document.activeElement).toBe(cancel)
+  await user.tab()
+  expect(document.activeElement).toBe(confirm)
+  await user.tab()
+  expect(document.activeElement).toBe(cancel)
+})
+
+it('pulls focus back into the confirmation when Tab is pressed outside it', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+  screen.getByRole('link', { name: 'Download' }).focus()
+
+  await user.tab()
+
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Replace all data on restart' }),
+  )
+})
+
+it('closes the confirmation with Escape, uploads nothing and returns focus to the restore button', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+
+  await user.keyboard('{Escape}')
+
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+    false,
+  )
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Restore on next restart' }),
+  )
+})
+
+it('returns focus to the restore button when the confirmation is cancelled', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Restore on next restart' }),
+  )
+})
+
+it('returns focus to the restore button after a confirmed restore finishes', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+
+  await user.click(
+    screen.getByRole('button', { name: 'Replace all data on restart' }),
+  )
+
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Restore on next restart' }),
+    ),
+  )
+})

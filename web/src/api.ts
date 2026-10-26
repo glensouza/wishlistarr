@@ -36,7 +36,8 @@ export async function requestWithStatus<T>(
   signal?: AbortSignal,
 ): Promise<{ status: number; body: T }> {
   const headers: Record<string, string> = {}
-  if (body !== undefined) {
+  const isForm = body instanceof FormData
+  if (body !== undefined && !isForm) {
     headers['Content-Type'] = 'application/json'
   }
   if (method !== 'GET') {
@@ -46,7 +47,7 @@ export async function requestWithStatus<T>(
   const response = await fetch(path, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: isForm ? body : body === undefined ? undefined : JSON.stringify(body),
     signal,
   })
   if (!response.ok) {
