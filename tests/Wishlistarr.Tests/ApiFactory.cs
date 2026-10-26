@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
+using Wishlistarr.Api.Updates;
 using Wishlistarr.Integrations.Plex;
 
 namespace Wishlistarr.Tests;
@@ -42,9 +43,21 @@ public class ApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("WISHLISTARR_DATA_DIR", this.DataPath);
-        builder.ConfigureTestServices(services => services.Configure<PlexOptions>(options =>
-            options.PlexTvBaseAddress = new Uri("http://127.0.0.1:9/")));
+        builder.UseSetting($"Jobs:Schedules:{UpdateCheckJob.JobName}:Enabled", "false");
+        builder.ConfigureTestServices(services =>
+        {
+            services.Configure<PlexOptions>(options => options.PlexTvBaseAddress = new Uri("http://127.0.0.1:9/"));
+            if (this.ReplaceGitHubHandler)
+            {
+                services.AddHttpClient(UpdateChecker.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => this.CreateGitHubHandler());
+            }
+        });
     }
+
+    protected virtual bool ReplaceGitHubHandler => true;
+
+    protected virtual HttpMessageHandler CreateGitHubHandler() => new GitHubBlockedHandler();
 
     protected override void Dispose(bool disposing)
     {
@@ -66,5 +79,11 @@ public class ApiFactory : WebApplicationFactory<Program>
                 Thread.Sleep(200);
             }
         }
+    }
+
+    private sealed class GitHubBlockedHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("The test host does not call GitHub."));
     }
 }

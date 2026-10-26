@@ -12,6 +12,7 @@ import LogViewer from './LogViewer'
 import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
+import UpdateNotice from './UpdateNotice'
 import RequestHistoryPanel from './RequestHistoryPanel'
 
 export default function ParentArea() {
@@ -43,6 +44,7 @@ export default function ParentArea() {
       <h1>{t('parent.title')}</h1>
       {isParent && (
         <>
+          <UpdateNotice />
           <HealthBanner />
           <p>
             <Link to="/about">{t('about.link')}</Link>

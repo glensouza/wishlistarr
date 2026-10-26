@@ -7,6 +7,7 @@ using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Arr;
@@ -35,6 +36,7 @@ public static class ApiEndpoints
         v1.MapArr();
         v1.MapSeerr();
         v1.MapJobs();
+        v1.MapUpdates();
         v1.MapWebhookSettings();
         v1.MapObservability();
 
@@ -91,6 +93,19 @@ public static class ApiEndpoints
                 return Results.Problem(
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Keys starting with 'seerr.' are managed by the Seerr endpoints.");
+            }
+
+            if (key == UpdateChecker.CheckSettingKey)
+            {
+                if (!UpdateChecker.TryParseCheckEnabled(update.Value, out bool enabled))
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "The update check must be true or false.");
+                }
+
+                await store.SetAsync(key, enabled ? "true" : "false", false, ct);
+                return Results.NoContent();
             }
 
             if (key == KidRequestFlow.TimeZoneSetting && !KidRequestFlow.TryFindTimeZone(update.Value, out _))
