@@ -5,8 +5,7 @@ import Artwork from './Artwork'
 export const youtubeApiUrl = 'https://www.youtube.com/iframe_api'
 export const youtubeHost = 'https://www.youtube-nocookie.com'
 
-const minPlayerWidth = 480
-const minPlayerHeight = 270
+const playerEnded = 0
 
 export const isYoutubeId = (key: string | null | undefined): key is string =>
   typeof key === 'string' && /^[A-Za-z0-9_-]{11}$/.test(key)
@@ -39,7 +38,6 @@ declare global {
         element: HTMLElement,
         options: PlayerOptions,
       ) => YoutubePlayer
-      PlayerState?: { ENDED?: number }
     }
     onYouTubeIframeAPIReady?: () => void
   }
@@ -102,7 +100,7 @@ export default function Trailer({
   useEffect(() => {
     if (!playing) return
     function onKey(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return
+      if (event.key !== 'Escape' || event.defaultPrevented) return
       event.preventDefault()
       close()
     }
@@ -116,13 +114,8 @@ export default function Trailer({
     if (!stage || generation.current !== ticket || !Player) return
     stage.replaceChildren()
     const frame = document.createElement('iframe')
-    const width = Math.max(minPlayerWidth, stage.clientWidth)
     frame.src = embedUrl(id, window.location.origin)
     frame.title = t('details.trailerFrame')
-    frame.width = String(width)
-    frame.height = String(
-      Math.max(minPlayerHeight, Math.round((width * 9) / 16)),
-    )
     frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'
     frame.allowFullscreen = true
     stage.appendChild(frame)
@@ -136,13 +129,7 @@ export default function Trailer({
           event.target.playVideo()
         },
         onStateChange: (event) => {
-          const ended = window.YT?.PlayerState?.ENDED
-          if (
-            event.data === 0 ||
-            (ended !== undefined && event.data === ended)
-          ) {
-            close()
-          }
+          if (event.data === playerEnded) close()
         },
         onError: () => {
           close()

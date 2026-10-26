@@ -45,7 +45,6 @@ const scriptLoaded = () =>
 function installApi() {
   window.YT = {
     Player: FakePlayer,
-    PlayerState: { ENDED: 0 },
   }
 }
 
@@ -110,8 +109,8 @@ it('builds the privacy-enhanced iframe itself and attaches the player to it', as
   const [element, options] = FakePlayer.constructorArgs
   expect(element).toBe(frame)
   expect(Object.keys(options as object)).toEqual(['events'])
-  expect(Number(frame?.getAttribute('width'))).toBeGreaterThanOrEqual(480)
-  expect(Number(frame?.getAttribute('height'))).toBeGreaterThanOrEqual(270)
+  expect(frame?.hasAttribute('width')).toBe(false)
+  expect(frame?.hasAttribute('height')).toBe(false)
 })
 
 it('closes when the video ends', async () => {
@@ -148,6 +147,28 @@ it('closes the player when Escape is pressed', async () => {
   await user.keyboard('{Escape}')
 
   expect(FakePlayer.last?.destroyed).toBe(true)
+  expect(document.querySelector('iframe')).toBeNull()
+})
+
+it('only prevents Escape when it closes the trailer', async () => {
+  const user = userEvent.setup()
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  const escape = () =>
+    new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+
+  const before = escape()
+  document.dispatchEvent(before)
+  expect(before.defaultPrevented).toBe(false)
+
+  await startPlaying(user)
+  const handled = escape()
+  handled.preventDefault()
+  document.dispatchEvent(handled)
+  expect(document.querySelector('iframe')).toBeTruthy()
+
+  const closing = escape()
+  document.dispatchEvent(closing)
+  expect(closing.defaultPrevented).toBe(true)
   expect(document.querySelector('iframe')).toBeNull()
 })
 
