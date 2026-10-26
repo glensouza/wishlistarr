@@ -101,7 +101,13 @@ Wishlistarr does not collect any telemetry or analytics.
 
 <a href="https://www.themoviedb.org/"><img src="site/tmdb.svg" alt="TMDB" width="140"></a>
 
-This product uses the TMDB API but is not endorsed or certified by TMDB.
+This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
+
+Watch provider data comes from [JustWatch](https://www.justwatch.com/). Artwork data comes from [fanart.tv](https://fanart.tv/). Powered by [DoesTheDogDie.com](https://www.doesthedogdie.com).
+
+Wishlistarr is not affiliated with, endorsed, or sponsored by Plex, Inc. Plex is a trademark of Plex, Inc.
+
+The same credits, and the open source package list, are on the in-app About page for parents and in [docs/attribution.md](docs/attribution.md).
 
 ## License
 

@@ -3,13 +3,15 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
+COPY build/allowed-licenses.json /src/build/allowed-licenses.json
 RUN npm run build
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS api
 ARG TARGETARCH
 ARG VERSION=0.0.0
 WORKDIR /src
-COPY global.json Directory.Build.props ./
+COPY global.json Directory.Build.props dotnet-tools.json ./
+COPY build/ build/
 COPY src/Wishlistarr.Core/Wishlistarr.Core.csproj src/Wishlistarr.Core/
 COPY src/Wishlistarr.Data/Wishlistarr.Data.csproj src/Wishlistarr.Data/
 COPY src/Wishlistarr.Integrations/Wishlistarr.Integrations.csproj src/Wishlistarr.Integrations/

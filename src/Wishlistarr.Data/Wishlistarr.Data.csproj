@@ -5,6 +5,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <!-- Design-time only. Publish=false keeps this package, and packages only it brings in, out of the shipped license scan. -->
+      <Publish>false</Publish>
     </PackageReference>
   </ItemGroup>
 

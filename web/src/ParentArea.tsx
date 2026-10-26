@@ -40,6 +40,9 @@ export default function ParentArea() {
       <h1>{t('parent.title')}</h1>
       {isParent && (
         <>
+          <p>
+            <Link to="/about">{t('about.link')}</Link>
+          </p>
           <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />

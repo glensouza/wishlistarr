@@ -8,6 +8,7 @@ public class WebRootFactory : ApiFactory
 {
     public const string IndexHtml = "<!doctype html><title>test-shell</title>";
     public const string AssetJs = "console.log(1);";
+    public const string NpmNotice = """{"packages":[{"name":"react","version":"1.0.0","license":"MIT"}]}""";
 
     private readonly string webRoot = Directory.CreateTempSubdirectory("wishlistarr-web").FullName;
 
@@ -16,6 +17,8 @@ public class WebRootFactory : ApiFactory
         File.WriteAllText(Path.Combine(this.webRoot, "index.html"), IndexHtml);
         Directory.CreateDirectory(Path.Combine(this.webRoot, "assets"));
         File.WriteAllText(Path.Combine(this.webRoot, "assets", "x.js"), AssetJs);
+        Directory.CreateDirectory(Path.Combine(this.webRoot, "licenses"));
+        File.WriteAllText(Path.Combine(this.webRoot, "licenses", "npm.json"), NpmNotice);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -83,5 +86,29 @@ public sealed class StaticFrontendTests(WebRootFactory factory) : IClassFixture<
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(WebRootFactory.AssetJs, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task License_notice_is_served_without_signing_in()
+    {
+        HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync("/licenses/npm.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(WebRootFactory.NpmNotice, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Missing_license_notice_is_not_a_license_list()
+    {
+        HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync("/licenses/nuget.json");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.NotEqual("application/json", response.Content.Headers.ContentType?.MediaType);
+        Assert.DoesNotContain("packages", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 }

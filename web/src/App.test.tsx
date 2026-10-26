@@ -66,6 +66,8 @@ it('shows the shell with a skip link and landmarks', async () => {
   expect(screen.getByRole('banner')).toBeTruthy()
   expect(screen.getByRole('main')).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Wishlistarr' })).toBeTruthy()
+  expect(screen.getByRole('contentinfo')).toBeTruthy()
+  expect(screen.queryByRole('link', { name: 'About' })).toBeNull()
   await screen.findByText('No profiles yet. Ask a parent to add one.')
   expect(await axe(container)).toHaveNoViolations()
 })
@@ -128,6 +130,7 @@ it('asks for the parent sign-in when nobody is signed in', async () => {
   stubFetch(() => ({ setupRequired: false, principalType: null }))
   const { container } = renderAt('/parent')
   expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy()
+  expect(screen.queryByRole('link', { name: 'About' })).toBeNull()
   expect(await axe(container)).toHaveNoViolations()
 })
 
