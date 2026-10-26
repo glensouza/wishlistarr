@@ -873,3 +873,15 @@ fieldset label:has(input[type='checkbox']) {
 .history-profile {
   margin-top: var(--space-3);
 }
+
+@media (min-width: 1920px) {
+  html[data-kid-scale] {
+    font-size: clamp(1.25rem, 1.041666vw, 2.5rem);
+  }
+}
+
+@media (min-width: 3840px) {
+  html[data-kid-scale] {
+    font-size: clamp(2.5rem, 1.041666vw, 3.5rem);
+  }
+}
