@@ -15,9 +15,12 @@ public sealed class RequestStateMachineTests
         (RequestState.Fulfilling, RequestState.Failed, [RequestActorKind.System]),
         (RequestState.Available, RequestState.Labeled, [RequestActorKind.System]),
         (RequestState.Available, RequestState.Failed, [RequestActorKind.System]),
+        (RequestState.Available, RequestState.Revoked, [RequestActorKind.Parent]),
+        (RequestState.Labeled, RequestState.Revoked, [RequestActorKind.Parent]),
         (RequestState.Failed, RequestState.Fulfilling, [RequestActorKind.Parent, RequestActorKind.System]),
         (RequestState.Failed, RequestState.Available, [RequestActorKind.Parent, RequestActorKind.System]),
         (RequestState.Failed, RequestState.Denied, [RequestActorKind.Parent]),
+        (RequestState.Failed, RequestState.Revoked, [RequestActorKind.Parent]),
     ];
 
     [Fact]
@@ -43,11 +46,11 @@ public sealed class RequestStateMachineTests
         Assert.DoesNotContain(RequestStateMachine.Transitions, transition => transition.Actors.Contains(RequestActorKind.Kid));
 
     [Fact]
-    public void Denied_and_labeled_are_final()
+    public void Denied_and_revoked_are_final()
     {
         RequestState[] terminal = [.. Enum.GetValues<RequestState>().Where(RequestStateMachine.IsTerminal)];
 
-        Assert.Equal([RequestState.Denied, RequestState.Labeled], terminal);
+        Assert.Equal([RequestState.Denied, RequestState.Revoked], terminal);
     }
 
     [Theory]

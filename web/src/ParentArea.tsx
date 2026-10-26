@@ -7,6 +7,7 @@ import { useKidSession } from './kid/KidSession'
 import { parentSignOut } from './kidDevices'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
+import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
 
@@ -42,6 +43,7 @@ export default function ParentArea() {
           <p>
             <Link to="/about">{t('about.link')}</Link>
           </p>
+          <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
           {error && <p role="alert">{error}</p>}

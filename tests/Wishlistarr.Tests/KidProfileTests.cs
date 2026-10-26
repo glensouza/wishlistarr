@@ -428,6 +428,55 @@ public sealed class KidProfileTests
         Assert.Contains("limited to 50", await tooManyLanguages.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Auto_approve_rules_are_stored_per_profile_and_rejected_when_invalid()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        HttpResponseMessage created = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "Ada",
+            avatar = "fox",
+            autoApprove = true,
+            autoApproveMovieRating = " parentalGuidance ",
+            autoApproveTvRating = "teen",
+        });
+        JsonElement profile = await created.Content.ReadFromJsonAsync<JsonElement>();
+        int id = profile.GetProperty("id").GetInt32();
+        HttpResponseMessage other = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new { name = "Ben", avatar = "owl" });
+        HttpResponseMessage word = await parent.PostAsJsonAsync(
+            "/api/v1/kid-profiles",
+            new { name = "Cy", avatar = "fox", autoApproveMovieRating = "PG-13" });
+        HttpResponseMessage number = await parent.PostAsJsonAsync(
+            "/api/v1/kid-profiles",
+            new { name = "Cy", avatar = "fox", autoApproveTvRating = "2" });
+        HttpResponseMessage cleared = await parent.PutAsJsonAsync($"/api/v1/kid-profiles/{id}", new
+        {
+            name = "Ada",
+            avatar = "fox",
+            autoApproveMovieRating = "general",
+        });
+        JsonElement ben = await other.Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement updated = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.True(profile.GetProperty("autoApprove").GetBoolean());
+        Assert.Equal("parentalGuidance", profile.GetProperty("autoApproveMovieRating").GetString());
+        Assert.Equal("teen", profile.GetProperty("autoApproveTvRating").GetString());
+        Assert.Equal(HttpStatusCode.Created, other.StatusCode);
+        Assert.False(ben.GetProperty("autoApprove").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, ben.GetProperty("autoApproveMovieRating").ValueKind);
+        Assert.Equal(JsonValueKind.Null, ben.GetProperty("autoApproveTvRating").ValueKind);
+        Assert.Equal(HttpStatusCode.BadRequest, word.StatusCode);
+        Assert.Contains("rating level", await word.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpStatusCode.BadRequest, number.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        Assert.False(updated.GetProperty("autoApprove").GetBoolean());
+        Assert.Equal("general", updated.GetProperty("autoApproveMovieRating").GetString());
+        Assert.Equal(JsonValueKind.Null, updated.GetProperty("autoApproveTvRating").ValueKind);
+    }
+
     private static string LanguageCode(int index) => $"{(char)('a' + (index / 26))}{(char)('a' + (index % 26))}";
 
     private static List<int> Numbers(JsonElement profile, string name) =>
