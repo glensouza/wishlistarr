@@ -1,13 +1,13 @@
 # Kid profiles
 
-A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
+A kid profile has a name, an avatar, an optional PIN, optional age limits for movies and TV, optional blocked genres and keywords, an optional list of allowed original languages, optional auto-approve rules, a Plex label, an optional Plex user id and an optional weekly request allowance. Parents manage profiles in the web app or through the API; kids pick their profile on a paired device and enter its PIN to get a Kid session. Pairing and per-device profile assignment are described in [kid-devices.md](kid-devices.md).
 
 ## Managing profiles
 
 All of these require the Parent role.
 
 - `GET /api/v1/kid-profiles` lists active profiles. PIN hashes are never returned, only `hasPin`.
-- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind.
+- `POST /api/v1/kid-profiles` and `PUT /api/v1/kid-profiles/{id}` take `{ name, avatar, pin, removePin, movieAgeLimit, tvAgeLimit, plexLabel, plexUserId, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages, autoApprove, autoApproveMovieRating, autoApproveTvRating }`. `PUT` replaces the profile; leave `pin` out to keep the current PIN, or send `removePin: true` to clear it. Omit a content-rule list, or send an empty one, for no restriction of that kind. Omit `autoApprove` for off, and omit a rating for no ceiling.
 - `DELETE /api/v1/kid-profiles/{id}?removeOwnedLabels=true|false` archives the profile.
 - `POST /api/v1/kid-profiles/{id}/unlock` unlocks a locked profile and clears its failed PIN counts.
 
@@ -18,6 +18,10 @@ Names are 1 to 50 characters and unique among active profiles (case-insensitive)
 ### Content rules
 
 `blockedGenreIds` and `blockedKeywordIds` are TMDB ids. `allowedOriginalLanguages` are ISO 639-1 codes such as `en`. Codes are stored lowercase. Duplicate ids are stored once, in the order given. At most 40 genres, 100 keywords and 50 languages are accepted; an id must be positive and a language must be two letters. How a missing language, a missing genre list or a missing keyword list is decided is described in [content policy](content-policy.md).
+
+### Auto-approve
+
+`autoApprove` is a switch. `autoApproveMovieRating` and `autoApproveTvRating` are optional ceilings, each a rating level: `preschool`, `general`, `children`, `parentalGuidance`, `teen`, `mature` or `adult`. A blank value clears the ceiling. A ceiling, when set, always caps auto-approval, even with `autoApprove` on; with the switch on and no ceiling for that kind, any allowed rated title is approved. A number or any other word is rejected. The switch and the ceilings are stored on the profile and returned by the profile list. How they decide a request is described in [requests](requests.md#auto-approve).
 
 ### Plex label
 

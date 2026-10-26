@@ -74,6 +74,8 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(profile => profile.PinHash).HasMaxLength(256);
             entity.Property(profile => profile.PlexLabel).HasMaxLength(64).UseCollation("NOCASE");
             entity.Property(profile => profile.PlexUserId).HasMaxLength(100);
+            entity.Property(profile => profile.AutoApproveMovieRating).HasConversion<string>().HasMaxLength(32);
+            entity.Property(profile => profile.AutoApproveTvRating).HasConversion<string>().HasMaxLength(32);
             entity.HasIndex(profile => profile.Name).IsUnique().HasFilter("\"ArchivedAt\" IS NULL");
             entity.HasIndex(profile => profile.PlexLabel).IsUnique().HasFilter("\"ArchivedAt\" IS NULL");
             entity.HasMany(profile => profile.Sessions)

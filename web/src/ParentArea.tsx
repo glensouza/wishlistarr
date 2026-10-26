@@ -7,6 +7,7 @@ import { useKidSession } from './kid/KidSession'
 import { parentSignOut } from './kidDevices'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
+import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
 
@@ -39,6 +40,7 @@ export default function ParentArea() {
       <h1>{t('parent.title')}</h1>
       {isParent && (
         <>
+          <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
           {error && <p role="alert">{error}</p>}

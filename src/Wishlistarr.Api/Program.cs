@@ -75,6 +75,12 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
+builder.Services.AddOptions<ApprovalOptions>()
+    .Bind(builder.Configuration.GetSection(ApprovalOptions.SectionName))
+    .Validate(options => options.IsValid(), "The Approval configuration section is invalid.")
+    .ValidateOnStart();
+builder.Services.AddScoped<RequestLabeling>();
+builder.Services.AddScoped<RequestApproval>();
 builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();
 builder.Services.AddScoped<PlexEnforcement>();

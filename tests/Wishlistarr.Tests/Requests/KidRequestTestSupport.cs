@@ -5,10 +5,12 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
+using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Tmdb;
@@ -17,6 +19,46 @@ using Wishlistarr.Tests.Tmdb;
 
 namespace Wishlistarr.Tests.Requests;
 
+public sealed class Rendezvous(int parties)
+{
+    private readonly TaskCompletionSource all = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int arrived;
+
+    public int Arrived => Volatile.Read(ref this.arrived);
+
+    public async Task ArriveAsync()
+    {
+        if (Interlocked.Increment(ref this.arrived) == parties)
+        {
+            this.all.TrySetResult();
+        }
+
+        await this.all.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+}
+
+public sealed class DecisionSaveGate : SaveChangesInterceptor
+{
+    public Func<Task>? Gate { get; set; }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        bool decision = eventData.Context!.ChangeTracker.Entries<MediaRequestEvent>().Any(entry =>
+            entry.State == EntityState.Added
+            && entry.Entity.FromState == RequestState.Pending
+            && entry.Entity.ToState is RequestState.Approved or RequestState.Denied);
+        if (decision && this.Gate is not null)
+        {
+            await this.Gate();
+        }
+
+        return result;
+    }
+}
+
 public sealed class FakeLibraryIndex : ILibraryIndex
 {
     private readonly Dictionary<(MediaKind, ExternalId), List<MediaItem>> items = [];
@@ -24,6 +66,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
     public bool Ready { get; set; } = true;
 
     public int Calls { get; private set; }
+
+    public Func<Task>? Gate { get; set; }
 
     public void Add(MediaKind kind, int tmdbId, MediaItem item)
     {
@@ -36,19 +80,24 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         list.Add(item);
     }
 
-    public Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
+    public async Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
     {
         this.Calls++;
-        if (!this.Ready)
+        if (this.Gate is not null)
         {
-            return Task.FromResult<IReadOnlyList<MediaItem>?>(null);
+            await this.Gate();
         }
 
-        return Task.FromResult<IReadOnlyList<MediaItem>?>(this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : []);
+        if (!this.Ready)
+        {
+            return null;
+        }
+
+        return this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : [];
     }
 }
 
-public sealed class KidRequestApiFactory : AuthApiFactory
+public class KidRequestApiFactory : AuthApiFactory
 {
     public const string RequestsPath = "/api/v1/kid/requests";
 
@@ -78,6 +127,8 @@ public sealed class KidRequestApiFactory : AuthApiFactory
 
     public TestClock Clock { get; } = new();
 
+    public DecisionSaveGate Saves { get; } = new();
+
     public int LabelWrites => this.Plex.Requests.Count(request => request.Method == "PUT");
 
     public int LibraryScans => this.Plex.Requests.Count(request => request.Path.StartsWith("/library/sections/", StringComparison.Ordinal) && request.Method == "GET");
@@ -101,12 +152,28 @@ public sealed class KidRequestApiFactory : AuthApiFactory
         int? weeklyAllowance = null,
         int[]? blockedGenreIds = null,
         int[]? blockedKeywordIds = null,
-        string[]? allowedOriginalLanguages = null)
+        string[]? allowedOriginalLanguages = null,
+        bool autoApprove = false,
+        string? autoApproveMovieRating = null,
+        string? autoApproveTvRating = null)
     {
         HttpClient parent = await this.CreateAuthorizedClientAsync();
         HttpResponseMessage created = await parent.PostAsJsonAsync(
             "/api/v1/kid-profiles",
-            new { name, avatar = "fox", movieAgeLimit, tvAgeLimit, weeklyAllowance, blockedGenreIds, blockedKeywordIds, allowedOriginalLanguages });
+            new
+            {
+                name,
+                avatar = "fox",
+                movieAgeLimit,
+                tvAgeLimit,
+                weeklyAllowance,
+                blockedGenreIds,
+                blockedKeywordIds,
+                allowedOriginalLanguages,
+                autoApprove,
+                autoApproveMovieRating,
+                autoApproveTvRating,
+            });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         int profileId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
 
@@ -170,6 +237,7 @@ public sealed class KidRequestApiFactory : AuthApiFactory
             });
             services.RemoveAll<ITmdbApiKeyProvider>();
             services.AddSingleton<ITmdbApiKeyProvider>(new FixedKeyProvider());
+            services.AddDbContext<WishlistarrDbContext>(options => options.AddInterceptors(this.Saves));
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(this.Clock);
             if (this.Index is not null)

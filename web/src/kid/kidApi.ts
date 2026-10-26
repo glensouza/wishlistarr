@@ -66,4 +66,17 @@ export async function requestTitle(
   return { ...body, alreadyAsked: status !== 201 }
 }
 
+export type KidRequest = {
+  id: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  state: string
+  requestCount: number
+  denialReason: string | null
+}
+
+export const listKidRequests = () =>
+  request<KidRequest[]>('GET', '/api/v1/kid/requests')
+
 export const pinLength = { min: 4, max: 8 }

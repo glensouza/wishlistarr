@@ -1,0 +1,61 @@
+import { request } from './api'
+
+export type RequestState =
+  | 'pending'
+  | 'approved'
+  | 'denied'
+  | 'fulfilling'
+  | 'available'
+  | 'labeled'
+  | 'failed'
+
+export type ParentRequest = {
+  id: number
+  kidProfileId: number
+  kidName: string
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  state: RequestState
+  requestCount: number
+  createdAt: string
+  denialReason: string | null
+}
+
+export type DecisionStatus =
+  | 'succeeded'
+  | 'alreadyDecided'
+  | 'notFound'
+  | 'failed'
+  | 'conflict'
+  | 'notProcessed'
+
+export type DecisionItem = {
+  id: number
+  status: DecisionStatus
+  state: RequestState | null
+}
+
+const base = '/api/v1/requests'
+
+export type RequestPage = {
+  items: ParentRequest[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export const pageSize = 100
+export const maxBatch = 50
+
+export const listRequests = (state: RequestState, limit = pageSize) =>
+  request<RequestPage>('GET', `${base}?state=${state}&limit=${limit}`)
+
+export const approveRequests = (ids: number[], reason: string | null) =>
+  request<{ results: DecisionItem[] }>('POST', `${base}/approve`, {
+    ids,
+    reason,
+  })
+
+export const denyRequests = (ids: number[], reason: string | null) =>
+  request<{ results: DecisionItem[] }>('POST', `${base}/deny`, { ids, reason })
