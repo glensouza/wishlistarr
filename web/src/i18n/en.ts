@@ -205,6 +205,9 @@ export const en = {
   'requests.result.notFound': 'Not found',
   'requests.result.failed': 'Could not be completed. Check Plex and try again.',
   'requests.result.conflict': 'Someone else decided it differently',
+  'requests.result.notProcessed': 'Not reached in time. Try again.',
+  'requests.result.unsent': 'Not sent. Try again.',
+  'requests.result.unknown': 'No answer. Reload to see what happened.',
   'requests.selectAll': 'Select all shown',
   'requests.showing':
     'Showing {shown} of {total} waiting. The rest appear after these are decided.',

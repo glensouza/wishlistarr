@@ -23,7 +23,12 @@ export type ParentRequest = {
 }
 
 export type DecisionStatus =
-  'succeeded' | 'alreadyDecided' | 'notFound' | 'failed' | 'conflict'
+  | 'succeeded'
+  | 'alreadyDecided'
+  | 'notFound'
+  | 'failed'
+  | 'conflict'
+  | 'notProcessed'
 
 export type DecisionItem = {
   id: number

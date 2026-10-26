@@ -35,12 +35,14 @@ let calls: Call[]
 let rows: ParentRequest[]
 let total: number | undefined
 let failing: number[]
+let breakAt: number | undefined
 
 beforeEach(() => {
   calls = []
   rows = [waiting, second]
   total = undefined
   failing = []
+  breakAt = undefined
   vi.stubGlobal(
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
@@ -62,6 +64,9 @@ beforeEach(() => {
         })
       }
       const ids = (JSON.parse(init?.body as string) as { ids: number[] }).ids
+      if (ids.includes(breakAt ?? -1)) {
+        throw new Error('The connection dropped.')
+      }
       return Response.json({
         results: ids.map((id) => ({
           id,
@@ -154,4 +159,24 @@ it('splits a large selection into batches and lists what failed', async () => {
   expect(
     await screen.findByText(/Movie 60: Could not be completed/),
   ).toBeTruthy()
+})
+
+it('lists the requests that were never sent when a later batch throws', async () => {
+  rows = Array.from({ length: 120 }, (_, index) => ({
+    ...waiting,
+    id: index + 1,
+    title: `Movie ${index + 1}`,
+  }))
+  breakAt = 60
+  render(<RequestsAdmin />)
+  await screen.findByText('Movie 1')
+  fireEvent.click(screen.getByLabelText('Select all shown'))
+  fireEvent.click(screen.getByRole('button', { name: 'Approve selected' }))
+
+  expect(await screen.findByText(/The connection dropped/)).toBeTruthy()
+  expect(await screen.findByText(/Movie 101: Not sent/)).toBeTruthy()
+  expect(screen.getByText(/Movie 120: Not sent/)).toBeTruthy()
+  expect(screen.getByText(/Movie 51: No answer/)).toBeTruthy()
+  expect(screen.queryByText(/Movie 50: /)).toBeNull()
+  expect(writes()).toHaveLength(2)
 })
