@@ -118,7 +118,7 @@ export const en = {
   'admin.plexLabel': 'Plex label',
   'admin.autoApprove': 'Auto-approve requests',
   'admin.autoApproveHint':
-    'Approve titles with a known rating without a parent, or only up to a rating. Titles without a rating always wait for you. Leave a rating blank for no ceiling.',
+    'Approve titles with a known rating without a parent. A rating ceiling, when set, always applies, even with the switch on. Titles without a rating always wait for you. Leave a rating blank for no ceiling.',
   'admin.movieCeiling': 'Movie rating ceiling',
   'admin.tvCeiling': 'TV rating ceiling',
   'admin.ratingNone': 'No ceiling',

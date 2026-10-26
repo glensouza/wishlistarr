@@ -42,6 +42,38 @@ public sealed class AutoApproveRuleTests
             RatingLevel.General));
     }
 
+    [Theory]
+    [InlineData(RatingLevel.General, true)]
+    [InlineData(RatingLevel.ParentalGuidance, true)]
+    [InlineData(RatingLevel.Teen, false)]
+    public void A_ceiling_caps_the_switch_for_movies(RatingLevel rating, bool expected)
+    {
+        AutoApproveRule rule = new(true, RatingLevel.ParentalGuidance, null);
+
+        Assert.Equal(expected, rule.AppliesTo(Allowed(rating), MediaKind.Movie, rating));
+    }
+
+    [Fact]
+    public void Movie_and_tv_ceilings_are_independent_with_the_switch_on()
+    {
+        AutoApproveRule rule = new(true, RatingLevel.Teen, RatingLevel.Children);
+
+        Assert.True(rule.AppliesTo(Allowed(RatingLevel.Teen), MediaKind.Movie, RatingLevel.Teen));
+        Assert.False(rule.AppliesTo(Allowed(RatingLevel.Teen), MediaKind.Show, RatingLevel.Teen));
+        Assert.True(rule.AppliesTo(Allowed(RatingLevel.Children), MediaKind.Show, RatingLevel.Children));
+        Assert.False(rule.AppliesTo(Allowed(RatingLevel.Mature), MediaKind.Movie, RatingLevel.Mature));
+    }
+
+    [Fact]
+    public void A_missing_ceiling_for_one_kind_leaves_that_kind_to_the_switch()
+    {
+        AutoApproveRule rule = new(true, RatingLevel.General, null);
+
+        Assert.True(rule.AppliesTo(Allowed(RatingLevel.Mature), MediaKind.Show, RatingLevel.Mature));
+        Assert.False(rule.AppliesTo(Allowed(RatingLevel.Mature), MediaKind.Movie, RatingLevel.Mature));
+        Assert.False(rule.AppliesTo(Allowed(RatingLevel.General), MediaKind.Movie, null));
+    }
+
     [Fact]
     public void No_rule_approves_nothing()
     {
@@ -49,6 +81,9 @@ public sealed class AutoApproveRuleTests
 
         Assert.False(rule.AppliesTo(Decision(ContentOutcome.Allowed, ContentReasonCode.WithinRatingLimit, RatingLevel.General), MediaKind.Movie, RatingLevel.General));
     }
+
+    private static ContentDecision Allowed(RatingLevel level) =>
+        Decision(ContentOutcome.Allowed, ContentReasonCode.NoRatingLimit, level);
 
     private static ContentDecision Decision(ContentOutcome outcome, ContentReasonCode code, RatingLevel? level) =>
         new(outcome, new ContentReason(code, Level: level));
