@@ -6,7 +6,8 @@ namespace Wishlistarr.Api.Updates;
 public sealed partial class SemanticVersion : IComparable<SemanticVersion>
 {
     // The same pattern as the tag check in .github/workflows/release.yml, without the v prefix.
-    [GeneratedRegex(@"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$", RegexOptions.CultureInvariant)]
+    // The end anchor is \z because $ also matches before a trailing newline.
+    [GeneratedRegex(@"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?\z", RegexOptions.CultureInvariant)]
     private static partial Regex VersionPattern();
 
     private SemanticVersion(int major, int minor, int patch, IReadOnlyList<string> prerelease)

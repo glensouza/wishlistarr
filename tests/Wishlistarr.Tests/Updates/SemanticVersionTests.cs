@@ -47,6 +47,9 @@ public sealed class SemanticVersionTests
         Assert.False(SemanticVersion.TryParse("01.0.0", out _));
         Assert.False(SemanticVersion.TryParse("1.0.0+build", out _));
         Assert.False(SemanticVersion.TryParse("v1.0.0", out _));
+        Assert.False(SemanticVersion.TryParse("1.2.3\n", out _));
+        Assert.False(SemanticVersion.TryParse("1.2.3-rc.1\n", out _));
+        Assert.False(SemanticVersion.TryParseTag("v1.2.3\n", out _));
         Assert.False(SemanticVersion.TryParse("999999999999.0.0", out _));
         Assert.False(SemanticVersion.TryParseTag("1.2.3", out _));
         Assert.False(SemanticVersion.TryParseTag("V1.2.3", out _));
