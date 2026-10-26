@@ -36,6 +36,8 @@ builder.Host.UseSerilog(
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
             .Enrich.With<WebhookTokenRedactor>()
+            .Enrich.With<LogEventRedactor>()
+            .WriteTo.Sink(services.GetRequiredService<LogBuffer>())
             .WriteTo.Console()
             .WriteTo.File(
                 Path.Combine(directory.LogsPath, "wishlistarr-.log"),
@@ -63,6 +65,9 @@ builder.Services.AddOptions<KeyManagementOptions>().Configure<DataDirectory, ILo
         options.XmlRepository = new FileSystemXmlRepository(new DirectoryInfo(directory.KeysPath), loggerFactory));
 
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddLogBuffer(builder.Configuration);
+builder.Services.AddIntegrationHealthChecks(builder.Configuration);
+builder.AddWishlistarrMetrics();
 builder.Services.AddSingleton<SystemStatus>();
 builder.Services.AddBackgroundJobs(builder.Configuration);
 builder.Services.AddWebhooks(builder.Configuration);
@@ -113,6 +118,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseWishlistarrSecurity();
 
+app.MapWishlistarrMetrics();
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
     .WithTags("System")
     .WithName("GetHealth")

@@ -5,11 +5,14 @@ import { useAuthStatus } from './authStatus'
 import { useT } from './i18n'
 import { useKidSession } from './kid/KidSession'
 import { parentSignOut } from './kidDevices'
+import HealthBanner from './HealthBanner'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
+import LogViewer from './LogViewer'
 import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
+import RequestHistoryPanel from './RequestHistoryPanel'
 
 export default function ParentArea() {
   const t = useT()
@@ -40,12 +43,15 @@ export default function ParentArea() {
       <h1>{t('parent.title')}</h1>
       {isParent && (
         <>
+          <HealthBanner />
           <p>
             <Link to="/about">{t('about.link')}</Link>
           </p>
           <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
+          <RequestHistoryPanel />
+          <LogViewer />
           {error && <p role="alert">{error}</p>}
           <button type="button" onClick={() => void signOut()}>
             {kidDevice ? t('parent.returnToKidMode') : t('parent.signOut')}

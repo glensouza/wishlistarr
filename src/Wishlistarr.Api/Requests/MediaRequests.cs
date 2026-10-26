@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Api.System;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
@@ -115,6 +116,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
             try
             {
                 await db.SaveChangesAsync(ct);
+                AppMetrics.RecordRequest(created.Kind, RequestState.Pending);
                 return new RequestResult(RequestOutcome.Created, created);
             }
             catch (DbUpdateException ex) when (ex.InnerException is SqliteException { SqliteExtendedErrorCode: SqliteConstraintUnique })
@@ -176,6 +178,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
             try
             {
                 await db.SaveChangesAsync(ct);
+                AppMetrics.RecordRequest(request.Kind, to);
                 return new RequestResult(RequestOutcome.Changed, request);
             }
             catch (DbUpdateConcurrencyException)

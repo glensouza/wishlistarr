@@ -36,6 +36,7 @@ public static class ApiEndpoints
         v1.MapSeerr();
         v1.MapJobs();
         v1.MapWebhookSettings();
+        v1.MapObservability();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")

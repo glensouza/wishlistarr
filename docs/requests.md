@@ -79,6 +79,8 @@ Once a request is denied or revoked, asking again starts a new `Pending` request
 
 Each `MediaRequestEvents` row holds the request id, the state before (empty for the creation) and after, the actor's kind, id and name, an optional reason of up to 500 characters and the time it happened. Rows are only ever added. `GetHistoryAsync(requestId)` returns them oldest first.
 
+Parents can read one profile's events, newest first, with `GET /api/v1/kid-profiles/{id}/events`. `limit` defaults to 50 and is capped at 200. Archived profiles are included. A missing profile is `404`. Each item is `{ id, requestId, kind, tmdbId, title, fromState, toState, actorKind, actorName, reason, occurredAt }`. It does not include a PIN. A kid session cannot call it. See [health.md](health.md).
+
 ## Asking for a title
 
 `POST /api/v1/kid/requests` needs a Kid session and the antiforgery token, and takes `{ kind, tmdbId }` where `kind` is `movie` or `show`. `KidRequestFlow` in `Wishlistarr.Api.Requests` handles it in this order:

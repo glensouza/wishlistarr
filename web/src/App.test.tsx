@@ -254,6 +254,176 @@ it('does not show the kid home on an unpaired browser', async () => {
   )
 })
 
+const parent = {
+  setupRequired: false,
+  principalType: 'Parent',
+  kidDevice: null,
+}
+
+it('shows a banner when a health check fails', async () => {
+  stubFetch((path) => {
+    if (path === '/api/v1/auth/status') return parent
+    if (path === '/api/v1/system/health') {
+      return [
+        {
+          integration: 'plex',
+          status: 'error',
+          message: 'Plex refused the sign-in.',
+          fix: 'Link Plex again.',
+        },
+        {
+          integration: 'custom-box',
+          status: 'ok',
+          message: 'The custom box is quiet.',
+          fix: 'Leave it.',
+        },
+      ]
+    }
+    return []
+  })
+  const { container } = renderAt('/parent')
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toContain('Plex refused the sign-in.')
+  expect(alert.textContent).toContain('Link Plex again.')
+  expect(alert.textContent).not.toContain('The custom box is quiet.')
+  expect(screen.getByText('custom-box')).toBeTruthy()
+  expect(screen.getAllByText('Plex')).toHaveLength(2)
+  expect(await axe(container)).toHaveNoViolations()
+})
+
+it('says health checks passed when every check is ok', async () => {
+  stubFetch((path) =>
+    path === '/api/v1/auth/status'
+      ? parent
+      : path === '/api/v1/system/health'
+        ? [
+            {
+              integration: 'database',
+              status: 'ok',
+              message: 'The database is reachable.',
+              fix: 'Keep the data directory writable.',
+            },
+          ]
+        : [],
+  )
+  renderAt('/parent')
+  expect(await screen.findByText('All checks passed.')).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('fails closed when health checks are not a list', async () => {
+  stubFetch((path) =>
+    path === '/api/v1/auth/status'
+      ? parent
+      : path === '/api/v1/system/health'
+        ? { status: 'ok' }
+        : [],
+  )
+  renderAt('/parent')
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'Health checks could not be loaded.',
+  )
+  expect(screen.queryByText('All checks passed.')).toBeNull()
+})
+
+it('does not load health checks on the kid screens', async () => {
+  const calls = stubFetch((path) =>
+    path === '/api/v1/auth/status'
+      ? paired
+      : path === '/api/v1/kid/profiles'
+        ? []
+        : null,
+  )
+  renderAt('/')
+  await screen.findByText('No profiles yet. Ask a parent to add one.')
+  expect(calls.some((call) => call.path.includes('/system/health'))).toBe(false)
+  expect(calls.some((call) => call.path.includes('/system/logs'))).toBe(false)
+  expect(screen.queryByRole('heading', { name: 'Health' })).toBeNull()
+})
+
+it('filters logs and offers a download', async () => {
+  const user = userEvent.setup()
+  const calls = stubFetch((path) => {
+    if (path === '/api/v1/auth/status') return parent
+    if (path.startsWith('/api/v1/system/logs')) {
+      return path.includes('level=warning')
+        ? [
+            {
+              at: '2026-01-02T00:00:00.000Z',
+              level: 'warning',
+              category: 'Wishlistarr.Test',
+              message: 'disk is full',
+            },
+          ]
+        : []
+    }
+    return []
+  })
+  renderAt('/parent')
+  expect(await screen.findByText('No log entries.')).toBeTruthy()
+  expect(
+    screen.getByRole('link', { name: 'Download' }).getAttribute('href'),
+  ).toBe('/api/v1/system/logs/download?level=information')
+  await user.selectOptions(screen.getByLabelText('Level'), 'warning')
+  expect(await screen.findByText('disk is full')).toBeTruthy()
+  expect(
+    screen.getByRole('link', { name: 'Download' }).getAttribute('href'),
+  ).toBe('/api/v1/system/logs/download?level=warning')
+  expect(calls.some((call) => call.path.includes('level=warning'))).toBe(true)
+})
+
+it('shows request history for a profile', async () => {
+  stubFetch((path) => {
+    if (path === '/api/v1/auth/status') return parent
+    if (path === '/api/v1/kid-profiles') {
+      return [
+        {
+          id: 4,
+          name: 'Ada',
+          avatar: 'fox',
+          isLocked: false,
+          plexRestrictions: null,
+        },
+      ]
+    }
+    if (path === '/api/v1/kid-profiles/4/events') {
+      return [
+        {
+          id: 8,
+          requestId: 3,
+          title: 'Odd Title',
+          fromState: null,
+          toState: 'mystery',
+          actorName: 'system',
+          reason: null,
+          occurredAt: '2026-03-01T00:00:00.000Z',
+        },
+        {
+          id: 7,
+          requestId: 2,
+          title: 'The Matrix',
+          fromState: 'pending',
+          toState: 'denied',
+          actorName: 'parent',
+          reason: 'Not tonight',
+          occurredAt: '2026-01-02T15:04:00.000Z',
+        },
+      ]
+    }
+    return []
+  })
+  renderAt('/parent')
+  const list = await screen.findByRole('list', { name: 'Ada' })
+  expect(list.textContent).toContain('Odd Title')
+  expect(list.textContent).toContain('New → mystery')
+  expect(list.textContent).toContain('The Matrix')
+  expect(list.textContent).toContain('Pending → Denied')
+  expect(list.textContent).toContain('Not tonight')
+  expect(list.textContent?.indexOf('Odd Title')).toBeLessThan(
+    list.textContent?.indexOf('The Matrix') ?? 0,
+  )
+})
+
 it('has a friendly page for unknown routes', () => {
   stubFetch(() => null)
   renderAt('/nowhere')
