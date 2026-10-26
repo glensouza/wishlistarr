@@ -63,6 +63,7 @@ public sealed partial class ReleaseNotesConfigTests
         YamlMappingNode changelog = (YamlMappingNode)((YamlMappingNode)Load(".github/release.yml"))["changelog"];
         string[] authors = [.. ((YamlSequenceNode)((YamlMappingNode)changelog["exclude"])["authors"]).Children.Select(Scalar)];
         Assert.Contains("dependabot", authors);
+        Assert.Contains("dependabot[bot]", authors);
     }
 
     [Fact]
