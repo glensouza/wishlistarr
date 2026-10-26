@@ -513,10 +513,12 @@ public sealed class RequestAccessTests
         Assert.Equal(RequestState.Labeled, Assert.Single(await factory.GetRequestsAsync()).State);
         await RevokeAsync(parent, new { ids = new[] { labeled } });
         index.Remove(MediaKind.Movie, 700);
+        int lookups = index.Calls;
 
         HttpResponseMessage again = await KidRequestApiFactory.RequestAsync(kid, "movie", 700);
         MediaRequest created = (await factory.GetRequestsAsync()).Single(request => request.Id != labeled);
 
+        Assert.Equal(lookups, index.Calls);
         Assert.Equal(HttpStatusCode.Created, again.StatusCode);
         Assert.Equal("pending", (await again.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
         Assert.Equal(RequestState.Pending, created.State);

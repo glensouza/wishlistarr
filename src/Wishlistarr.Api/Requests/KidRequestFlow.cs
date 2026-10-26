@@ -115,16 +115,18 @@ public sealed partial class KidRequestFlow(
 
         RatingLevel? rating = new RatingRule().Evaluate(content, policy).Reason.Level;
         bool genresUnknown = profile.BlockedGenreIds.Count > 0 && content.GenreIds is not { Count: > 0 };
-        bool auto = !revokedBefore && new AutoApproveRule(
+        bool auto = new AutoApproveRule(
             profile.AutoApprove,
             profile.AutoApproveMovieRating,
             profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
-        bool inspectLibrary = decision.Outcome == ContentOutcome.Allowed;
+
+        // Both the instant label and auto-approval need a library answer, so not looking up a revoked title keeps it waiting for a parent.
+        bool inspectLibrary = !revokedBefore && decision.Outcome == ContentOutcome.Allowed;
         (IReadOnlyList<MediaItem> matches, bool libraryKnown) = inspectLibrary
             ? await this.FindInLibraryAsync(title, ct)
             : ([], false);
         bool inLibrary = libraryKnown && matches.Count > 0;
-        bool instant = !revokedBefore && decision.Outcome == ContentOutcome.Allowed && inLibrary;
+        bool instant = decision.Outcome == ContentOutcome.Allowed && inLibrary;
         bool autoNow = auto && libraryKnown && !instant;
         bool counts = !instant;
 
