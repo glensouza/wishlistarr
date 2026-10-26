@@ -22,6 +22,7 @@ export type ParentRequest = {
   createdAt: string
   denialReason: string | null
   canRevoke: boolean
+  labelMayRemain: boolean
 }
 
 export type DecisionStatus =
@@ -45,6 +46,7 @@ export type RequestPage = {
   total: number
   limit: number
   offset: number
+  unfinished: number
 }
 
 export const pageSize = 100

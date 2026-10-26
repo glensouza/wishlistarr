@@ -65,7 +65,13 @@ export default function RequestsAdmin() {
   const [total, setTotal] = useState(0)
   const [labeled, setLabeled] = useState<ParentRequest[]>([])
   const [labeledTotal, setLabeledTotal] = useState(0)
-  const [stuck, setStuck] = useState<ParentRequest[]>([])
+  const [unfinished, setUnfinished] = useState(0)
+  const [unfinishedOpen, setUnfinishedOpen] = useState(false)
+  const [failedRows, setFailedRows] = useState<ParentRequest[]>([])
+  const [failedTotal, setFailedTotal] = useState(0)
+  const [availableRows, setAvailableRows] = useState<ParentRequest[]>([])
+  const [availableTotal, setAvailableTotal] = useState(0)
+  const [unfinishedBroken, setUnfinishedBroken] = useState(false)
   const [profiles, setProfiles] = useState<KidProfile[]>([])
   const [failedParts, setFailedParts] = useState<Part[]>([])
   const [selected, setSelected] = useState<number[]>([])
@@ -86,14 +92,13 @@ export default function RequestsAdmin() {
       listRequests('pending'),
       listRequests('labeled'),
       listKidProfiles(),
-      listRequests('failed'),
-      listRequests('available'),
-    ]).then(([pending, ready, kids, failedRows, availableRows]) => {
+    ]).then(([pending, ready, kids]) => {
       if (!current) return
       const failed: Part[] = []
       if (pending.status === 'fulfilled') {
         setRows(pending.value.items)
         setTotal(pending.value.total)
+        setUnfinished(pending.value.unfinished)
       } else {
         failed.push('pending')
       }
@@ -105,18 +110,6 @@ export default function RequestsAdmin() {
       }
       if (kids.status === 'fulfilled') setProfiles(kids.value)
       else failed.push('profiles')
-      if (
-        failedRows.status === 'fulfilled' &&
-        availableRows.status === 'fulfilled'
-      ) {
-        setStuck(
-          [...failedRows.value.items, ...availableRows.value.items].filter(
-            (row) => row.canRevoke,
-          ),
-        )
-      } else {
-        failed.push('stuck')
-      }
       setFailedParts(failed)
       setSelected([])
     })
@@ -124,6 +117,37 @@ export default function RequestsAdmin() {
       current = false
     }
   }, [version])
+
+  useEffect(() => {
+    if (!unfinishedOpen) return
+    let current = true
+    void Promise.all([listRequests('failed'), listRequests('available')]).then(
+      ([failed, available]) => {
+        if (!current) return
+        setFailedRows(failed.items)
+        setFailedTotal(failed.total)
+        setAvailableRows(available.items)
+        setAvailableTotal(available.total)
+        setUnfinishedBroken(false)
+      },
+      () => {
+        if (current) setUnfinishedBroken(true)
+      },
+    )
+    return () => {
+      current = false
+    }
+  }, [version, unfinishedOpen])
+
+  const brokenParts: Part[] = unfinishedBroken
+    ? [...failedParts, 'stuck']
+    : failedParts
+  const unfinishedRows = [
+    ...failedRows,
+    ...availableRows.filter((row) => row.canRevoke),
+  ]
+  const moreUnfinished =
+    failedRows.length < failedTotal || availableRows.length < availableTotal
 
   function reload() {
     setVersion((current) => current + 1)
@@ -195,13 +219,33 @@ export default function RequestsAdmin() {
     setBusy(true)
     try {
       const page = await listRequests('labeled', pageSize, labeled.length)
-      setLabeled((current) => [
-        ...current,
-        ...page.items.filter(
-          (item) => !current.some((row) => row.id === item.id),
-        ),
-      ])
+      setLabeled((current) => appendNew(current, page.items))
       setLabeledTotal(page.total)
+    } catch (failure) {
+      setError(messageOf(failure, t('app.somethingWrong')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function loadMoreUnfinished() {
+    if (busy) return
+    clearMessages()
+    setBusy(true)
+    try {
+      if (failedRows.length < failedTotal) {
+        const page = await listRequests('failed', pageSize, failedRows.length)
+        setFailedRows((current) => appendNew(current, page.items))
+        setFailedTotal(page.total)
+      } else {
+        const page = await listRequests(
+          'available',
+          pageSize,
+          availableRows.length,
+        )
+        setAvailableRows((current) => appendNew(current, page.items))
+        setAvailableTotal(page.total)
+      }
     } catch (failure) {
       setError(messageOf(failure, t('app.somethingWrong')))
     } finally {
@@ -300,11 +344,11 @@ export default function RequestsAdmin() {
   return (
     <section aria-labelledby="requests-heading">
       <h2 id="requests-heading">{t('requests.title')}</h2>
-      {failedParts.length > 0 && (
+      {brokenParts.length > 0 && (
         <div role="alert">
           <p>
             {t('requests.loadFailed', {
-              parts: failedParts.map((part) => t(partKey[part])).join(', '),
+              parts: brokenParts.map((part) => t(partKey[part])).join(', '),
             })}
           </p>
           <button type="button" onClick={reload}>
@@ -452,33 +496,65 @@ export default function RequestsAdmin() {
           )}
         </>
       )}
-      {stuck.length > 0 && (
+      {unfinished > 0 && (
         <>
           <h3>{t('requests.stuckHeading')}</h3>
           <p>{t('requests.stuckHint')}</p>
-          <ul>
-            {stuck.map((row) => (
-              <li key={row.id}>
-                <strong>{row.title}</strong>
-                <span>
-                  {t('requests.forKid', {
-                    kind: t(
-                      row.kind === 'movie' ? 'requests.movie' : 'requests.show',
-                    ),
-                    name: row.kidName,
-                  })}
-                </span>
-                <span>{t(stateKey[row.state])}</span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void revoke(row)}
-                >
-                  {t('requests.revokeTitle', { title: row.title })}
-                </button>
-              </li>
-            ))}
-          </ul>
+          {!unfinishedOpen && (
+            <button type="button" onClick={() => setUnfinishedOpen(true)}>
+              {t('requests.stuckShow', { count: String(unfinished) })}
+            </button>
+          )}
+          {unfinishedOpen && (
+            <ul>
+              {unfinishedRows.map((row) => (
+                <li key={row.id}>
+                  <strong>{row.title}</strong>
+                  <span>
+                    {t('requests.forKid', {
+                      kind: t(
+                        row.kind === 'movie'
+                          ? 'requests.movie'
+                          : 'requests.show',
+                      ),
+                      name: row.kidName,
+                    })}
+                  </span>
+                  <span>{t(stateKey[row.state])}</span>
+                  {row.labelMayRemain && (
+                    <span>
+                      {t(
+                        row.canRevoke
+                          ? 'requests.stuckLabelRevoke'
+                          : 'requests.stuckLabelCheck',
+                      )}
+                    </span>
+                  )}
+                  {row.canRevoke && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void revoke(row)}
+                    >
+                      {t('requests.revokeTitle', { title: row.title })}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {unfinishedOpen && moreUnfinished && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void loadMoreUnfinished()}
+            >
+              {t('requests.showMore', {
+                shown: String(unfinishedRows.length),
+                total: String(Math.max(unfinished, unfinishedRows.length)),
+              })}
+            </button>
+          )}
         </>
       )}
       {profiles.length > 0 && (
@@ -562,6 +638,13 @@ export default function RequestsAdmin() {
       )}
     </section>
   )
+}
+
+function appendNew(current: ParentRequest[], items: ParentRequest[]) {
+  return [
+    ...current,
+    ...items.filter((item) => !current.some((row) => row.id === item.id)),
+  ]
 }
 
 function unresolved(item: DecisionItem) {

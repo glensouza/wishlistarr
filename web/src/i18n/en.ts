@@ -230,7 +230,12 @@ export const en = {
   'requests.showMore': 'Show more ({shown} of {total} shown)',
   'requests.stuckHeading': 'Did not finish',
   'requests.stuckHint':
-    'Giving these titles stopped part way. Removing one takes off any label Wishlistarr added, and you can give it again afterwards.',
+    'A title you gave or a kid asked for stopped part way, or its Plex label could not be written. Removing one takes off any label Wishlistarr recorded, and it can be given again afterwards.',
+  'requests.stuckShow': 'Show them ({count})',
+  'requests.stuckLabelRevoke':
+    'Wishlistarr may have left its label on this title in Plex. Removing the title takes it off.',
+  'requests.stuckLabelCheck':
+    'Plex may have kept the label even though writing it failed, and Wishlistarr has no record of it. Check the labels on this title in Plex.',
   'requests.grantHeading': 'Give a title',
   'requests.grantKid': 'Profile',
   'requests.grantPickKid': 'Choose a profile',

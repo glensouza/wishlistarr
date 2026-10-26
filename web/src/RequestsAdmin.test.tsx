@@ -24,6 +24,7 @@ const waiting: ParentRequest = {
   createdAt: '2026-10-22T00:00:00Z',
   denialReason: null,
   canRevoke: false,
+  labelMayRemain: false,
 }
 
 const second: ParentRequest = {
@@ -56,6 +57,7 @@ let calls: Call[]
 let rows: ParentRequest[]
 let labeled: ParentRequest[]
 let stuck: ParentRequest[]
+let unfinished: number | undefined
 let inUse: boolean
 let profiles: KidProfile[]
 let total: number | undefined
@@ -69,6 +71,7 @@ beforeEach(() => {
   rows = [waiting, second]
   labeled = []
   stuck = []
+  unfinished = undefined
   inUse = false
   profiles = []
   total = undefined
@@ -113,21 +116,26 @@ beforeEach(() => {
         const query = new URL(path, 'http://localhost').searchParams
         const state = query.get('state')
         const offset = Number(query.get('offset') ?? '0')
+        const open =
+          unfinished ??
+          stuck.filter((row) => row.state === 'failed' || row.canRevoke).length
         if (state === 'labeled') {
           return Response.json({
             items: labeled.slice(offset, offset + 100),
             total: labeled.length,
             limit: 100,
             offset,
+            unfinished: open,
           })
         }
         if (state === 'failed' || state === 'available') {
           const items = stuck.filter((row) => row.state === state)
           return Response.json({
-            items,
+            items: items.slice(offset, offset + 100),
             total: items.length,
             limit: 100,
-            offset: 0,
+            offset,
+            unfinished: open,
           })
         }
         return Response.json({
@@ -135,6 +143,7 @@ beforeEach(() => {
           total: total ?? rows.length,
           limit: 100,
           offset: 0,
+          unfinished: open,
         })
       }
       if (path.endsWith('/grant')) {
@@ -402,6 +411,13 @@ it('loads more titles on their lists past the first page', async () => {
   expect(writes()[0].body).toEqual({ ids: [1129], reason: null })
 })
 
+const unfinishedCalls = () =>
+  calls.filter(
+    (call) =>
+      call.path.includes('state=failed') ||
+      call.path.includes('state=available'),
+  )
+
 it('offers to remove a title that did not finish only when it can be revoked', async () => {
   stuck = [
     {
@@ -410,6 +426,7 @@ it('offers to remove a title that did not finish only when it can be revoked', a
       state: 'failed',
       title: 'Kept label',
       canRevoke: true,
+      labelMayRemain: true,
     },
     {
       ...waiting,
@@ -418,18 +435,103 @@ it('offers to remove a title that did not finish only when it can be revoked', a
       title: 'No label',
       canRevoke: false,
     },
+    {
+      ...waiting,
+      id: 23,
+      state: 'failed',
+      title: 'Unrecorded label',
+      canRevoke: false,
+      labelMayRemain: true,
+    },
     { ...waiting, id: 22, state: 'available', title: 'Stuck', canRevoke: true },
+    {
+      ...waiting,
+      id: 24,
+      state: 'available',
+      title: 'Still labeling',
+      canRevoke: false,
+    },
   ]
   render(<RequestsAdmin />)
-  expect(await screen.findByText('Did not finish')).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Remove Kept label' })).toBeTruthy()
+  fireEvent.click(await screen.findByRole('button', { name: 'Show them (4)' }))
+  expect(
+    await screen.findByRole('button', { name: 'Remove Kept label' }),
+  ).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Remove Stuck' })).toBeTruthy()
-  expect(screen.queryByText('No label')).toBeNull()
+  expect(screen.getByText('No label')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Remove No label' })).toBeNull()
+  expect(
+    screen.queryByRole('button', { name: 'Remove Unrecorded label' }),
+  ).toBeNull()
+  expect(screen.queryByText('Still labeling')).toBeNull()
+  expect(
+    screen.getByText(/Removing the title takes it off/).closest('li')
+      ?.textContent,
+  ).toContain('Kept label')
+  expect(
+    screen.getByText(/Check the labels on this title in Plex/).closest('li')
+      ?.textContent,
+  ).toContain('Unrecorded label')
   fireEvent.click(screen.getByRole('button', { name: 'Remove Kept label' }))
 
   await waitFor(() => expect(writes()).toHaveLength(1))
   expect(writes()[0].path).toBe('/api/v1/requests/revoke')
   expect(writes()[0].body).toEqual({ ids: [20], reason: null })
+})
+
+it('loads titles that did not finish only when asked, and not at all when there are none', async () => {
+  render(<RequestsAdmin />)
+  await screen.findByText('Movie 700')
+  expect(screen.queryByText('Did not finish')).toBeNull()
+  expect(unfinishedCalls()).toHaveLength(0)
+  cleanup()
+
+  stuck = [{ ...waiting, id: 20, state: 'failed', title: 'Kept label' }]
+  render(<RequestsAdmin />)
+  expect(await screen.findByText('Did not finish')).toBeTruthy()
+  expect(screen.getByText(/or a kid asked for stopped part way/)).toBeTruthy()
+  expect(screen.queryByText('Kept label')).toBeNull()
+  expect(unfinishedCalls()).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Show them (1)' }))
+
+  expect(await screen.findByText('Kept label')).toBeTruthy()
+  expect(unfinishedCalls()).toHaveLength(2)
+})
+
+it('loads more titles that did not finish past the first page', async () => {
+  stuck = [
+    ...Array.from({ length: 130 }, (_, index) => ({
+      ...waiting,
+      id: 2000 + index,
+      state: 'failed' as const,
+      title: `Unfinished ${index + 1}`,
+    })),
+    {
+      ...waiting,
+      id: 3000,
+      state: 'available',
+      title: 'Stuck',
+      canRevoke: true,
+    },
+  ]
+  render(<RequestsAdmin />)
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Show them (131)' }),
+  )
+  expect(await screen.findByText('Unfinished 100')).toBeTruthy()
+  expect(screen.queryByText('Unfinished 101')).toBeNull()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Show more (101 of 131 shown)' }),
+  )
+
+  expect(await screen.findByText('Unfinished 130')).toBeTruthy()
+  expect(screen.getByText('Stuck')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /^Show more/ })).toBeNull()
+  expect(
+    calls.some((call) =>
+      call.path.includes('state=failed&limit=100&offset=100'),
+    ),
+  ).toBe(true)
 })
 
 it('says when a revoked label belongs to another profile now', async () => {
