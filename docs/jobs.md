@@ -45,3 +45,5 @@ The built-in `job-history-cleanup` job deletes finished runs older than `Jobs:Hi
 The `database-backup` job writes a consistent copy of the database and the data protection key ring, then keeps the newest `Backups:Retention` files. The zip contains secrets. See [backup.md](backup.md).
 
 The `tmdb-data-purge` job enforces the TMDB data retention described in [tmdb.md](tmdb.md).
+
+The `update-check` job asks GitHub whether a newer release exists. It runs once a day. See [upgrading.md](upgrading.md). It is the only call Wishlistarr makes to GitHub by itself.

@@ -418,9 +418,10 @@ public sealed class BackupTests
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
         string[] migrations = [.. db.Database.GetMigrations()];
-        string latest = migrations[^1];
+        int target = Array.FindIndex(migrations, name => name.EndsWith("_AddProfileContentRules", StringComparison.Ordinal));
+        string latest = migrations[target];
         IMigrator migrator = db.Database.GetService<IMigrator>() ?? throw new InvalidOperationException("No migrator.");
-        await migrator.MigrateAsync(migrations[^2]);
+        await migrator.MigrateAsync(migrations[target - 1]);
         await db.Database.CloseConnectionAsync();
         SqliteConnection.ClearAllPools();
         return latest;

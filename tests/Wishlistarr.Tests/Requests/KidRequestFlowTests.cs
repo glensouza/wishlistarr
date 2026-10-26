@@ -131,10 +131,11 @@ public sealed class KidRequestFlowTests
         (HttpClient kid, _) = await factory.SignInKidAsync(blockedGenreIds: [28]);
 
         HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "movie", 603);
-        string text = await response.Content.ReadAsStringAsync();
+        JsonObject problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        problem.Remove("traceId");
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
-        Assert.DoesNotContain("28", WithoutTrace(text), StringComparison.Ordinal);
+        Assert.DoesNotContain("28", problem.ToJsonString(), StringComparison.Ordinal);
         Assert.Empty(await factory.GetRequestsAsync());
     }
 

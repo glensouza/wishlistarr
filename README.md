@@ -17,7 +17,7 @@ Wishlistarr is a free and open source request app for families that share a Plex
 - **Content policy:** rules per profile decide whether a title is allowed, needs approval or is blocked.
 - **Parent approval:** requests that need a decision wait for a parent before anything is downloaded.
 - **Plex labels:** approved titles are labeled for the profile so Plex restrictions keep each child to their own library.
-- **Private by design:** no telemetry or analytics, and metadata comes from TMDB.
+- **Private by design:** nothing is sent as telemetry. An optional local metrics endpoint stays off unless you enable it. Metadata comes from TMDB.
 
 Wishlistarr is under active development and not yet released.
 
@@ -75,7 +75,7 @@ dotnet run --project src/Wishlistarr.AppHost
 
 The AppHost is a contributor tool only. It is not needed to run or build Wishlistarr, and it is not part of any release. Vite reads the API address from `WISHLISTARR_API_URL`, which the AppHost sets; it defaults to `http://localhost:5082`.
 
-On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in, and [docs/kid-devices.md](docs/kid-devices.md) for pairing kid devices. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server. See [docs/requests.md](docs/requests.md) for how requests move from pending to labeled. See [docs/kid-search.md](docs/kid-search.md) for kid search and its latency budget. See [docs/webhooks.md](docs/webhooks.md) for inbound Plex, Sonarr, Radarr and Seerr webhooks. See [docs/library.md](docs/library.md) for the local Plex library index. See [docs/backup.md](docs/backup.md) for backups, retention and restore.
+On first start a parent account must be created before the API can be used. See [docs/authentication.md](docs/authentication.md) for sign-in, sessions, the API key and the optional trusted-network bypass. See [docs/kid-profiles.md](docs/kid-profiles.md) for kid profiles and PIN sign-in, and [docs/kid-devices.md](docs/kid-devices.md) for pairing kid devices. See [docs/plex.md](docs/plex.md) to link a Plex account and choose a server. See [docs/requests.md](docs/requests.md) for how requests move from pending to labeled. See [docs/kid-search.md](docs/kid-search.md) for kid search and its latency budget. See [docs/webhooks.md](docs/webhooks.md) for inbound Plex, Sonarr, Radarr and Seerr webhooks. See [docs/library.md](docs/library.md) for the local Plex library index. See [docs/backup.md](docs/backup.md) for backups, retention and restore. See [docs/health.md](docs/health.md) for health checks, the log viewer, request history and the optional metrics endpoint.
 
 ## Test
 
@@ -95,13 +95,19 @@ C# style is defined in `.editorconfig` and enforced as warnings (errors in the b
 
 ## Privacy
 
-Wishlistarr does not collect any telemetry or analytics.
+Wishlistarr does not send telemetry or analytics. `GET /metrics` is a local Prometheus scrape and it stays off unless `Metrics:Enabled` is true. See [docs/health.md](docs/health.md).
 
 ## Acknowledgements
 
 <a href="https://www.themoviedb.org/"><img src="site/tmdb.svg" alt="TMDB" width="140"></a>
 
-This product uses the TMDB API but is not endorsed or certified by TMDB.
+This product uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
+
+Watch provider data comes from [JustWatch](https://www.justwatch.com/). Artwork data comes from [fanart.tv](https://fanart.tv/). Powered by [DoesTheDogDie.com](https://www.doesthedogdie.com).
+
+Wishlistarr is not affiliated with, endorsed, or sponsored by Plex, Inc. Plex is a trademark of Plex, Inc.
+
+The same credits, and the open source package list, are on the in-app About page for parents and in [docs/attribution.md](docs/attribution.md).
 
 ## License
 

@@ -4,6 +4,8 @@ Wishlistarr has two kinds of signed-in principal: a **Parent** and a **Kid**. Th
 
 Public endpoints: `GET /api/health`, `GET /api/v1/auth/status`, `GET /api/v1/auth/antiforgery`, `POST /api/v1/auth/setup`, `POST /api/v1/auth/login` and `POST /api/v1/kid/pair`. Kid sessions and PIN limits are described in [kid-profiles.md](kid-profiles.md), and device pairing in [kid-devices.md](kid-devices.md).
 
+`GET /metrics`, `GET /api/v1/system/health`, `GET /api/v1/system/logs`, `GET /api/v1/system/logs/download` and `GET /api/v1/kid-profiles/{id}/events` require the Parent policy. The API key or a parent session can call them. They are not public. `/metrics` answers `404` until metrics are enabled; see [health.md](health.md).
+
 ## First run
 
 Until a parent account exists, `GET /api/v1/auth/status` reports `setupRequired: true`. Parent endpoints still answer `401` to callers with no credentials; callers that do authenticate before setup (the API key, the trusted-network bypass, or a Kid) get `409 Conflict` instead of reaching the endpoint. `POST /api/v1/auth/setup` with `{ "username", "password" }` creates the account and signs it in. It only works once; later calls return `409`.

@@ -28,6 +28,28 @@ jobs:
             echo "Tagged commit is not on main" >&2
             exit 1
           fi
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Generate third-party license notices
+        run: |
+          dotnet publish src/Wishlistarr.Api/Wishlistarr.Api.csproj -c Release -o "$RUNNER_TEMP/publish"
+          npm ci --prefix web
+          npm run build --prefix web
+          cp "$RUNNER_TEMP/publish/wwwroot/licenses/nuget.json" nuget-licenses.json
+          cp web/public/licenses/npm.json npm-licenses.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: third-party-licenses
+          path: |
+            npm-licenses.json
+            nuget-licenses.json
+          if-no-files-found: error
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -70,9 +92,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
+          if [ ! -f .github/release.yml ]; then
+            echo "Missing .github/release.yml" >&2
+            exit 1
+          fi
           if [ "$PRERELEASE" = "true" ]; then
             flags="--prerelease"
           else
             flags="--latest"
           fi
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $flags
+          gh release create "$GITHUB_REF_NAME" npm-licenses.json nuget-licenses.json --title "$GITHUB_REF_NAME" --generate-notes --verify-tag $flags

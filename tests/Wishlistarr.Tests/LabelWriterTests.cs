@@ -316,6 +316,47 @@ public sealed class LabelWriterTests
     }
 
     [Fact]
+    public async Task A_deadline_after_plex_took_the_label_still_leaves_a_ledger_row()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        using CancellationTokenSource deadline = new();
+        factory.Fake.AfterRequest = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                deadline.Cancel();
+            }
+        };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", deadline.Token)));
+
+        Assert.Equal(["Ada"], factory.Fake.Item("101").Labels);
+        OwnedLabel owned = Assert.Single(await factory.GetLedgerAsync());
+        Assert.Equal("Ada", owned.Label);
+        Assert.Equal("101", owned.RatingKey);
+    }
+
+    [Fact]
+    public async Task A_write_plex_rejected_leaves_no_ledger_row()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        factory.Fake.Delay = request => request.Method == "PUT"
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        await Assert.ThrowsAsync<MediaServerException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request")));
+
+        Assert.Empty(factory.Fake.Item("101").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
     public async Task Unknown_items_and_invalid_input_are_rejected()
     {
         using LabelApiFactory factory = new();

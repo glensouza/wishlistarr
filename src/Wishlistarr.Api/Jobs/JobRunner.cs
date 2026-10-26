@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Api.System;
 using Wishlistarr.Data;
 
 namespace Wishlistarr.Api.Jobs;
@@ -153,6 +154,8 @@ public sealed class JobRunner(
                 ? exception.Message[..JobRun.MaxErrorLength]
                 : exception.Message;
         }
+
+        AppMetrics.RecordJob(definition.Name, outcome.ToString().ToLowerInvariant());
 
         try
         {
