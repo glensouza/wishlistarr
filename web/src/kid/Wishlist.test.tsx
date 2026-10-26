@@ -4,10 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { axe } from '../test/axe'
 import Wishlist, { wishlistPollMaxMs, wishlistPollMs } from './Wishlist'
 
-const clearSession = vi.hoisted(() => vi.fn())
+const signOut = vi.hoisted(() => vi.fn())
 
 vi.mock('./KidSession', () => ({
-  useKidSession: () => ({ clear: clearSession }),
+  useKidSession: () => ({ signOut }),
 }))
 
 type Wish = {
@@ -77,7 +77,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  clearSession.mockClear()
+  signOut.mockReset()
+  signOut.mockResolvedValue(undefined)
   vi.useRealTimers()
   vi.unstubAllGlobals()
   Object.defineProperty(document, 'hidden', {
@@ -251,11 +252,11 @@ it('stops polling and signs the kid out when the session has ended', async () =>
 
   await vi.advanceTimersByTimeAsync(wishlistPollMs)
   expect(calls).toBe(base + 1)
-  expect(clearSession).toHaveBeenCalledTimes(1)
+  expect(signOut).toHaveBeenCalledTimes(1)
 
   await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 5)
   expect(calls).toBe(base + 1)
-  expect(clearSession).toHaveBeenCalledTimes(1)
+  expect(signOut).toHaveBeenCalledTimes(1)
 })
 
 it('also stops on a forbidden answer', async () => {
@@ -266,7 +267,7 @@ it('also stops on a forbidden answer', async () => {
   await vi.advanceTimersByTimeAsync(0)
   await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 5)
   expect(calls).toBe(1)
-  expect(clearSession).toHaveBeenCalledTimes(1)
+  expect(signOut).toHaveBeenCalledTimes(1)
 })
 
 it('does not fetch again after it is removed', async () => {
@@ -277,7 +278,7 @@ it('does not fetch again after it is removed', async () => {
   unmount()
   await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 5)
   expect(calls).toBe(base)
-  expect(clearSession).not.toHaveBeenCalled()
+  expect(signOut).not.toHaveBeenCalled()
 })
 
 it('keeps one request chain when the tab is hidden and shown during a fetch', async () => {
@@ -389,4 +390,68 @@ it('says how many wishes are left', async () => {
   wishlist = { remaining: 1, resetsAt: null, items: [] }
   render(<Wishlist />)
   expect(await screen.findByText('1 wish left this week')).toBeTruthy()
+})
+
+it('ignores a failed sign-out call when the session has ended', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  signOut.mockRejectedValue(new Error('offline'))
+  failures = 100
+  failStatus = 401
+  render(<Wishlist />)
+  await vi.advanceTimersByTimeAsync(0)
+  await vi.advanceTimersByTimeAsync(wishlistPollMaxMs * 2)
+  expect(signOut).toHaveBeenCalledTimes(1)
+  expect(calls).toBe(1)
+})
+
+it('tells screen readers when a refresh fails', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  failures = 1
+  await vi.advanceTimersByTimeAsync(wishlistPollMs)
+  const notice = (
+    await screen.findByText('We could not check for updates.')
+  ).closest('[role="status"]')
+  expect(notice).not.toBeNull()
+  expect(notice?.querySelector('button')).not.toBeNull()
+})
+
+it('announces the same change again after the text was cleared', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  const { container } = render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  const live = container.querySelector('.visually-hidden[aria-live="polite"]')
+  const readyItem = { ...waiting, state: 'ready', plex: null }
+
+  const expectAnnounced = async (text: string) => {
+    await vi.advanceTimersByTimeAsync(wishlistPollMs)
+    await waitFor(() => expect(live?.textContent).toBe(text))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_500)
+    })
+    expect(live?.textContent).toBe('')
+  }
+
+  wishlist = { remaining: 2, resetsAt: null, items: [readyItem] }
+  await expectAnnounced('Tiny Tale: Ready to watch')
+  wishlist = { remaining: 2, resetsAt: null, items: [waiting] }
+  await expectAnnounced('Tiny Tale: Waiting for a parent')
+  wishlist = { remaining: 2, resetsAt: null, items: [readyItem] }
+  await expectAnnounced('Tiny Tale: Ready to watch')
+})
+
+it('keeps a single request chain when the tab becomes visible while a timer is waiting', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  render(<Wishlist />)
+  await screen.findByText('Waiting for a parent')
+  const base = calls
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMs / 3)
+  document.dispatchEvent(new Event('visibilitychange'))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(calls).toBe(base + 1)
+
+  await vi.advanceTimersByTimeAsync(wishlistPollMs * 4)
+  expect(calls).toBe(base + 5)
 })

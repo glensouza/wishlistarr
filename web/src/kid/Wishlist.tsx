@@ -11,6 +11,7 @@ import { useKidSession } from './KidSession'
 
 export const wishlistPollMs = 15_000
 export const wishlistPollMaxMs = 60_000
+const announcementMs = 3_000
 
 function labelFor(state: string): MessageKey {
   switch (state) {
@@ -70,7 +71,7 @@ export default function Wishlist({
   const [attempt, setAttempt] = useState(0)
   const [refreshFailed, setRefreshFailed] = useState(false)
   const [announcement, setAnnouncement] = useState('')
-  const { clear } = useKidSession()
+  const { signOut } = useKidSession()
   const known = useRef<Map<number, string> | null>(null)
 
   useEffect(() => {
@@ -123,7 +124,7 @@ export default function Wishlist({
         ) {
           stopped = true
           clearTimeout(timer)
-          clear()
+          signOut().catch(() => {})
           return
         }
         setStatus((current) => (current === 'loading' ? 'failed' : current))
@@ -150,7 +151,13 @@ export default function Wishlist({
       controller.abort()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [attempt, pollMs, pollMaxMs, t, clear])
+  }, [attempt, pollMs, pollMaxMs, t, signOut])
+
+  useEffect(() => {
+    if (!announcement) return
+    const timer = setTimeout(() => setAnnouncement(''), announcementMs)
+    return () => clearTimeout(timer)
+  }, [announcement])
 
   if (status === 'loading' && !wishlist) {
     return <p role="status">{t('wishlist.loading')}</p>
@@ -189,7 +196,7 @@ export default function Wishlist({
         {announcement}
       </p>
       {refreshFailed && (
-        <p className="wishlist-notice">
+        <p className="wishlist-notice" role="status">
           {t('wishlist.refreshFailed')}
           <button
             type="button"
