@@ -2,7 +2,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useT } from '../i18n'
 import { useKidSession } from './KidSession'
 import HomeRows from './HomeRows'
-import KidRequests from './KidRequests'
+import KidHistory from './KidHistory'
 import Search from './Search'
 import Wishlist from './Wishlist'
 
@@ -24,7 +24,7 @@ export default function KidHome() {
       <p>{t('home.intro')}</p>
       <HomeRows />
       <Wishlist />
-      <KidRequests />
+      <KidHistory />
       <Search />
       <button
         type="button"

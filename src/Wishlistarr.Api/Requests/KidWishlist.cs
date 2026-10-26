@@ -39,7 +39,7 @@ public sealed partial class KidWishlist(
 
         // SQLite cannot order by the stored DateTimeOffset, so the newest-first order is applied after the rows are loaded.
         List<MediaRequest> requests = await db.MediaRequests.AsNoTracking()
-            .Where(request => request.KidProfileId == profileId)
+            .Where(request => request.KidProfileId == profileId && request.State != RequestState.Revoked)
             .ToListAsync(ct);
         requests.Sort(static (left, right) =>
         {

@@ -95,6 +95,26 @@ public sealed class KidWishlistTests
     }
 
     [Fact]
+    public async Task A_revoked_title_is_left_off_the_wishlist()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient ada, int adaId) = await factory.SignInKidAsync();
+
+        await AddRequestAsync(factory, adaId, 730, "Still Here");
+        int revoked = await AddRequestAsync(factory, adaId, 731, "Taken Away");
+        await MoveAsync(factory, revoked, RequestState.Approved, RequestActor.Parent(null, "Parent"));
+        await MoveAsync(factory, revoked, RequestState.Available, RequestActor.System("dispatch"));
+        await MoveAsync(factory, revoked, RequestState.Labeled, RequestActor.System("dispatch"));
+        await MoveAsync(factory, revoked, RequestState.Revoked, RequestActor.Parent(null, "Parent"));
+
+        JsonElement body = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Single(body.GetProperty("items").EnumerateArray());
+        Assert.Equal("waiting", Item(body, "Still Here").GetProperty("state").GetString());
+        Assert.DoesNotContain("Taken Away", body.GetRawText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Ready_items_link_to_plex_without_a_server_address_or_token()
     {
         FakeLibraryIndex index = new();

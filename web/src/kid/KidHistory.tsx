@@ -3,34 +3,9 @@ import { useT, type MessageKey } from '../i18n'
 import {
   historyPageSize,
   listKidHistory,
-  listKidRequests,
   type KidHistoryAction,
   type KidHistoryEntry,
-  type KidRequest,
 } from './kidApi'
-
-const stateKey = (state: string): MessageKey => {
-  switch (state) {
-    case 'pending':
-      return 'kidRequests.pending'
-    case 'approved':
-      return 'kidRequests.approved'
-    case 'denied':
-      return 'kidRequests.denied'
-    case 'fulfilling':
-      return 'kidRequests.fulfilling'
-    case 'available':
-      return 'kidRequests.available'
-    case 'labeled':
-      return 'kidRequests.labeled'
-    case 'failed':
-      return 'kidRequests.failed'
-    case 'revoked':
-      return 'kidRequests.revoked'
-    default:
-      return 'kidRequests.unknown'
-  }
-}
 
 const historyKey = (action: KidHistoryAction): MessageKey => {
   switch (action) {
@@ -53,11 +28,9 @@ const historyKey = (action: KidHistoryAction): MessageKey => {
   }
 }
 
-export default function KidRequests() {
+export default function KidHistory() {
   const t = useT()
-  const [rows, setRows] = useState<KidRequest[] | null>(null)
   const [history, setHistory] = useState<KidHistoryEntry[] | null>(null)
-  const [rowsFailed, setRowsFailed] = useState(false)
   const [historyFailed, setHistoryFailed] = useState(false)
   const [moreHistory, setMoreHistory] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -66,16 +39,17 @@ export default function KidRequests() {
 
   useEffect(() => {
     let current = true
-    void Promise.allSettled([listKidRequests(), listKidHistory()]).then(
-      ([loaded, events]) => {
+    void listKidHistory().then(
+      (events) => {
         if (!current) return
-        if (loaded.status === 'fulfilled') setRows(loaded.value)
-        setRowsFailed(loaded.status === 'rejected')
-        if (events.status === 'fulfilled') {
-          setHistory(events.value)
-          setMoreHistory(events.value.length === historyPageSize)
-        }
-        setHistoryFailed(events.status === 'rejected')
+        setHistory(events)
+        setMoreHistory(events.length === historyPageSize)
+        setHistoryFailed(false)
+        setMoreFailed(false)
+      },
+      () => {
+        if (!current) return
+        setHistoryFailed(true)
         setMoreFailed(false)
       },
     )
@@ -111,30 +85,8 @@ export default function KidRequests() {
   )
 
   return (
-    <section aria-labelledby="kid-requests-heading">
-      <h2 id="kid-requests-heading">{t('kidRequests.title')}</h2>
-      {rowsFailed && (
-        <div role="alert">
-          <p>{t('kidRequests.listFailedToLoad')}</p>
-          {retry}
-        </div>
-      )}
-      {rows === null && !rowsFailed && <p role="status">{t('app.loading')}</p>}
-      {rows !== null && rows.length === 0 && <p>{t('kidRequests.none')}</p>}
-      {rows !== null && rows.length > 0 && (
-        <ul>
-          {rows.map((row) => (
-            <li key={row.id}>
-              <strong>{row.title}</strong>
-              <span>{t(stateKey(row.state))}</span>
-              {row.state === 'denied' && row.denialReason && (
-                <p>{row.denialReason}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      <h3>{t('kidRequests.history')}</h3>
+    <section aria-labelledby="kid-history-heading">
+      <h2 id="kid-history-heading">{t('kidRequests.history')}</h2>
       {historyFailed && (
         <div role="alert">
           <p>{t('kidRequests.historyFailedToLoad')}</p>

@@ -209,7 +209,7 @@ A kid can ask again for a revoked title. The new request is `Pending` and waits 
 
 `remaining` is how many new requests the profile can still make this week, using the same week and the same `CountsTowardAllowance` count as [Weekly allowance](#weekly-allowance). It is `null` when the profile has no `weeklyAllowance` (no limit). `resetsAt` is the start of the next week when there is a limit, and `null` otherwise. `0` wishes left means the allowance is used up or was set to `0`.
 
-Items are the profile's own requests, newest first. The stored title is returned as text. Nothing is read from TMDB for this list.
+Items are the profile's own requests, newest first. A request a parent has revoked is left out, because the title was taken off the kid's list. The [kid history](#kid-history) still says it was removed. The stored title is returned as text. Nothing is read from TMDB for this list.
 
 ### Friendly states
 
