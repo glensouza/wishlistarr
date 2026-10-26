@@ -55,6 +55,13 @@ function stubFetch(handler: (path: string, method: string) => unknown) {
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
+      if (path === '/api/v1/backups' && method === 'GET') {
+        return Response.json({
+          retention: 7,
+          restorePending: false,
+          backups: [],
+        })
+      }
       calls.push({
         method,
         path,
@@ -147,6 +154,13 @@ it('keeps the server message off the page when saving fails', async () => {
         )
       }
       if (path === '/api/v1/updates') return Response.json(notice)
+      if (path === '/api/v1/backups') {
+        return Response.json({
+          retention: 7,
+          restorePending: false,
+          backups: [],
+        })
+      }
       if (path.startsWith('/api/v1/requests')) {
         return Response.json({ items: [], total: 0, limit: 100, offset: 0 })
       }
