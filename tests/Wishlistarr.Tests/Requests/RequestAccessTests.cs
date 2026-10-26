@@ -685,7 +685,7 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
-    public async Task Two_revokes_with_a_failing_second_copy_end_labeled_or_revoked_and_never_in_between()
+    public async Task Two_revokes_with_a_failing_second_copy_put_the_label_back_once_and_then_revoke()
     {
         FakeLibraryIndex index = TwoCopyIndex();
         using KidRequestApiFactory factory = new(index);
@@ -708,32 +708,53 @@ public sealed class RequestAccessTests
             RevokeAsync(second, new { ids = new[] { id } }));
         index.Gate = null;
         factory.Plex.Delay = null;
-        MediaRequest request = Assert.Single(await factory.GetRequestsAsync());
-        List<OwnedLabel> ledger = await factory.GetLedgerAsync();
 
-        if (request.State == RequestState.Labeled)
-        {
-            Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
-            Assert.Equal(["Ada"], factory.Plex.Item("102").Labels);
-            Assert.Equal(2, ledger.Count);
-        }
-        else
-        {
-            Assert.Equal(RequestState.Revoked, request.State);
-            Assert.Empty(factory.Plex.Item("101").Labels);
-            Assert.Empty(factory.Plex.Item("102").Labels);
-            Assert.Empty(ledger);
-        }
-
-        Assert.Equal(
-            ["failed", "succeeded"],
-            results.Select(body => Item(body, id).GetProperty("status").GetString()).Order());
-        Assert.Equal(RequestState.Revoked, request.State);
+        // Whichever revoke takes the request lock first meets the refusal, puts the first copy back and leaves the request labeled; the second then removes both.
+        JsonElement failed = Assert.Single(results, body => Item(body, id).GetProperty("status").GetString() == "failed");
+        JsonElement succeeded = Assert.Single(results, body => Item(body, id).GetProperty("status").GetString() == "succeeded");
+        Assert.Equal("labeled", Item(failed, id).GetProperty("state").GetString());
+        Assert.Equal("revoked", Item(succeeded, id).GetProperty("state").GetString());
+        Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
         Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Revoked);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+        Assert.Empty(factory.Plex.Item("102").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
     }
 
     [Fact]
-    public async Task A_second_grant_while_the_first_is_labeling_does_not_label_after_a_revoke()
+    public async Task A_revoke_does_not_put_labels_back_on_a_failed_request_that_moved_on()
+    {
+        using KidRequestApiFactory factory = new(TwoCopyIndex());
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskWithStrandedLabelAsync(factory, kid);
+        int writes = factory.LabelWrites;
+        int moved = 0;
+        factory.Plex.Delay = async request =>
+        {
+            // Stands for a retry that moves the failed request back to available while the revoke is removing its label.
+            if (request.Method == "PUT" && Interlocked.Increment(ref moved) == 1)
+            {
+                await SetAvailableAsync(factory, id);
+            }
+        };
+
+        JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } });
+        factory.Plex.Delay = null;
+
+        Assert.Equal("conflict", Item(body, id).GetProperty("status").GetString());
+        Assert.Equal("available", Item(body, id).GetProperty("state").GetString());
+        Assert.Equal(RequestState.Available, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Revoked);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+        Assert.Empty(factory.Plex.Item("102").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+        Assert.Equal(writes + 1, factory.LabelWrites);
+    }
+
+    [Fact]
+    public async Task A_second_grant_while_the_first_is_labeling_writes_nothing_and_one_revoke_removes_the_label()
     {
         using KidRequestApiFactory factory = new(MatrixIndex());
         await factory.LinkPlexAsync();
@@ -759,9 +780,13 @@ public sealed class RequestAccessTests
         HttpResponseMessage granted = await granting;
         HttpResponseMessage repeated = await again;
         int id = (await granted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        int grantWrites = factory.LabelWrites;
         JsonElement revoked = await RevokeAsync(first, new { ids = new[] { id } });
         int writes = factory.LabelWrites;
         factory.Plex.Delay = null;
+
+        Assert.Equal(1, grantWrites);
+        Assert.Equal(2, writes);
 
         Assert.Equal(HttpStatusCode.Created, granted.StatusCode);
         Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
