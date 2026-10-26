@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Core.Content;
@@ -157,7 +158,7 @@ public sealed partial class KidTitleDetails(
                 title,
                 Year(kind == MediaKind.Movie ? details.ReleaseDate : details.FirstAirDate),
                 masked ? null : Synopsis(details.Overview),
-                masked ? null : ImageUrl(KidSearch.PosterSize, details.PosterPath),
+                masked ? null : ImageUrl(KidContentPipeline.PosterSize, details.PosterPath),
                 masked ? null : ImageUrl(KidSearch.BackdropSize, details.BackdropPath),
                 Runtime(kind, details),
                 rating,
@@ -328,7 +329,7 @@ public sealed partial class KidTitleDetails(
     {
         string file = (path ?? string.Empty).TrimStart('/');
         return KidSearch.IsImageSize(size) && TmdbImageProxy.IsAllowed(size, file)
-            ? $"{KidSearch.PosterRoute}/{size}/{file}"
+            ? $"{KidContentPipeline.PosterRoute}/{size}/{file}"
             : null;
     }
 

@@ -44,6 +44,20 @@ export type RequestedTitle = {
   alreadyAsked: boolean
 }
 
+export type HomeItem = SearchItem
+
+export type HomeRow = {
+  id: string
+  genreId: number | null
+  genreName: string | null
+  items: HomeItem[]
+}
+
+export type HomeResponse = { rows: HomeRow[] }
+
+export const getHome = (signal?: AbortSignal) =>
+  request<HomeResponse>('GET', '/api/v1/kid/home', undefined, signal)
+
 export const searchTitles = (
   query: string,
   page: number,

@@ -29,6 +29,7 @@ export type KidProfile = {
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
   allowedOriginalLanguages: string[]
+  homeRows: string[]
   plexRestrictions?: PlexRestrictions | null
 }
 
@@ -42,6 +43,13 @@ export type LabelRestriction = {
 export type PlexRestrictions = {
   movies: LabelRestriction
   television: LabelRestriction
+}
+
+export const builtInHomeRows = ['popular', 'library', 'genre']
+
+export type HomeOptions = {
+  defaultRows: string[]
+  genres: { id: number; name: string; movie: boolean; tv: boolean }[]
 }
 
 export type KidProfileInput = {
@@ -60,9 +68,13 @@ export type KidProfileInput = {
   blockedGenreIds: number[]
   blockedKeywordIds: number[]
   allowedOriginalLanguages: string[]
+  homeRows: string[]
 }
 
 const base = '/api/v1/kid-profiles'
+
+export const getHomeOptions = () =>
+  request<HomeOptions>('GET', `${base}/home-options`)
 
 export const listKidProfiles = () => request<KidProfile[]>('GET', base)
 

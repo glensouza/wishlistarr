@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
@@ -229,14 +230,17 @@ public sealed class KidSearchTests
         (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 20);
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
         Assert.NotNull(response);
         Assert.Equal(20, response.Results.Count);
         Assert.Equal(0, tmdb.KeywordCalls);
-        Assert.InRange(tmdb.PeakConcurrency, 2, KidSearch.MaxParallelLookups);
+        Assert.InRange(tmdb.PeakConcurrency, 2, KidContentPipeline.MaxParallelLookups);
     }
 
     [Fact]
@@ -246,14 +250,17 @@ public sealed class KidSearchTests
         (_, int profileId) = await factory.SignInKidAsync(blockedKeywordIds: [99]);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 20);
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
         Assert.NotNull(response);
         Assert.Equal(20, response.Results.Count);
         Assert.Equal(20, tmdb.KeywordCalls);
-        Assert.InRange(tmdb.KeywordPeak, 2, KidSearch.MaxParallelLookups);
+        Assert.InRange(tmdb.KeywordPeak, 2, KidContentPipeline.MaxParallelLookups);
     }
 
     [Fact]
@@ -263,7 +270,10 @@ public sealed class KidSearchTests
         (_, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 10);
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 5) { TimeoutId = 2 };
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], TimeProvider.System, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "flaky", 1);
 
@@ -279,7 +289,10 @@ public sealed class KidSearchTests
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 4) { HangKeywords = true };
         ManualTimeProvider time = new();
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], time, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance));
 
         Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
         using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
@@ -289,7 +302,7 @@ public sealed class KidSearchTests
         }
 
         Assert.False(pending.IsCompleted);
-        time.Advance(KidSearch.LookupBudget);
+        time.Advance(KidContentPipeline.LookupBudget);
         KidSearchResponse? response = await pending.WaitAsync(guard.Token);
 
         Assert.NotNull(response);
@@ -305,7 +318,10 @@ public sealed class KidSearchTests
         using IServiceScope scope = factory.Services.CreateScope();
         GateClient tmdb = new(count: 4) { Hang = true };
         ManualTimeProvider time = new();
-        KidSearch search = new(scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(), tmdb, [], time, NullLogger<KidSearch>.Instance);
+        KidSearch search = new(
+            scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
+            tmdb,
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance));
 
         Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
         using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
@@ -315,7 +331,7 @@ public sealed class KidSearchTests
         }
 
         Assert.False(pending.IsCompleted);
-        time.Advance(KidSearch.LookupBudget);
+        time.Advance(KidContentPipeline.LookupBudget);
         KidSearchResponse? response = await pending.WaitAsync(guard.Token);
 
         Assert.NotNull(response);
@@ -664,65 +680,7 @@ public sealed class KidSearchTests
         public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<int?> FindIdAsync(TmdbMediaType type, ExternalIdSource source, string externalId, CancellationToken ct = default) => throw new NotSupportedException();
-    }
 
-    private sealed class ManualTimeProvider : TimeProvider
-    {
-        private readonly List<ManualTimer> timers = [];
-        private DateTimeOffset now = DateTimeOffset.UtcNow;
-
-        public override DateTimeOffset GetUtcNow() => this.now;
-
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            ManualTimer timer = new(callback, state, this.now + dueTime);
-            lock (this.timers)
-            {
-                this.timers.Add(timer);
-            }
-
-            return timer;
-        }
-
-        public void Advance(TimeSpan by)
-        {
-            List<ManualTimer> due;
-            lock (this.timers)
-            {
-                this.now += by;
-                due = [.. this.timers.Where(timer => timer.Due <= this.now)];
-            }
-
-            foreach (ManualTimer timer in due)
-            {
-                timer.Fire();
-            }
-        }
-
-        private sealed class ManualTimer(TimerCallback callback, object? state, DateTimeOffset due) : ITimer
-        {
-            private bool done;
-
-            public DateTimeOffset Due => due;
-
-            public void Fire()
-            {
-                if (!this.done)
-                {
-                    this.done = true;
-                    callback(state);
-                }
-            }
-
-            public bool Change(TimeSpan dueTime, TimeSpan period) => !this.done;
-
-            public void Dispose() => this.done = true;
-
-            public ValueTask DisposeAsync()
-            {
-                this.done = true;
-                return ValueTask.CompletedTask;
-            }
-        }
+        public Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

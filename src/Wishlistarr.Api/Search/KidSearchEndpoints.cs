@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Integrations.Tmdb;
 

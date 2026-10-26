@@ -18,7 +18,7 @@ Failures answer `502` (TMDB unreachable) or `503` (no API key) with a message th
 
 ## Filtering
 
-Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title). Search results supply TMDB genre ids (`genre_ids`) and the original language. When the profile blocks keywords, each title's keyword ids are read from `GET /movie/{id}/keywords` or `GET /tv/{id}/keywords` in the same lookup pass as its certification. A profile with no keyword blocks does not call that endpoint.
+Every result is checked with the same content policy and US certification lookup as [requests](requests.md#asking-for-a-title). [Home](kid-home.md) uses that same pipeline and keeps only titles the policy allows. Search results supply TMDB genre ids (`genre_ids`) and the original language. When the profile blocks keywords, each title's keyword ids are read from `GET /movie/{id}/keywords` or `GET /tv/{id}/keywords` in the same lookup pass as its certification. A profile with no keyword blocks does not call that endpoint.
 
 - `Blocked` titles are removed before anything is returned. A keyword id on the profile's list blocks the title. A successful keyword lookup that returns none does not.
 - Titles whose certification cannot be read, because TMDB failed for that title or the lookup did not finish within the budget below, are removed. The same applies to a keyword lookup when the profile has keyword blocks. Unknown never counts as allowed.

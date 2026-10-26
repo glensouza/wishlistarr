@@ -125,6 +125,89 @@ public sealed class KidProfileTests
     }
 
     [Fact]
+    public async Task Home_rows_can_be_configured_reordered_and_validated()
+    {
+        using KidApiFactory factory = new();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+
+        HttpResponseMessage defaultProfileResponse = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "DefaultRows",
+            avatar = "fox",
+        });
+        JsonElement defaultProfile = await defaultProfileResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(["popular", "library", "genre"], Texts(defaultProfile, "homeRows"));
+
+        HttpResponseMessage customResponse = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "CustomRows",
+            avatar = "bear",
+            homeRows = new[] { "library", "popular" },
+        });
+        JsonElement customProfile = await customResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(["library", "popular"], Texts(customProfile, "homeRows"));
+
+        int id = customProfile.GetProperty("id").GetInt32();
+        HttpResponseMessage putResponse = await parent.PutAsJsonAsync($"/api/v1/kid-profiles/{id}", new
+        {
+            name = "CustomRows",
+            avatar = "bear",
+            homeRows = new[] { "genre", "library" },
+        });
+        JsonElement updated = await putResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(["genre", "library"], Texts(updated, "homeRows"));
+
+        HttpResponseMessage omitted = await parent.PutAsJsonAsync($"/api/v1/kid-profiles/{id}", new
+        {
+            name = "CustomRows",
+            avatar = "bear",
+        });
+        Assert.Equal(["popular", "library", "genre"], Texts(await omitted.Content.ReadFromJsonAsync<JsonElement>(), "homeRows"));
+
+        HttpResponseMessage canonical = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "CanonicalRows",
+            avatar = "owl",
+            homeRows = new[] { "genre:016", "Genre:16", "library", " " },
+        });
+        Assert.Equal(["genre:16", "library"], Texts(await canonical.Content.ReadFromJsonAsync<JsonElement>(), "homeRows"));
+
+        HttpResponseMessage empty = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "EmptyRows",
+            avatar = "fox",
+            homeRows = Array.Empty<string>(),
+        });
+        Assert.Empty(Texts(await empty.Content.ReadFromJsonAsync<JsonElement>(), "homeRows"));
+
+        HttpResponseMessage invalid = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "InvalidRows",
+            avatar = "fox",
+            homeRows = new[] { "not_a_valid_row" },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Contains("genre:<id>", await invalid.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        HttpResponseMessage tooMany = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "TooManyRows",
+            avatar = "fox",
+            homeRows = Enumerable.Range(1, KidProfiles.MaxHomeRows + 1).Select(i => $"genre:{i}").ToArray(),
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+
+        HttpResponseMessage padded = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new
+        {
+            name = "PaddedRows",
+            avatar = "fox",
+            homeRows = Enumerable.Range(1, KidProfiles.MaxHomeRows).Select(i => "popular").Concat(["", " ", "library"]).ToArray(),
+        });
+        Assert.Equal(HttpStatusCode.Created, padded.StatusCode);
+        Assert.Equal(["popular", "library"], Texts(await padded.Content.ReadFromJsonAsync<JsonElement>(), "homeRows"));
+    }
+
+    [Fact]
     public async Task Plex_label_defaults_to_the_profile_name()
     {
         using KidApiFactory factory = new();
