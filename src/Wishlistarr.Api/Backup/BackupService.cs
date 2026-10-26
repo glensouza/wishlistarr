@@ -99,6 +99,7 @@ public sealed class BackupService(
             throw new BackupRejectedException(BackupRejection.TooLarge);
         }
 
+        this.RejectWhileRestoreIsFinishing();
         string staging = Path.Combine(directory.Root, BackupNames.StagingPrefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         try
@@ -107,15 +108,16 @@ public sealed class BackupService(
             await CopyLimitedAsync(upload, zipPath, maxBytes, ct);
             string extracted = Path.Combine(staging, "extracted");
             Directory.CreateDirectory(extracted);
-            await BackupArchive.ExtractAsync(zipPath, extracted, maxBytes, ct);
+            await BackupArchive.ExtractAsync(zipPath, extracted, options.Value.MaxEntries, options.Value.MaxRestoreBytes, ct);
             File.Delete(zipPath);
             await this.ValidateDatabaseAsync(Path.Combine(extracted, BackupNames.DatabaseEntryName), ct);
             this.ValidateKeyDirectory(Path.Combine(extracted, "keys"));
-            await File.WriteAllTextAsync(Path.Combine(extracted, BackupNames.ReadyFileName), "ready", ct);
+            await File.WriteAllTextAsync(Path.Combine(extracted, BackupNames.ReadyFileName), Guid.NewGuid().ToString("N"), ct);
 
             await this.gate.WaitAsync(ct);
             try
             {
+                this.RejectWhileRestoreIsFinishing();
                 this.DiscardPendingRestore();
                 Directory.Move(extracted, directory.RestorePendingPath);
             }
@@ -127,6 +129,14 @@ public sealed class BackupService(
         finally
         {
             this.TryDeleteDirectory(staging);
+        }
+    }
+
+    private void RejectWhileRestoreIsFinishing()
+    {
+        if (File.Exists(directory.RestoreJournalPath))
+        {
+            throw new BackupRejectedException(BackupRejection.RestoreInProgress);
         }
     }
 
@@ -199,7 +209,9 @@ public sealed class BackupService(
         try
         {
             await SqliteSnapshot.VacuumIntoAsync(directory.DatabasePath, snapshot, ct);
+            this.EnsureRestorable(snapshot, keyFiles, zipSize: null);
             BackupArchive.Write(partial, snapshot, keyFiles);
+            this.EnsureRestorable(snapshot, keyFiles, new FileInfo(partial).Length);
             File.Move(partial, zipPath);
         }
         catch
@@ -226,11 +238,41 @@ public sealed class BackupService(
         return ToItem(new FileInfo(zipPath)) ?? throw new InvalidOperationException("The backup file could not be read.");
     }
 
+    // A backup the app writes must be one restore would accept, so the same limits are applied
+    // here. The older backups are left alone when this one is refused.
+    private void EnsureRestorable(string snapshot, string[] keyFiles, long? zipSize)
+    {
+        BackupOptions limits = options.Value;
+        long expanded = new FileInfo(snapshot).Length + keyFiles.Sum(file => new FileInfo(file).Length);
+        string? problem = null;
+        if (keyFiles.Length + 1 > limits.MaxEntries)
+        {
+            problem = $"it would hold {keyFiles.Length + 1} files and restore accepts at most {limits.MaxEntries} (Backups:MaxEntries)";
+        }
+        else if (expanded > limits.MaxRestoreBytes)
+        {
+            problem = $"its contents are {expanded} bytes and restore accepts at most {limits.MaxRestoreBytes} (Backups:MaxRestoreBytes)";
+        }
+        else if (zipSize > limits.MaxUploadBytes)
+        {
+            problem = $"the zip is {zipSize} bytes and restore accepts at most {limits.MaxUploadBytes} (Backups:MaxUploadBytes)";
+        }
+
+        if (problem is null)
+        {
+            return;
+        }
+
+        string message = $"The backup was not created because {problem}. Earlier backups were kept.";
+        logger.LogError("{Message}", message);
+        throw new InvalidOperationException(message);
+    }
+
     private async Task<bool> StagedIsValidAsync(string databasePath, string keysPath, CancellationToken ct)
     {
         try
         {
-            if (!File.Exists(databasePath) || new FileInfo(databasePath).Length > options.Value.MaxUploadBytes)
+            if (!File.Exists(databasePath) || new FileInfo(databasePath).Length > options.Value.MaxRestoreBytes)
             {
                 return false;
             }

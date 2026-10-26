@@ -7,11 +7,15 @@ namespace Wishlistarr.Api.Backup;
 internal enum RestoreStep
 {
     JournalWritten,
+    SidecarRetired,
     DatabaseRetired,
     KeysRetired,
     DatabasePlaced,
     KeysPlaced,
     Committed,
+    RollbackKeysRestored,
+    RollbackDatabaseRestored,
+    RollbackSidecarRestored,
 }
 
 internal enum RestorePhase
@@ -20,7 +24,7 @@ internal enum RestorePhase
     Committed,
 }
 
-internal sealed record RestoreJournal(RestorePhase Phase, bool HadDatabase, bool HadKeys);
+internal sealed record RestoreJournal(RestorePhase Phase, bool HadDatabase, bool HadKeys, string? PendingId = null);
 
 // The journal is written before anything moves and is the only record of which side of the swap
 // each file is on. Startup reads it to roll a half-done swap back, or to finish cleaning up after
@@ -59,7 +63,8 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
         RestoreJournal journal = new(
             RestorePhase.Swapping,
             File.Exists(directory.DatabasePath),
-            Directory.Exists(directory.KeysPath));
+            Directory.Exists(directory.KeysPath),
+            this.ReadPendingId());
         this.WriteJournal(journal);
         try
         {
@@ -67,7 +72,10 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
             Directory.CreateDirectory(directory.RestorePreviousPath);
             foreach (string suffix in DatabaseSuffixes)
             {
-                MoveFileIfExists(directory.DatabasePath + suffix, this.PreviousDatabase + suffix);
+                if (MoveFileIfExists(directory.DatabasePath + suffix, this.PreviousDatabase + suffix))
+                {
+                    this.Step(RestoreStep.SidecarRetired);
+                }
             }
 
             MoveFileIfExists(directory.DatabasePath, this.PreviousDatabase);
@@ -121,7 +129,7 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
         }
 
         this.Step(RestoreStep.Committed);
-        this.TryFinish();
+        this.TryFinish(journal);
     }
 
     public void Recover()
@@ -135,7 +143,7 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
 
         if (journal.Phase == RestorePhase.Committed)
         {
-            this.TryFinish();
+            this.TryFinish(journal);
         }
         else
         {
@@ -155,6 +163,7 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
             }
 
             Directory.Move(this.PreviousKeys, directory.KeysPath);
+            this.Step(RestoreStep.RollbackKeysRestored);
         }
         else if (!journal.HadKeys && Directory.Exists(directory.KeysPath))
         {
@@ -169,6 +178,7 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
             }
 
             File.Move(this.PreviousDatabase, directory.DatabasePath);
+            this.Step(RestoreStep.RollbackDatabaseRestored);
         }
         else if (!journal.HadDatabase && File.Exists(directory.DatabasePath))
         {
@@ -181,6 +191,7 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
             {
                 DeleteFileIfExists(directory.DatabasePath + suffix);
                 File.Move(this.PreviousDatabase + suffix, directory.DatabasePath + suffix);
+                this.Step(RestoreStep.RollbackSidecarRestored);
             }
         }
 
@@ -218,15 +229,20 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
     }
 
     // The restored data is already live here, so a cleanup failure must not stop startup. The
-    // journal stays until cleanup succeeds, and the next start tries again.
-    private void TryFinish()
+    // journal stays until cleanup succeeds, and the next start tries again. The pending folder is
+    // only removed while it still belongs to this swap, so a restore staged since is kept.
+    private void TryFinish(RestoreJournal journal)
     {
         try
         {
-            DeleteFileIfExists(Path.Combine(directory.RestorePendingPath, BackupNames.ReadyFileName));
-            if (Directory.Exists(directory.RestorePendingPath))
+            string? pendingId = this.ReadPendingId();
+            if (journal.PendingId is null || pendingId is null || pendingId == journal.PendingId)
             {
-                Directory.Delete(directory.RestorePendingPath, recursive: true);
+                DeleteFileIfExists(this.PendingReadyPath);
+                if (Directory.Exists(directory.RestorePendingPath))
+                {
+                    Directory.Delete(directory.RestorePendingPath, recursive: true);
+                }
             }
 
             if (Directory.Exists(directory.RestorePreviousPath))
@@ -243,6 +259,20 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
                 exception,
                 "The restore was applied, but {PreviousPath} could not be cleaned up. It holds the replaced data and is removed on the next start.",
                 directory.RestorePreviousPath);
+        }
+    }
+
+    private string PendingReadyPath => Path.Combine(directory.RestorePendingPath, BackupNames.ReadyFileName);
+
+    private string? ReadPendingId()
+    {
+        try
+        {
+            return File.Exists(this.PendingReadyPath) ? File.ReadAllText(this.PendingReadyPath).Trim() : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 
@@ -279,12 +309,15 @@ internal sealed class RestoreSwap(DataDirectory directory, ILogger logger, Actio
 
     private void Step(RestoreStep step) => afterStep?.Invoke(step);
 
-    private static void MoveFileIfExists(string source, string destination)
+    private static bool MoveFileIfExists(string source, string destination)
     {
-        if (File.Exists(source))
+        if (!File.Exists(source))
         {
-            File.Move(source, destination);
+            return false;
         }
+
+        File.Move(source, destination);
+        return true;
     }
 
     private static void DeleteFileIfExists(string path)

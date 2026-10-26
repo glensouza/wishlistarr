@@ -87,7 +87,7 @@ public static class BackupEndpoints
             }
             catch (BackupRejectedException rejected)
             {
-                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: rejected.Title);
+                return Results.Problem(statusCode: rejected.StatusCode, title: rejected.Title);
             }
         })
             .AddEndpointFilter((context, next) =>
@@ -103,7 +103,8 @@ public static class BackupEndpoints
             .WithName("RestoreBackup")
             .WithSummary("Checks a backup zip and stages it. The files are swapped in on the next start, and the current data is kept as a backup.")
             .Produces<RestoreAccepted>(StatusCodes.Status202Accepted)
-            .ProducesProblem(StatusCodes.Status400BadRequest);
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict);
     }
 }
 

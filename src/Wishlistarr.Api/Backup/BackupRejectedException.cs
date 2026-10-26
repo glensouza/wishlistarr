@@ -14,11 +14,16 @@ public enum BackupRejection
     IntegrityFailed,
     SchemaNewer,
     SchemaUnreadable,
+    RestoreInProgress,
 }
 
 public sealed class BackupRejectedException(BackupRejection rejection) : Exception
 {
     public BackupRejection Rejection { get; } = rejection;
+
+    public int StatusCode => this.Rejection == BackupRejection.RestoreInProgress
+        ? StatusCodes.Status409Conflict
+        : StatusCodes.Status400BadRequest;
 
     public string Title => this.Rejection switch
     {
@@ -34,6 +39,7 @@ public sealed class BackupRejectedException(BackupRejection rejection) : Excepti
         BackupRejection.IntegrityFailed => "The backup database failed its integrity check.",
         BackupRejection.SchemaNewer => "The backup was made by a newer version and cannot be restored.",
         BackupRejection.SchemaUnreadable => "The backup database schema could not be read.",
+        BackupRejection.RestoreInProgress => "An earlier restore is still being finished. Restart Wishlistarr and try again.",
         _ => "The backup was rejected.",
     };
 }

@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Backup;
@@ -20,7 +21,9 @@ public sealed class StandaloneBackups : IAsyncDisposable
 {
     private readonly ServiceProvider provider;
 
-    public StandaloneBackups(string path, int retention = BackupOptions.DefaultRetention, TimeProvider? time = null)
+    public StandaloneBackups(string path, int retention = BackupOptions.DefaultRetention, TimeProvider? time = null,
+        BackupOptions? options = null,
+        ILogger<BackupService>? logger = null)
     {
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { [DataDirectory.EnvironmentVariable] = path })
@@ -31,10 +34,10 @@ public sealed class StandaloneBackups : IAsyncDisposable
         this.provider = services.BuildServiceProvider();
         this.Service = new BackupService(
             this.Directory,
-            Options.Create(new BackupOptions { Retention = retention }),
+            Options.Create(options ?? new BackupOptions { Retention = retention }),
             this.provider.GetRequiredService<IServiceScopeFactory>(),
             time ?? TimeProvider.System,
-            NullLogger<BackupService>.Instance);
+            logger ?? NullLogger<BackupService>.Instance);
     }
 
     public DataDirectory Directory { get; }
@@ -199,6 +202,64 @@ public static class BackupTestSupport
         await command.ExecuteNonQueryAsync();
     }
 
+    public const string WalMarker = "only-in-the-wal";
+
+    public static readonly string[] SidecarSuffixes = ["-wal", "-shm", "-journal"];
+
+    // The marker row is committed to the write-ahead log and never checkpointed, so it can only be
+    // read back when the -wal file travels with the database file.
+    public static async Task AddWalSidecarsAsync(string dataPath)
+    {
+        string database = Path.Combine(dataPath, DataDirectory.DatabaseFileName);
+        string work = TempDirectory();
+        try
+        {
+            string workDatabase = Path.Combine(work, DataDirectory.DatabaseFileName);
+            File.Copy(database, workDatabase);
+            await using SqliteConnection connection = new($"Data Source={workDatabase};Pooling=False");
+            await connection.OpenAsync();
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText =
+                $"""
+                PRAGMA journal_mode=WAL;
+                PRAGMA wal_autocheckpoint=0;
+                CREATE TABLE wal_marker (value TEXT NOT NULL);
+                INSERT INTO wal_marker (value) VALUES ('{WalMarker}');
+                """;
+            await command.ExecuteNonQueryAsync();
+
+            foreach (string suffix in new[] { string.Empty, "-wal", "-shm" })
+            {
+                using FileStream source = new(workDatabase + suffix, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using FileStream target = File.Create(database + suffix);
+                source.CopyTo(target);
+            }
+
+            Assert.True(new FileInfo(database + "-wal").Length > 0);
+        }
+        finally
+        {
+            DeleteDirectory(work);
+        }
+    }
+
+    public static async Task<string?> ReadWalMarkerAsync(string dataPath)
+    {
+        string database = Path.Combine(dataPath, DataDirectory.DatabaseFileName);
+        await using SqliteConnection connection = new($"Data Source={database};Mode=ReadWrite;Pooling=False");
+        await connection.OpenAsync();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM wal_marker;";
+        try
+        {
+            return Convert.ToString(await command.ExecuteScalarAsync());
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
     public static async Task<string?> DecryptedSettingAsync(string dataPath, string key)
     {
         string keys = Path.Combine(dataPath, "keys");
@@ -272,5 +333,23 @@ public static class BackupTestSupport
 
         stream.Write(header);
         stream.Write(name);
+    }
+}
+
+public sealed class ListLogger<T> : ILogger<T>
+{
+    public List<string> Errors { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        if (logLevel >= LogLevel.Error)
+        {
+            this.Errors.Add(formatter(state, exception));
+        }
     }
 }

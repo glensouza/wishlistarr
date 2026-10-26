@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   downloadBackupPath,
   latestBackupRun,
@@ -27,6 +27,10 @@ export default function BackupsAdmin() {
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
   const [confirming, setConfirming] = useState<File | null>(null)
+  const restoreButton = useRef<HTMLButtonElement>(null)
+  const dialog = useRef<HTMLDivElement>(null)
+  const cancelButton = useRef<HTMLButtonElement>(null)
+  const returnFocus = useRef(false)
 
   useEffect(() => {
     let current = true
@@ -53,6 +57,45 @@ export default function BackupsAdmin() {
       current = false
     }
   }, [version, t])
+
+  useEffect(() => {
+    if (!confirming) return
+    cancelButton.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        returnFocus.current = true
+        setConfirming(null)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const buttons = Array.from(
+        dialog.current?.querySelectorAll<HTMLButtonElement>('button') ?? [],
+      )
+      if (buttons.length === 0) return
+      const first = buttons[0]
+      const last = buttons[buttons.length - 1]
+      const active = document.activeElement
+      if (!dialog.current?.contains(active)) {
+        event.preventDefault()
+        first.focus()
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [confirming])
+
+  useEffect(() => {
+    if (confirming || working || !returnFocus.current) return
+    returnFocus.current = false
+    restoreButton.current?.focus()
+  }, [confirming, working])
 
   async function backUpNow() {
     setError(null)
@@ -87,6 +130,7 @@ export default function BackupsAdmin() {
   }
 
   async function restore(file: File) {
+    returnFocus.current = true
     setConfirming(null)
     setError(null)
     setWorking(true)
@@ -136,17 +180,33 @@ export default function BackupsAdmin() {
           {t('backups.file')}
           <input name="backup" type="file" accept=".zip,application/zip" />
         </label>
-        <button type="submit" disabled={working || confirming !== null}>
+        <button
+          ref={restoreButton}
+          type="submit"
+          disabled={working || confirming !== null}
+        >
           {t('backups.restore')}
         </button>
       </form>
       {confirming && (
-        <div role="alertdialog" aria-label={t('backups.confirmTitle')}>
+        <div
+          ref={dialog}
+          role="alertdialog"
+          aria-modal="true"
+          aria-label={t('backups.confirmTitle')}
+        >
           <p>{t('backups.confirmQuestion', { name: confirming.name })}</p>
           <button type="button" onClick={() => void restore(confirming)}>
             {t('backups.confirmRestore')}
           </button>
-          <button type="button" onClick={() => setConfirming(null)}>
+          <button
+            ref={cancelButton}
+            type="button"
+            onClick={() => {
+              returnFocus.current = true
+              setConfirming(null)
+            }}
+          >
             {t('backups.cancelRestore')}
           </button>
         </div>

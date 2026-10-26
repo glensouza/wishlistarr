@@ -21,6 +21,8 @@ public sealed class RestoreTemplate : IAsyncLifetime
 
     public string Staged => Path.Combine(this.Root, "target");
 
+    public string StagedWithSidecars => Path.Combine(this.Root, "target-sidecars");
+
     public async Task InitializeAsync()
     {
         string source = Path.Combine(this.Root, "source");
@@ -38,6 +40,8 @@ public sealed class RestoreTemplate : IAsyncLifetime
         await using StandaloneBackups target = new(this.Staged);
         await using MemoryStream upload = new(zip);
         await target.Service.StageRestoreAsync(upload, zip.Length);
+        CopyDirectory(this.Staged, this.StagedWithSidecars);
+        await AddWalSidecarsAsync(this.StagedWithSidecars);
     }
 
     public Task DisposeAsync()
@@ -61,11 +65,19 @@ public sealed class RestoreTemplate : IAsyncLifetime
     }
 }
 
-public sealed class RestoreSwapTests(RestoreTemplate template) : IClassFixture<RestoreTemplate>, IDisposable
+public sealed partial class RestoreSwapTests(RestoreTemplate template) : IClassFixture<RestoreTemplate>, IDisposable
 {
     private readonly List<string> cases = [];
 
-    public static TheoryData<string> Steps => [.. Enum.GetNames<RestoreStep>()];
+    public static TheoryData<string> Steps =>
+    [
+        nameof(RestoreStep.JournalWritten),
+        nameof(RestoreStep.DatabaseRetired),
+        nameof(RestoreStep.KeysRetired),
+        nameof(RestoreStep.DatabasePlaced),
+        nameof(RestoreStep.KeysPlaced),
+        nameof(RestoreStep.Committed),
+    ];
 
     public void Dispose()
     {
@@ -239,7 +251,81 @@ public sealed class RestoreSwapTests(RestoreTemplate template) : IClassFixture<R
         Assert.Equal(RestoreTemplate.NewSecret, await DecryptedSettingAsync(path, RestoreTemplate.SettingKey));
     }
 
-    private static void AssertNoRestoreState(string path)
+    [Fact]
+    public async Task Cleanup_after_a_committed_restore_keeps_a_restore_staged_since()
+    {
+        string path = this.NewCase();
+        string crashed = this.Track(TempDirectory());
+        await using (StandaloneBackups backups = new(path))
+        {
+            backups.Service.AfterRestoreStep = step =>
+            {
+                if (step == RestoreStep.Committed)
+                {
+                    CopyDirectory(path, crashed);
+                    throw new OperationCanceledException("Simulated crash.");
+                }
+            };
+            await Assert.ThrowsAnyAsync<Exception>(() => backups.Service.ApplyPendingRestoreAsync());
+        }
+
+        string pending = Path.Combine(crashed, "restore-pending");
+        DeleteDirectory(pending);
+        CopyDirectory(Path.Combine(template.Staged, "restore-pending"), pending);
+        await File.WriteAllTextAsync(Path.Combine(pending, BackupNames.ReadyFileName), "a-newer-restore");
+
+        await using (StandaloneBackups recovering = new(crashed))
+        {
+            RestoreSwap swap = new(recovering.Directory, NullLogger.Instance, null);
+            swap.Recover();
+            Assert.False(swap.InProgress);
+            Assert.False(Directory.Exists(recovering.Directory.RestorePreviousPath));
+            Assert.True(recovering.Service.RestorePending);
+            Assert.True(File.Exists(Path.Combine(pending, BackupNames.DatabaseEntryName)));
+            Assert.True(Directory.Exists(Path.Combine(pending, "keys")));
+            Assert.Equal("a-newer-restore", await File.ReadAllTextAsync(Path.Combine(pending, BackupNames.ReadyFileName)));
+        }
+    }
+
+    [Fact]
+    public async Task Staging_a_restore_is_refused_while_a_restore_journal_exists()
+    {
+        string path = this.NewCase();
+        await File.WriteAllTextAsync(Path.Combine(path, "restore-journal.json"), "{}");
+        string pendingBefore = await File.ReadAllTextAsync(Path.Combine(path, "restore-pending", BackupNames.ReadyFileName));
+
+        await using (StandaloneBackups backups = new(path))
+        {
+            await using MemoryStream upload = new(Zip((BackupNames.DatabaseEntryName, [1, 2, 3])));
+            BackupRejectedException refused = await Assert.ThrowsAsync<BackupRejectedException>(
+                () => backups.Service.StageRestoreAsync(upload, upload.Length));
+            Assert.Equal(BackupRejection.RestoreInProgress, refused.Rejection);
+            Assert.Equal(409, refused.StatusCode);
+        }
+
+        Assert.Equal(pendingBefore, await File.ReadAllTextAsync(Path.Combine(path, "restore-pending", BackupNames.ReadyFileName)));
+        Assert.Empty(Directory.GetDirectories(path, "restore-staging-*"));
+    }
+
+    [Fact]
+    public async Task The_restore_endpoint_answers_409_while_a_restore_journal_exists()
+    {
+        string path = this.NewCase();
+        File.Delete(Path.Combine(path, "restore-pending", BackupNames.ReadyFileName));
+        await using OwnedDataApiFactory factory = new(path);
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+        await File.WriteAllTextAsync(Path.Combine(path, "restore-journal.json"), "{}");
+
+        ByteArrayContent file = new([1, 2, 3]);
+        using MultipartFormDataContent content = new() { { file, "file", "backup.zip" } };
+        HttpResponseMessage response = await client.PostAsync("/api/v1/backups/restore", content);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Contains("earlier restore", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        File.Delete(Path.Combine(path, "restore-journal.json"));
+    }
+
+    internal static void AssertNoRestoreState(string path)
     {
         Assert.False(File.Exists(Path.Combine(path, "restore-journal.json")));
         Assert.False(File.Exists(Path.Combine(path, "restore-journal.json.tmp")));
@@ -254,10 +340,10 @@ public sealed class RestoreSwapTests(RestoreTemplate template) : IClassFixture<R
         return await scope.ServiceProvider.GetRequiredService<SettingsStore>().GetAsync(key);
     }
 
-    private string NewCase()
+    private string NewCase(bool withSidecars = false)
     {
         string path = this.Track(TempDirectory());
-        CopyDirectory(template.Staged, path);
+        CopyDirectory(withSidecars ? template.StagedWithSidecars : template.Staged, path);
         return path;
     }
 

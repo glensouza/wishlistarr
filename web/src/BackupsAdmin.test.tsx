@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { resetAntiforgery } from './api'
 import BackupsAdmin from './BackupsAdmin'
@@ -152,4 +153,89 @@ it('uploads a confirmed restore with the cached antiforgery token and no json bo
   expect(restore?.body).toBeInstanceOf(FormData)
   expect(antiforgeryFetches).toBe(1)
   expect(await screen.findByText(/next time Wishlistarr starts/i)).toBeTruthy()
+})
+
+async function openDialog() {
+  render(<BackupsAdmin />)
+  await screen.findByRole('link', { name: 'Download' })
+  chooseBackup()
+  await screen.findByRole('alertdialog', { name: 'Confirm restore' })
+}
+
+it('moves focus to Cancel when the confirmation opens', async () => {
+  await openDialog()
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Cancel' }),
+  )
+})
+
+it('keeps Tab and Shift+Tab inside the confirmation', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+  const confirm = screen.getByRole('button', {
+    name: 'Replace all data on restart',
+  })
+  const cancel = screen.getByRole('button', { name: 'Cancel' })
+
+  await user.tab({ shift: true })
+  expect(document.activeElement).toBe(confirm)
+  await user.tab()
+  expect(document.activeElement).toBe(cancel)
+  await user.tab()
+  expect(document.activeElement).toBe(confirm)
+  await user.tab()
+  expect(document.activeElement).toBe(cancel)
+})
+
+it('pulls focus back into the confirmation when Tab is pressed outside it', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+  screen.getByRole('link', { name: 'Download' }).focus()
+
+  await user.tab()
+
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Replace all data on restart' }),
+  )
+})
+
+it('closes the confirmation with Escape, uploads nothing and returns focus to the restore button', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+
+  await user.keyboard('{Escape}')
+
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+  expect(calls.some((call) => call.path === '/api/v1/backups/restore')).toBe(
+    false,
+  )
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Restore on next restart' }),
+  )
+})
+
+it('returns focus to the restore button when the confirmation is cancelled', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Restore on next restart' }),
+  )
+})
+
+it('returns focus to the restore button after a confirmed restore finishes', async () => {
+  const user = userEvent.setup()
+  await openDialog()
+
+  await user.click(
+    screen.getByRole('button', { name: 'Replace all data on restart' }),
+  )
+
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Restore on next restart' }),
+    ),
+  )
 })

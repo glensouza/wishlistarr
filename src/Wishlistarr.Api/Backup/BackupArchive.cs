@@ -4,8 +4,6 @@ namespace Wishlistarr.Api.Backup;
 
 public static class BackupArchive
 {
-    public const int MaxEntries = 64;
-
     private const int UnixFileTypeMask = 0xF000;
 
     private const int UnixRegularFile = 0x8000;
@@ -34,7 +32,7 @@ public static class BackupArchive
         Verify(zipPath, databasePath, keyFiles);
     }
 
-    public static async Task ExtractAsync(string zipPath, string destination, long maxBytes, CancellationToken ct)
+    public static async Task ExtractAsync(string zipPath, string destination, int maxEntries, long maxBytes, CancellationToken ct)
     {
         ZipArchive archive;
         try
@@ -52,7 +50,7 @@ public static class BackupArchive
 
         using (archive)
         {
-            RejectEntries(archive, maxBytes);
+            RejectEntries(archive, maxEntries, maxBytes);
             long total = 0;
             foreach (ZipArchiveEntry entry in archive.Entries)
             {
@@ -84,7 +82,7 @@ public static class BackupArchive
         }
     }
 
-    private static void Verify(string zipPath, string databasePath, IReadOnlyList<string> keyFiles)
+    internal static void Verify(string zipPath, string databasePath, IReadOnlyList<string> keyFiles)
     {
         Dictionary<string, long> expected = new(StringComparer.Ordinal)
         {
@@ -101,16 +99,35 @@ public static class BackupArchive
         {
             throw new InvalidDataException("The backup zip did not read back as written.");
         }
+
+        byte[] buffer = new byte[81920];
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            using Stream stream = entry.Open();
+            long length = 0;
+            uint crc = 0;
+            int read;
+            while ((read = stream.Read(buffer)) > 0)
+            {
+                length += read;
+                crc = ZipCrc32.Append(crc, buffer.AsSpan(0, read));
+            }
+
+            if (length != entry.Length || crc != entry.Crc32)
+            {
+                throw new InvalidDataException("The backup zip did not read back as written.");
+            }
+        }
     }
 
-    private static void RejectEntries(ZipArchive archive, long maxBytes)
+    private static void RejectEntries(ZipArchive archive, int maxEntries, long maxBytes)
     {
         if (archive.Entries.Count == 0)
         {
             throw new BackupRejectedException(BackupRejection.NotAZip);
         }
 
-        if (archive.Entries.Count > MaxEntries)
+        if (archive.Entries.Count > maxEntries)
         {
             throw new BackupRejectedException(BackupRejection.TooManyEntries);
         }
@@ -219,6 +236,19 @@ public static class BackupArchive
     private static async Task<long> CopyEntryAsync(ZipArchiveEntry entry, string target, long remaining, CancellationToken ct)
     {
         await using Stream input = entry.Open();
+        return await CopyLimitedAsync(input, target, entry.Length, entry.Crc32, remaining, ct);
+    }
+
+    // The byte budget is checked before the declared length, so an entry that streams past the
+    // total cap is reported as too large however small its header claims to be.
+    internal static async Task<long> CopyLimitedAsync(
+        Stream input,
+        string target,
+        long declaredLength,
+        uint declaredCrc,
+        long remaining,
+        CancellationToken ct)
+    {
         await using FileStream output = new(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         byte[] buffer = new byte[81920];
         long written = 0;
@@ -232,21 +262,21 @@ public static class BackupArchive
             }
 
             written += read;
-            if (written > entry.Length)
-            {
-                throw new BackupRejectedException(BackupRejection.NotAZip);
-            }
-
             if (written > remaining)
             {
                 throw new BackupRejectedException(BackupRejection.TooLarge);
+            }
+
+            if (written > declaredLength)
+            {
+                throw new BackupRejectedException(BackupRejection.NotAZip);
             }
 
             crc = ZipCrc32.Append(crc, buffer.AsSpan(0, read));
             await output.WriteAsync(buffer.AsMemory(0, read), ct);
         }
 
-        if (written != entry.Length || crc != entry.Crc32)
+        if (written != declaredLength || crc != declaredCrc)
         {
             throw new BackupRejectedException(BackupRejection.NotAZip);
         }
