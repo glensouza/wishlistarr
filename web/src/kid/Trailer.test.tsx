@@ -180,6 +180,26 @@ it('only prevents Escape when it closes the trailer', async () => {
   expect(document.querySelector('iframe')).toBeNull()
 })
 
+it('shows a tap hint when autoplay is blocked and keeps the player', async () => {
+  const user = userEvent.setup()
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await startPlaying(user)
+  expect(screen.queryByRole('status')).toBeNull()
+
+  act(() => {
+    FakePlayer.last?.options.events.onAutoplayBlocked()
+  })
+
+  expect(screen.getByRole('status').textContent).toBe(
+    'Tap play to start the trailer.',
+  )
+  expect(document.querySelector('iframe')).toBeTruthy()
+
+  await user.click(screen.getByRole('button', { name: 'Close trailer' }))
+
+  expect(screen.queryByRole('status')).toBeNull()
+})
+
 it('removes the player when playback fails', async () => {
   const user = userEvent.setup()
   render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)

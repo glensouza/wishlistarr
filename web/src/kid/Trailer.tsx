@@ -30,6 +30,7 @@ type PlayerOptions = {
     onReady: (event: { target: YoutubePlayer }) => void
     onStateChange: (event: YoutubeEvent) => void
     onError: (event: YoutubeEvent) => void
+    onAutoplayBlocked: () => void
   }
 }
 
@@ -77,6 +78,7 @@ export default function Trailer({
   const wasPlaying = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [blocked, setBlocked] = useState(false)
   const canPlay = isYoutubeId(videoId)
 
   const stop = useCallback(() => {
@@ -85,6 +87,7 @@ export default function Trailer({
     playerRef.current = null
     player?.destroy()
     stageRef.current?.replaceChildren()
+    setBlocked(false)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = null
     const pending = readyRef.current
@@ -147,6 +150,9 @@ export default function Trailer({
         },
         onStateChange: (event) => {
           if (event.data === playerEnded) close()
+        },
+        onAutoplayBlocked: () => {
+          if (generation.current === ticket) setBlocked(true)
         },
         onError: () => {
           close()
@@ -234,6 +240,7 @@ export default function Trailer({
           </button>
         )}
       </div>
+      {blocked && <p role="status">{t('details.trailerTapPlay')}</p>}
       {failed && <p role="alert">{t('details.trailerFailed')}</p>}
     </>
   )

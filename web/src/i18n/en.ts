@@ -180,6 +180,7 @@ export const en = {
   'details.playTrailer': 'Play trailer',
   'details.closeTrailer': 'Close trailer',
   'details.trailerFailed': 'The trailer could not be played.',
+  'details.trailerTapPlay': 'Tap play to start the trailer.',
   'details.trailerFrame': 'Trailer',
   'details.cast': 'Cast',
   'details.seasons': 'Seasons',
