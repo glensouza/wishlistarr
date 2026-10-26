@@ -54,7 +54,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 return [.. item.Labels, owned?.Label ?? label];
             },
             item => item.Labels.Contains(label, LabelComparer),
-            (item, token) => this.RecordAsync(item, label, kidProfileId, source, token),
+            item => this.ReserveAsync(item, label, kidProfileId, source),
+            (_, _) => Task.CompletedTask,
             LabelWriteOutcome.Added,
             LabelWriteOutcome.AlreadyPresent,
             ct);
@@ -73,6 +74,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                     : null;
             },
             item => !item.Labels.Contains(label, LabelComparer),
+            _ => Task.FromResult<Func<Task>>(() => Task.CompletedTask),
             (item, token) => this.ForgetAsync(item, label, token),
             LabelWriteOutcome.Removed,
             LabelWriteOutcome.NotPresent,
@@ -95,6 +97,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         string itemId,
         Func<MediaItemLabels, CancellationToken, Task<IReadOnlyList<string>?>> plan,
         Func<MediaItemLabels, bool> verify,
+        Func<MediaItemLabels, Task<Func<Task>>> reserve,
         Func<MediaItemLabels, CancellationToken, Task> record,
         LabelWriteOutcome changed,
         LabelWriteOutcome unchanged,
@@ -112,6 +115,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         }
 
         using IDisposable held = await locks.AcquireAsync($"{target.ServerId}/{target.Id}", ct);
+        Func<Task>? release = null;
         for (int attempt = 0; attempt < MaxAttempts; attempt++)
         {
             MediaItemLabels? current = await server.GetLabelsAsync(target.Id, ct);
@@ -132,13 +136,29 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 continue;
             }
 
-            await server.SetLabelsAsync(current, labels, ct);
+            // The ledger row is saved before Plex is touched, so a deadline that fires after Plex took the change cannot leave a label with no owner.
+            release ??= await reserve(current);
+            try
+            {
+                await server.SetLabelsAsync(current, labels, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await release();
+                throw;
+            }
+
             MediaItemLabels? written = await server.GetLabelsAsync(target.Id, ct);
             if (written is not null && written.Locked && verify(written))
             {
                 await record(written, ct);
                 return new LabelWriteResult(changed, written);
             }
+        }
+
+        if (release is not null)
+        {
+            await release();
         }
 
         throw new MediaServerException("Plex did not keep the label change.");
@@ -149,9 +169,10 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             owned => owned.ServerId == item.ServerId && owned.Guid == item.Guid && owned.Label == label,
             ct);
 
-    private async Task RecordAsync(MediaItemLabels item, string label, int kidProfileId, string source, CancellationToken ct)
+    private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source)
     {
-        OwnedLabel? owned = await this.FindOwnedAsync(item, label, ct);
+        OwnedLabel? owned = await this.FindOwnedAsync(item, label, CancellationToken.None);
+        bool created = owned is null;
         if (owned is null)
         {
             owned = new OwnedLabel
@@ -169,7 +190,15 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         owned.KidProfileId = kidProfileId;
         owned.Source = source;
         owned.AppliedAt = time.GetUtcNow();
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(CancellationToken.None);
+        return async () =>
+        {
+            if (created)
+            {
+                db.OwnedLabels.Remove(owned);
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+        };
     }
 
     private async Task ForgetAsync(MediaItemLabels item, string label, CancellationToken ct)

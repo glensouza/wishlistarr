@@ -22,11 +22,12 @@ public sealed partial class RequestLabeling(
         RequestActor actor)
     {
         // The request is already stored as available, so the caller going away does not stop labeling, but the deadline does.
-        using CancellationTokenSource deadline = new(options.Value.LabelTimeout, time);
-        CancellationToken ct = deadline.Token;
+        CancellationTokenSource? deadline = null;
         string? failure = null;
         try
         {
+            deadline = new(options.Value.LabelTimeout, time);
+            CancellationToken ct = deadline.Token;
             int labeled = 0;
             foreach (MediaItem match in matches)
             {
@@ -45,9 +46,13 @@ public sealed partial class RequestLabeling(
         catch (Exception ex)
         {
             this.LogLabelFailed(ex, requestId);
-            failure = deadline.IsCancellationRequested
+            failure = deadline?.IsCancellationRequested == true
                 ? "Plex did not answer in time."
                 : "The Plex label could not be written.";
+        }
+        finally
+        {
+            deadline?.Dispose();
         }
 
         return await requests.TransitionAsync(
