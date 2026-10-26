@@ -53,6 +53,31 @@ public sealed class AutoApproveRuleTests
         Assert.Equal(expected, rule.AppliesTo(Allowed(rating), MediaKind.Movie, rating));
     }
 
+    [Theory]
+    [InlineData(MediaKind.Movie)]
+    [InlineData(MediaKind.Show)]
+    public void A_ceiling_with_the_switch_off_approves_exactly_the_levels_at_or_below_it(MediaKind kind)
+    {
+        foreach (RatingLevel ceiling in Enum.GetValues<RatingLevel>())
+        {
+            AutoApproveRule rule = kind == MediaKind.Movie ? new(false, ceiling, null) : new(false, null, ceiling);
+            foreach (RatingLevel rating in Enum.GetValues<RatingLevel>())
+            {
+                Assert.Equal(rating <= ceiling, rule.AppliesTo(Allowed(rating), kind, rating));
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(MediaKind.Movie)]
+    [InlineData(MediaKind.Show)]
+    public void The_switch_alone_approves_every_rated_level(MediaKind kind)
+    {
+        AutoApproveRule rule = new(true, null, null);
+
+        Assert.All(Enum.GetValues<RatingLevel>(), rating => Assert.True(rule.AppliesTo(Allowed(rating), kind, rating)));
+    }
+
     [Fact]
     public void Movie_and_tv_ceilings_are_independent_with_the_switch_on()
     {

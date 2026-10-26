@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Requests;
@@ -836,6 +838,40 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
+    public async Task A_timed_out_write_that_never_reached_Plex_is_offered_for_revoke_and_revoking_clears_its_row()
+    {
+        using DeadlineFactory factory = new(MatrixIndex(), TimeSpan.FromMilliseconds(300));
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        TaskCompletionSource hang = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Plex.Delay = request => request.Method == "PUT" ? hang.Task : Task.CompletedTask;
+
+        try
+        {
+            int id = await AskAsync(kid, 603);
+            Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+            Assert.Single(await factory.GetLedgerAsync());
+            Assert.Empty(factory.Plex.Item("101").Labels);
+            int writes = factory.LabelWrites;
+
+            JsonElement listed = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests?state=failed");
+            JsonElement revoked = await RevokeAsync(parent, new { ids = new[] { id } });
+
+            Assert.True(Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("canRevoke").GetBoolean());
+            Assert.Equal("succeeded", Item(revoked, id).GetProperty("status").GetString());
+            Assert.False(Item(revoked, id).GetProperty("labelNotOwned").GetBoolean());
+            Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
+            Assert.Empty(await factory.GetLedgerAsync());
+            Assert.Equal(writes, factory.LabelWrites);
+        }
+        finally
+        {
+            hang.SetException(new InvalidOperationException("dropped"));
+        }
+    }
+
+    [Fact]
     public async Task A_failed_request_without_labels_is_not_offered_for_revoke()
     {
         using KidRequestApiFactory factory = new(TwoCopyIndex());
@@ -1000,6 +1036,15 @@ public sealed class RequestAccessTests
         FakeLibraryIndex index = new();
         index.Add(MediaKind.Movie, 129, new MediaItem("102", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 2001, MediaKind.Movie, "1", []));
         return index;
+    }
+
+    private sealed class DeadlineFactory(FakeLibraryIndex index, TimeSpan labelTimeout) : KidRequestApiFactory(index)
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureTestServices(services => services.Configure<ApprovalOptions>(options => options.LabelTimeout = labelTimeout));
+        }
     }
 
     private static void AssertNotRevoked(JsonElement body, int id, List<MediaRequest> requests, List<MediaRequestEvent> history)

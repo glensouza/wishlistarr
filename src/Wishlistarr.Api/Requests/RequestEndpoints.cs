@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
@@ -42,7 +43,9 @@ public static class RequestEndpoints
                     (request, profile) => new ListedRequest { Request = request, KidName = profile.Name });
             int total;
             List<ListedRequest> listed;
-            await using (await db.Database.BeginTransactionAsync(ct))
+            await db.Database.OpenConnectionAsync(ct);
+            await using (SqliteTransaction snapshot = ((SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: true))
+            await using (await db.Database.UseTransactionAsync(snapshot, ct))
             {
                 total = await matching.CountAsync(ct);
                 listed = await matching

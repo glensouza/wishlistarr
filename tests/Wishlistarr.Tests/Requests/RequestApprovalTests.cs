@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Requests;
@@ -390,7 +391,7 @@ public sealed class RequestApprovalTests
             Assert.Equal("failed", Item(body, id).GetProperty("status").GetString());
             Assert.Equal("failed", Item(body, id).GetProperty("state").GetString());
             Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
-            Assert.Empty(await factory.GetLedgerAsync());
+            Assert.Single(await factory.GetLedgerAsync());
             MediaRequestEvent last = (await factory.GetHistoryAsync(id))[^1];
             Assert.Equal(RequestState.Available, last.FromState);
             Assert.Equal("Plex did not answer in time.", last.Reason);
@@ -767,6 +768,45 @@ public sealed class RequestApprovalTests
 
         Assert.Equal(1, page.GetProperty("total").GetInt32());
         Assert.Equal([kept], page.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetInt32()));
+    }
+
+    [Fact]
+    public async Task The_parent_list_does_not_wait_for_a_writer()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskAsync(kid, 700);
+        string connectionString;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            connectionString = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Database.GetConnectionString()!;
+        }
+
+        await using SqliteConnection writer = new(connectionString);
+        await writer.OpenAsync();
+        await using SqliteTransaction held = (SqliteTransaction)await writer.BeginTransactionAsync();
+        await using SqliteCommand update = writer.CreateCommand();
+        update.Transaction = held;
+        update.CommandText = "UPDATE MediaRequests SET RequestCount = RequestCount + 1";
+        await update.ExecuteNonQueryAsync();
+
+        using CancellationTokenSource limit = new(TimeSpan.FromSeconds(3));
+        JsonElement page = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests", limit.Token);
+
+        Assert.Equal([id], page.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("id").GetInt32()));
+        await held.RollbackAsync();
+    }
+
+    [Fact]
+    public void Approval_timeouts_are_bounded()
+    {
+        Assert.True(new ApprovalOptions().IsValid());
+        Assert.True(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(10), BulkTimeout = TimeSpan.FromHours(24), StuckAfter = TimeSpan.FromMinutes(20) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromMinutes(10) + TimeSpan.FromTicks(1), BulkTimeout = TimeSpan.FromHours(1) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.FromDays(60), BulkTimeout = TimeSpan.FromDays(61) }.IsValid());
+        Assert.False(new ApprovalOptions { BulkTimeout = TimeSpan.FromHours(24) + TimeSpan.FromTicks(1) }.IsValid());
+        Assert.False(new ApprovalOptions { LabelTimeout = TimeSpan.Zero }.IsValid());
     }
 
     private static FakeLibraryIndex LibraryWithSpiritedAway()

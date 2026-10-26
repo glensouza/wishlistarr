@@ -366,3 +366,16 @@ it('round-trips auto-approve rules when a profile is saved', async () => {
     autoApproveTvRating: 'children',
   })
 })
+
+it('explains that a ceiling approves on its own and the switch alone approves any rated title', async () => {
+  profiles = [ada]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(
+    screen.getByText(/ceiling alone approves titles at or below it/),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(/switch alone, with no ceiling, approves any allowed/),
+  ).toBeTruthy()
+})
