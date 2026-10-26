@@ -872,6 +872,53 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
+    public async Task The_parent_list_checks_every_failed_request_with_one_index_call_and_no_Plex_call()
+    {
+        FakeLibraryIndex index = TwoCopyIndex();
+        using KidRequestApiFactory factory = new(index);
+        await factory.LinkPlexAsync();
+        (HttpClient ada, _) = await factory.SignInKidAsync();
+        (HttpClient ben, _) = await factory.SignInKidAsync("Ben");
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int stranded = await AskWithStrandedLabelAsync(factory, ada);
+        factory.Plex.Delay = request => request.Method == "PUT" ? throw new InvalidOperationException("refused") : Task.CompletedTask;
+        int clean = await AskAsync(ben, 603);
+        factory.Plex.Delay = null;
+        int lookups = index.Calls;
+        int plexCalls = factory.Plex.Requests.Count;
+
+        JsonElement listed = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests?state=failed");
+        JsonElement[] items = [.. listed.GetProperty("items").EnumerateArray()];
+
+        Assert.Equal(2, items.Length);
+        Assert.True(items.Single(item => item.GetProperty("id").GetInt32() == stranded).GetProperty("canRevoke").GetBoolean());
+        Assert.False(items.Single(item => item.GetProperty("id").GetInt32() == clean).GetProperty("canRevoke").GetBoolean());
+        Assert.Equal(1, index.GuidCalls);
+        Assert.Equal(lookups, index.Calls);
+        Assert.Equal(plexCalls, factory.Plex.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_failed_request_is_not_offered_for_revoke_before_the_index_can_answer()
+    {
+        FakeLibraryIndex index = TwoCopyIndex();
+        using KidRequestApiFactory factory = new(index);
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskWithStrandedLabelAsync(factory, kid);
+        index.Ready = false;
+        int plexCalls = factory.Plex.Requests.Count;
+
+        JsonElement listed = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests?state=failed");
+
+        JsonElement item = Assert.Single(listed.GetProperty("items").EnumerateArray());
+        Assert.Equal(id, item.GetProperty("id").GetInt32());
+        Assert.False(item.GetProperty("canRevoke").GetBoolean());
+        Assert.Equal(plexCalls, factory.Plex.Requests.Count);
+    }
+
+    [Fact]
     public async Task A_failed_request_without_labels_is_not_offered_for_revoke()
     {
         using KidRequestApiFactory factory = new(TwoCopyIndex());

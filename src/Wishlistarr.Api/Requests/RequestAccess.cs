@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Content;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
@@ -161,20 +162,13 @@ public sealed partial class RequestAccess(
 
     public async Task<IReadOnlySet<int>> RevocableAsync(IReadOnlyList<MediaRequest> rows, CancellationToken ct = default)
     {
-        HashSet<int> revocable = [];
-        foreach (MediaRequest request in rows)
+        HashSet<int> revocable = [.. rows
+            .Where(request => request.State == RequestState.Labeled || (request.State == RequestState.Available && this.IsStuck(request)))
+            .Select(request => request.Id)];
+        List<MediaRequest> failed = [.. rows.Where(request => request.State == RequestState.Failed)];
+        if (failed.Count > 0)
         {
-            bool allowed = request.State switch
-            {
-                RequestState.Labeled => true,
-                RequestState.Available => this.IsStuck(request),
-                RequestState.Failed => await this.HasAppLabelsAsync(request, ct),
-                _ => false,
-            };
-            if (allowed)
-            {
-                revocable.Add(request.Id);
-            }
+            revocable.UnionWith(await this.FailedWithAppLabelsAsync(failed, ct));
         }
 
         return revocable;
@@ -414,22 +408,30 @@ public sealed partial class RequestAccess(
             : new GrantItem(GrantStatus.Unavailable, labeled.Result.Request ?? moved);
     }
 
-    private async Task<bool> HasAppLabelsAsync(MediaRequest request, CancellationToken ct)
+    // Before the index can answer, no failed request is offered: the list would otherwise wait on Plex once per row.
+    private async Task<IEnumerable<int>> FailedWithAppLabelsAsync(IReadOnlyList<MediaRequest> failed, CancellationToken ct)
     {
-        IReadOnlyList<MediaItem> items;
-        try
+        IndexedGuids? indexed = await library.FindIndexedGuidsAsync(
+            [.. failed.Select(request => new TitleKey(request.Kind, request.TmdbId)).Distinct()],
+            ct);
+        if (indexed is null || indexed.Guids.Count == 0)
         {
-            items = await library.FindAsync(new TitleKey(request.Kind, request.TmdbId), ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is MediaServerException or HttpRequestException or TaskCanceledException)
-        {
-            this.LogLabelCheckFailed(ex, request.Id);
-            return false;
+            return [];
         }
 
-        string[] guids = [.. items.Select(item => item.Guid).Where(guid => !string.IsNullOrEmpty(guid))];
-        return guids.Length > 0
-            && await db.OwnedLabels.AsNoTracking().AnyAsync(owned => owned.KidProfileId == request.KidProfileId && guids.Contains(owned.Guid), ct);
+        string serverId = indexed.ServerId;
+        string[] guids = [.. indexed.Guids.Values.SelectMany(list => list).Distinct(StringComparer.Ordinal)];
+        int[] profiles = [.. failed.Select(request => request.KidProfileId).Distinct()];
+        var owned = await db.OwnedLabels.AsNoTracking()
+            .Where(row => row.ServerId == serverId && profiles.Contains(row.KidProfileId) && guids.Contains(row.Guid))
+            .Select(row => new { row.KidProfileId, row.Guid })
+            .Distinct()
+            .ToListAsync(ct);
+        HashSet<(int, string)> held = [.. owned.Select(row => (row.KidProfileId, row.Guid))];
+        return failed
+            .Where(request => indexed.Guids.TryGetValue(new TitleKey(request.Kind, request.TmdbId), out IReadOnlyList<string>? copies)
+                && copies.Any(guid => held.Contains((request.KidProfileId, guid))))
+            .Select(request => request.Id);
     }
 
     private async Task<HashSet<string>> LabelsOfOtherProfilesAsync(int profileId, CancellationToken ct)
@@ -479,9 +481,6 @@ public sealed partial class RequestAccess(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for a grant preview of {Kind} {TmdbId} failed")]
     private partial void LogPreviewLookupFailed(Exception ex, MediaKind kind, int tmdbId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for the labels of request {RequestId} failed")]
-    private partial void LogLabelCheckFailed(Exception ex, int requestId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Revoke for request {RequestId} failed before the request was marked revoked")]
     private partial void LogRevokeFailed(Exception ex, int requestId);

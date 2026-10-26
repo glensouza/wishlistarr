@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -77,6 +78,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
     public Func<Task>? Gate { get; set; }
 
+    public int GuidCalls { get; private set; }
+
     public void Add(MediaKind kind, int tmdbId, MediaItem item)
     {
         ExternalId id = new(ExternalIdSource.Tmdb, tmdbId.ToString(CultureInfo.InvariantCulture));
@@ -105,6 +108,27 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         }
 
         return this.items.TryGetValue((kind, id), out List<MediaItem>? list) ? list : [];
+    }
+
+    public Task<IndexedGuids?> FindGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        this.GuidCalls++;
+        if (!this.Ready)
+        {
+            return Task.FromResult<IndexedGuids?>(null);
+        }
+
+        Dictionary<TitleKey, IReadOnlyList<string>> guids = [];
+        foreach (TitleKey title in titles)
+        {
+            ExternalId id = new(ExternalIdSource.Tmdb, title.TmdbId.ToString(CultureInfo.InvariantCulture));
+            if (this.items.TryGetValue((title.Kind, id), out List<MediaItem>? list) && list.Count > 0)
+            {
+                guids[title] = [.. list.Select(item => item.Guid)];
+            }
+        }
+
+        return Task.FromResult<IndexedGuids?>(new IndexedGuids(FakePlexServer.MachineIdentifier, guids));
     }
 }
 
