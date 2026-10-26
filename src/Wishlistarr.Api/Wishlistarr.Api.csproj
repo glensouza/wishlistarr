@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Wishlistarr.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Wishlistarr.Core\Wishlistarr.Core.csproj" />
     <ProjectReference Include="..\Wishlistarr.Data\Wishlistarr.Data.csproj" />
     <ProjectReference Include="..\Wishlistarr.Integrations\Wishlistarr.Integrations.csproj" />

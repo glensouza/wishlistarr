@@ -14,14 +14,19 @@ public static class ObservabilityEndpoints
 
     public static void MapObservability(this RouteGroupBuilder v1)
     {
-        v1.MapGet("/system/health", (HealthReport health, CancellationToken ct) => health.CheckAsync(ct))
+        v1.MapGet("/system/health", async (HttpContext context, HealthReport health, CancellationToken ct) =>
+        {
+            NoStore(context);
+            return Results.Ok(await health.CheckAsync(ct));
+        })
             .WithTags("System")
             .WithName("GetIntegrationHealth")
             .WithSummary("Runs one health check per integration. Each check has a status, a short message and a fix hint.")
             .Produces<IReadOnlyList<HealthCheckResult>>();
 
-        v1.MapGet("/system/logs", (string? level, LogBuffer logs) =>
+        v1.MapGet("/system/logs", (HttpContext context, string? level, LogBuffer logs) =>
         {
+            NoStore(context);
             if (!LogBuffer.TryParseLevel(level, out LogBufferLevel? minimum))
             {
                 return LevelProblem();
@@ -35,14 +40,15 @@ public static class ObservabilityEndpoints
             .Produces<IReadOnlyList<LogEntry>>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
-        v1.MapGet("/system/logs/download", (string? level, LogBuffer logs) =>
+        v1.MapGet("/system/logs/download", (HttpContext context, string? level, LogBuffer logs, CancellationToken ct) =>
         {
+            NoStore(context);
             if (!LogBuffer.TryParseLevel(level, out LogBufferLevel? minimum))
             {
                 return LevelProblem();
             }
 
-            return Results.Stream(stream => logs.WriteDownloadAsync(stream, minimum), "text/plain", "wishlistarr.log");
+            return Results.Stream(stream => logs.WriteDownloadAsync(stream, minimum, ct), "text/plain", "wishlistarr.log");
         })
             .WithTags("System")
             .WithName("DownloadLogs")
@@ -50,6 +56,9 @@ public static class ObservabilityEndpoints
             .Produces(StatusCodes.Status200OK, contentType: "text/plain")
             .ProducesProblem(StatusCodes.Status400BadRequest);
     }
+
+    private static void NoStore(HttpContext context) =>
+        context.Response.Headers.CacheControl = "private, no-store";
 
     private static IResult LevelProblem() =>
         Results.Problem(

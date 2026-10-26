@@ -80,6 +80,22 @@ public sealed class HealthReportTests
     }
 
     [Fact]
+    public async Task A_check_that_ignores_cancellation_still_ends_the_report_at_the_timeout()
+    {
+        using Harness harness = new(timeout: TimeSpan.FromMilliseconds(100));
+        harness.Checks[3].HangIgnoringToken = true;
+
+        Task<IReadOnlyList<HealthCheckResult>> call = harness.Report.CheckAsync();
+        IReadOnlyList<HealthCheckResult> results = await call.WaitAsync(TimeSpan.FromSeconds(10));
+        IReadOnlyList<HealthCheckResult> again = await harness.Report.CheckAsync();
+
+        Assert.Equal(HealthCheckStatus.Error, results[3].Status);
+        Assert.Equal("sonarr name did not answer in time.", results[3].Message);
+        Assert.Equal(HealthCheckStatus.Ok, results[0].Status);
+        Assert.Same(results, again);
+    }
+
+    [Fact]
     public async Task A_check_that_throws_is_an_error_without_the_exception_detail()
     {
         using Harness harness = new();
@@ -129,6 +145,8 @@ public sealed class HealthReportTests
 
         public bool Hang { get; set; }
 
+        public bool HangIgnoringToken { get; set; }
+
         public Task? Gate { get; init; }
 
         public async Task<HealthCheckResult> CheckAsync(IServiceProvider services, CancellationToken ct)
@@ -138,6 +156,11 @@ public sealed class HealthReportTests
             if (this.Gate is not null)
             {
                 await this.Gate;
+            }
+
+            if (this.HangIgnoringToken)
+            {
+                await new TaskCompletionSource().Task;
             }
 
             if (this.Hang)

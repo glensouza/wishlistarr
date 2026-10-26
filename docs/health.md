@@ -30,23 +30,27 @@ Wishlistarr keeps a bounded in-memory ring of recent log lines and also writes t
 
 Redaction happens in two places. A Serilog enricher masks event properties before any sink sees the event, so the ring, the console and the daily file all receive the masked values. The ring then redacts again on a copy of the event, so it does not depend on the enricher and never changes the event that later sinks receive. An exception's message is redacted in the ring. The daily log file still stores the exception object Serilog captured, so that text can remain in the file.
 
-A property is masked as `***` when its name, ignoring case, contains `token`, `key`, `password`, `secret`, `cookie`, `authorization` or `auth`, or ends with `pin`. So `PlexToken`, `AuthToken`, `KidPin`, `ApiKeyHeader` and `Cookie` are masked. Structures, sequences and dictionaries are walked recursively, and a dictionary entry is masked by its key. Values that are not strings, such as a `Uri`, are rendered and redacted as text before they are stored. The text redaction covers:
+A property is masked as `***` when its name, ignoring case, contains `token`, `secret`, `password`, `cookie`, `authorization` or `oauth`, has `key`, `auth` or `pin` as a word (split on case changes and separators), or ends with `pin`. So `PlexToken`, `AuthToken`, `KidPin`, `ApiKeyHeader` and `Cookie` are masked. `CancellationToken` and `CacheKey` are kept, and so are `Keyword`, `Author` and `Monkey`, because `key` and `auth` only count as whole words. Structures, sequences and dictionaries are walked recursively, and a dictionary entry is masked by its key. Values that are not strings, such as a `Uri`, are rendered and redacted as text before they are stored. The text redaction covers:
 
-- JSON fields whose name matches the same rule, for example `authToken` (the field plex.tv returns), `apiKey`, `password` and `pin`, as strings or bare numbers
+- JSON fields whose name matches the same rule, for example `authToken` (the field plex.tv returns), `apiKey`, `password` and `pin`, as strings or bare numbers. Escaped values, such as a Unicode escape for a plus sign, an escaped quote or a doubled backslash, are handled, and a value with no closing quote is redacted to the end of the text
 - `Authorization`, `Proxy-Authorization`, `X-Plex-Token` and `X-Api-Key` header values, including `Bearer` and `Basic`
 - `Cookie:` and `Set-Cookie:` header lines, redacted to the end of the line
 - the session cookie values `wishlistarr.auth=`, `wishlistarr.kid=` and the other `wishlistarr.*` cookies
 - a standalone `Bearer` token
 - assignments such as `X-Plex-Token=`, `authToken=`, `api_key=`, `password=` and `pin=` in a query string, an XML attribute or after whitespace
+- colon style text such as `token: abc` and `PIN: 1234`
+- XML element bodies such as `<authToken>x</authToken>`, with or without a closing tag
 - the token segment of `/api/v1/webhooks/{source}/{token}`
 
 The word "token" in ordinary text is left as it is.
 
-Each stored message is cut at 4096 characters and ends with ` [truncated]`, so one large payload cannot fill the ring. The download is written to the response as it is read from the ring, not built in memory first.
+What is not covered: a secret written into the message text of a log call, for example by interpolating it into the template, is only recognised when it matches one of the shapes above. The enricher cannot see it, so the console and the daily file keep it as written, and only the ring masks it. A secret with no recognisable name or shape, such as a bare value in prose, is not found. Redaction runs on the whole message before it is cut. Every pattern has a 500 ms match timeout, and if one fires the whole message is stored as `***`.
+
+Each stored message is redacted first and then cut at 4096 characters and ends with ` [truncated]`, so one large payload cannot fill the ring. The download is written to the response as it is read from the ring, not built in memory first.
 
 `GET /api/v1/system/logs` returns `{ at, level, category, message }` from oldest to newest. `level` is `trace`, `debug`, `information`, `warning`, `error` or `critical`. The optional `level` query keeps that level and anything more severe. Omitting it returns the whole ring. Any other value is `400`.
 
-`GET /api/v1/system/logs/download` returns the same lines as `text/plain`, attached as `wishlistarr.log`. Each line is the UTC timestamp, the level, the category and the message. The parent page links to it and filters with the same query. Both routes are parent-only.
+`GET /api/v1/system/logs/download` returns the same lines as `text/plain`, attached as `wishlistarr.log`. Each line is the UTC timestamp, the level, the category and the message. The parent page links to it and filters with the same query. Both routes are parent-only and send `Cache-Control: private, no-store`, as does the health route.
 
 ## Request history
 

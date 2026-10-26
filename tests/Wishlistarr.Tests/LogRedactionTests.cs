@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -91,6 +92,121 @@ public sealed class LogRedactionTests
         Assert.DoesNotContain(Secret, redacted, StringComparison.Ordinal);
         Assert.DoesNotContain("123456", redacted, StringComparison.Ordinal);
         Assert.Contains("***", redacted, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("CancellationToken")]
+    [InlineData("CacheKey")]
+    [InlineData("Keyword")]
+    [InlineData("Keywords")]
+    [InlineData("Author")]
+    [InlineData("Monkey")]
+    public void Common_harmless_names_are_kept(string name) => Assert.False(LogRedactor.IsSecretName(name));
+
+    [Theory]
+    [InlineData("ApiKey")]
+    [InlineData("api_key")]
+    [InlineData("X-Api-Key")]
+    [InlineData("PlexToken")]
+    [InlineData("AuthToken")]
+    [InlineData("KidPin")]
+    [InlineData("pin")]
+    [InlineData("Cookie")]
+    [InlineData("Authorization")]
+    [InlineData("auth")]
+    [InlineData("SigningKey")]
+    public void Real_secret_names_stay_masked(string name) => Assert.True(LogRedactor.IsSecretName(name));
+
+    [Theory]
+    [InlineData("{\"token\":\"abc\\u002Bdef" + Secret + "\"}")]
+    [InlineData("{\"password\":\"a\\\\b" + Secret + "\"}")]
+    [InlineData("{\"authToken\":\"a\\\"b" + Secret + "c\",\"x\":1}")]
+    [InlineData("{\"token\":\"" + Secret)]
+    [InlineData("{\"token\":\"abc\\u002B" + Secret)]
+    [InlineData("{\"token\":\"" + Secret + "\\")]
+    [InlineData("{\"kid\": {\"pin\": \"" + Secret + "\"}}")]
+    public void Json_values_with_escapes_or_no_closing_quote_are_redacted(string text)
+    {
+        string redacted = LogRedactor.Redact(text);
+
+        Assert.DoesNotContain(Secret, redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("u002B", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Json_written_by_the_serializer_is_redacted()
+    {
+        string json = JsonSerializer.Serialize(new { token = "ab+/=" + Secret, note = "keep" });
+
+        string redacted = LogRedactor.Redact(json);
+
+        Assert.DoesNotContain(Secret, redacted, StringComparison.Ordinal);
+        Assert.Contains("keep", redacted, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("token: " + Secret)]
+    [InlineData("PIN: " + Secret)]
+    [InlineData("failed (apiKey: " + Secret + ")")]
+    [InlineData("<authToken>" + Secret + "</authToken>")]
+    [InlineData("<Plex><kidPin id=\"1\">" + Secret + "</kidPin></Plex>")]
+    [InlineData("<authToken>" + Secret)]
+    public void Colon_and_xml_element_forms_are_redacted(string text)
+    {
+        string redacted = LogRedactor.Redact(text);
+
+        Assert.DoesNotContain(Secret, redacted, StringComparison.Ordinal);
+        Assert.Contains("***", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Colon_and_xml_forms_leave_ordinary_names_alone() =>
+        Assert.Equal("status: ok <title>Keyword monkey</title> cancellationToken: none", LogRedactor.Redact("status: ok <title>Keyword monkey</title> cancellationToken: none"));
+
+    [Fact]
+    public void A_large_adversarial_input_is_processed_quickly_without_leaking()
+    {
+        string[] inputs =
+        [
+            "?" + string.Concat(Enumerable.Repeat("key", 21_845)),
+            string.Concat(Enumerable.Repeat("&token", 10_000)),
+            "<" + string.Concat(Enumerable.Repeat("a<", 32_000)),
+            "{\"token\":\"" + new string('\\', 65_000),
+            new string(' ', 65_000) + "x",
+            "Cookie" + new string(' ', 65_000),
+        ];
+
+        foreach (string input in inputs)
+        {
+            System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+            string redacted = LogRedactor.Redact(input);
+            watch.Stop();
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+            Assert.DoesNotContain("zz", redacted, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void A_regex_timeout_redacts_the_whole_value() =>
+        Assert.Equal(LogRedactor.Mask, LogRedactor.FailClosed(() => throw new RegexMatchTimeoutException()));
+
+    [Theory]
+    [InlineData(4070)]
+    [InlineData(4096)]
+    [InlineData(65_500)]
+    [InlineData(65_536 - 12)]
+    public void A_secret_that_straddles_a_clipping_boundary_is_still_masked(int offset)
+    {
+        LogBuffer buffer = NewBuffer();
+        using Logger logger = new LoggerConfiguration().WriteTo.Sink(buffer).CreateLogger();
+        string line = new string('a', offset) + "{\"token\":\"" + Secret + "\"}" + new string('b', 10);
+
+        logger.Information("{Text}", line);
+
+        string message = Assert.Single(buffer.List(null)).Message;
+        Assert.DoesNotContain("zz", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-qq", message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -332,6 +332,21 @@ public sealed class ObservabilityTests
         }
     }
 
+    [Theory]
+    [InlineData("/api/v1/system/health")]
+    [InlineData("/api/v1/system/logs")]
+    [InlineData("/api/v1/system/logs/download")]
+    public async Task Parent_only_system_routes_are_not_stored_by_caches(string route)
+    {
+        using ObservabilityApiFactory factory = new();
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        HttpResponseMessage response = await client.GetAsync(route);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("no-store, private", string.Join(", ", response.Headers.CacheControl!.ToString().Split(", ").Order(StringComparer.Ordinal)));
+    }
+
     [Fact]
     public async Task Log_list_filters_by_level_and_rejects_an_unknown_level()
     {

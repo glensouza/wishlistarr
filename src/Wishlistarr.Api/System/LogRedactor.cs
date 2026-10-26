@@ -9,26 +9,41 @@ public static partial class LogRedactor
     public const string Mask = "***";
 
     private const string NameChars = "[A-Za-z0-9_.\\-]";
-    private const string SecretName = "(?:" + NameChars + "*(?:token|key|password|secret|cookie|authorization|auth)" + NameChars + "*|" + NameChars + "*pin)";
+    private const int MatchTimeoutMilliseconds = 500;
+    private const RegexOptions Options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline;
 
-    private static readonly string[] ContainedNames = ["token", "key", "password", "secret", "cookie", "authorization", "auth"];
+    private static readonly string[] ContainedNames = ["token", "secret", "password", "passwd", "cookie", "authorization", "oauth", "apikey", "privatekey"];
+
+    private static readonly string[] SecretWords = ["key", "auth", "pin"];
+
+    private static readonly HashSet<string> HarmlessNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CancellationToken",
+        "CacheKey",
+    };
 
     public static bool IsSecretName(string name)
     {
-        if (name.EndsWith("pin", StringComparison.OrdinalIgnoreCase))
+        string flat = string.Concat(name.Where(char.IsLetterOrDigit));
+        if (flat.Length == 0 || HarmlessNames.Contains(flat))
         {
-            return true;
+            return false;
         }
 
         foreach (string part in ContainedNames)
         {
-            if (name.Contains(part, StringComparison.OrdinalIgnoreCase))
+            if (flat.Contains(part, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
         }
 
-        return false;
+        if (flat.EndsWith("pin", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return Words(name).Any(word => SecretWords.Contains(word, StringComparer.OrdinalIgnoreCase));
     }
 
     public static string Redact(string? text)
@@ -38,15 +53,75 @@ public static partial class LogRedactor
             return text ?? string.Empty;
         }
 
-        string redacted = JsonSecret().Replace(text, "$1***$3");
-        redacted = JsonBareSecret().Replace(redacted, "$1***");
+        return FailClosed(() => RedactText(text));
+    }
+
+    internal static string FailClosed(Func<string> redact)
+    {
+        try
+        {
+            return redact();
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return Mask;
+        }
+    }
+
+    private static string RedactText(string text)
+    {
+        string redacted = JsonSecret().Replace(text, match => IsSecretName(match.Groups["n"].Value)
+            ? match.Groups["p"].Value + Mask + match.Groups["c"].Value
+            : match.Value);
+        redacted = JsonBareSecret().Replace(redacted, MaskSecretValue);
         redacted = CookieHeader().Replace(redacted, "$1***");
         redacted = HeaderSecret().Replace(redacted, "$1***");
         redacted = BearerSecret().Replace(redacted, "Bearer ***");
         redacted = SessionCookie().Replace(redacted, "$1***");
-        redacted = AssignmentSecret().Replace(redacted, "$1***");
+        redacted = XmlSecret().Replace(redacted, MaskSecretValue);
+        redacted = AssignmentSecret().Replace(redacted, MaskSecretValue);
+        redacted = ColonSecret().Replace(redacted, MaskSecretValue);
         redacted = WebhookSecret().Replace(redacted, "$1***");
         return redacted;
+    }
+
+    private static string MaskSecretValue(Match match) =>
+        IsSecretName(match.Groups["n"].Value) ? match.Groups["p"].Value + Mask : match.Value;
+
+    private static List<string> Words(string name)
+    {
+        List<string> words = [];
+        int start = -1;
+        for (int index = 0; index <= name.Length; index++)
+        {
+            bool inWord = index < name.Length && char.IsLetterOrDigit(name[index]);
+            bool split = start >= 0 && (!inWord || StartsNewWord(name, index));
+            if (split)
+            {
+                words.Add(name[start..index]);
+                start = -1;
+            }
+
+            if (inWord && start < 0)
+            {
+                start = index;
+            }
+        }
+
+        return words;
+    }
+
+    private static bool StartsNewWord(string name, int index)
+    {
+        if (!char.IsUpper(name[index]))
+        {
+            return false;
+        }
+
+        char previous = name[index - 1];
+        return char.IsLower(previous)
+            || char.IsDigit(previous)
+            || (char.IsUpper(previous) && index + 1 < name.Length && char.IsLower(name[index + 1]));
     }
 
     public static LogEventPropertyValue Redact(string? name, LogEventPropertyValue value)
@@ -101,28 +176,34 @@ public static partial class LogRedactor
             return new KeyValuePair<ScalarValue, LogEventPropertyValue>(safeKey, Redact(key, pair.Value));
         }));
 
-    [GeneratedRegex("(?i)(\"" + SecretName + "\"\\s*:\\s*\")([^\"\\\\]*)(\")")]
+    [GeneratedRegex("(?<p>\"(?<n>" + NameChars + "+)\"\\s*:\\s*\")(?:[^\"\\\\]|\\\\[\\s\\S]?)*(?<c>\"?)", Options, MatchTimeoutMilliseconds)]
     private static partial Regex JsonSecret();
 
-    [GeneratedRegex("(?i)(\"" + SecretName + "\"\\s*:\\s*)(?:-?\\d[\\w.+\\-]*|true|false)")]
+    [GeneratedRegex("(?<p>\"(?<n>" + NameChars + "+)\"\\s*:\\s*)(?:-?\\d[\\w.+\\-]*|true|false)", Options, MatchTimeoutMilliseconds)]
     private static partial Regex JsonBareSecret();
 
-    [GeneratedRegex("(?i)(\\b(?:Set-)?Cookie\\s*:\\s*)[^\\r\\n]+")]
+    [GeneratedRegex("(\\b(?:Set-)?Cookie\\s*:\\s*)[^\\r\\n]+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex CookieHeader();
 
-    [GeneratedRegex("(?i)((?:Proxy-)?(?:Authorization|X-Plex-Token|X-Api-Key)\\s*:\\s*(?:Bearer\\s+|Basic\\s+)?)\\S+")]
+    [GeneratedRegex("((?:Proxy-)?(?:Authorization|X-Plex-Token|X-Api-Key)\\s*:\\s*(?:Bearer\\s+|Basic\\s+)?)\\S+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex HeaderSecret();
 
-    [GeneratedRegex("(?i)\\bBearer\\s+\\S+")]
+    [GeneratedRegex("\\bBearer\\s+\\S+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex BearerSecret();
 
-    [GeneratedRegex("(?i)(\\bwishlistarr\\.[a-z]+\\s*=\\s*)[^;\\s,\"']+")]
+    [GeneratedRegex("(\\bwishlistarr\\.[a-z]+\\s*=\\s*)[^;\\s,\"']+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex SessionCookie();
 
-    [GeneratedRegex("(?i)((?:^|[?&\\s{,;(])" + SecretName + "\\s*=\\s*[\"']?)[^\\s&#\"'=;,)]+")]
+    [GeneratedRegex("(?<p><(?<n>" + NameChars + "+)(?:\\s[^<>]*)?>)[^<>]+", Options, MatchTimeoutMilliseconds)]
+    private static partial Regex XmlSecret();
+
+    [GeneratedRegex("(?<p>(?:^|[?&\\s{,;(])(?<n>" + NameChars + "+)\\s*=\\s*[\"']?)[^\\s&#\"'=;,)]+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex AssignmentSecret();
 
-    [GeneratedRegex("(?i)(/api/v1/webhooks/[a-z]+/)[^\\s/?#\"'&]+")]
+    [GeneratedRegex("(?<p>(?:^|[\\s{,;(])(?<n>" + NameChars + "+)\\s*:\\s*[\"']?)[^\\s,;\"'<>)}\\]]+", Options, MatchTimeoutMilliseconds)]
+    private static partial Regex ColonSecret();
+
+    [GeneratedRegex("(/api/v1/webhooks/[a-z]+/)[^\\s/?#\"'&]+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex WebhookSecret();
 }
 

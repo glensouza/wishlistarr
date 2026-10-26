@@ -35,7 +35,6 @@ public sealed record LogEntry(DateTimeOffset At, LogBufferLevel Level, string Ca
 
 public sealed class LogBuffer(IOptions<LogOptions> options) : ILogEventSink
 {
-    private const int RedactionWindow = 65536;
     private const string TruncationMarker = " [truncated]";
 
     private readonly LogEntry[] slots = new LogEntry[options.Value.Capacity];
@@ -51,10 +50,10 @@ public sealed class LogBuffer(IOptions<LogOptions> options) : ILogEventSink
             logEvent.Exception,
             logEvent.MessageTemplate,
             logEvent.Properties.Select(property => new LogEventProperty(property.Key, LogRedactor.Redact(property.Key, property.Value))));
-        string message = Clip(safe.RenderMessage(), RedactionWindow);
+        string message = safe.RenderMessage();
         if (logEvent.Exception is not null)
         {
-            message = Clip(message + " " + logEvent.Exception.Message, RedactionWindow);
+            message += " " + logEvent.Exception.Message;
         }
 
         message = Clip(LogRedactor.Redact(message), LogOptions.MaxMessageLength);

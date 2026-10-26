@@ -85,7 +85,7 @@ public sealed class HealthReport(
         try
         {
             Dictionary<string, IHealthCheck> byName = checks.ToDictionary(check => check.Name, StringComparer.Ordinal);
-            HealthCheckResult[] results = await Task.WhenAll(Order.Select(name => this.RunAsync(byName[name], CancellationToken.None)));
+            HealthCheckResult[] results = await Task.WhenAll(Order.Select(name => this.RunAsync(byName[name])));
             AppMetrics.PublishHealth(results);
             lock (this.gate)
             {
@@ -104,18 +104,12 @@ public sealed class HealthReport(
         }
     }
 
-    private async Task<HealthCheckResult> RunAsync(IHealthCheck check, CancellationToken ct)
+    private async Task<HealthCheckResult> RunAsync(IHealthCheck check)
     {
-        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(options.Value.CheckTimeout);
+        using CancellationTokenSource timeout = new(options.Value.CheckTimeout);
         try
         {
-            using IServiceScope scope = scopes.CreateScope();
-            return await check.CheckAsync(scope.ServiceProvider, timeout.Token);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
+            return await this.RunInScopeAsync(check, timeout.Token).WaitAsync(timeout.Token);
         }
         catch (OperationCanceledException)
         {
@@ -125,6 +119,12 @@ public sealed class HealthReport(
         {
             return Checked(check.Name, HealthCheckStatus.Error, $"{check.DisplayName} could not be checked.", check.Fix);
         }
+    }
+
+    private async Task<HealthCheckResult> RunInScopeAsync(IHealthCheck check, CancellationToken ct)
+    {
+        using IServiceScope scope = scopes.CreateScope();
+        return await check.CheckAsync(scope.ServiceProvider, ct);
     }
 
     internal static HealthCheckResult Checked(string integration, HealthCheckStatus status, string message, string fix) =>
