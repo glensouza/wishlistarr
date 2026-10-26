@@ -66,4 +66,46 @@ export async function requestTitle(
   return { ...body, alreadyAsked: status !== 201 }
 }
 
+export type KidRequest = {
+  id: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  state: string
+  requestCount: number
+  denialReason: string | null
+}
+
+export const listKidRequests = () =>
+  request<KidRequest[]>('GET', '/api/v1/kid/requests')
+
+export type KidHistoryAction =
+  | 'granted'
+  | 'asked'
+  | 'approved'
+  | 'autoApproved'
+  | 'denied'
+  | 'ready'
+  | 'revoked'
+  | 'failed'
+
+export type KidHistoryEntry = {
+  id: number
+  requestId: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string
+  action: KidHistoryAction
+  at: string
+  note: string | null
+}
+
+export const historyPageSize = 50
+
+export const listKidHistory = (offset = 0, limit = historyPageSize) =>
+  request<KidHistoryEntry[]>(
+    'GET',
+    `/api/v1/kid/requests/history?limit=${limit}&offset=${offset}`,
+  )
+
 export const pinLength = { min: 4, max: 8 }

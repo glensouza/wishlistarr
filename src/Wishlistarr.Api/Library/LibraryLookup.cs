@@ -21,6 +21,20 @@ public sealed class LibraryLookup(IMediaServer server, IEnumerable<ILibraryIndex
         return Matching(await server.FindByExternalIdAsync(title.Kind, id, ct), title.Kind);
     }
 
+    // Only the index answers, so a page of titles never turns into one Plex call per title.
+    public async Task<IndexedGuids?> FindIndexedGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
+    {
+        foreach (ILibraryIndex index in indexes)
+        {
+            if (await index.FindGuidsAsync(titles, ct) is IndexedGuids indexed)
+            {
+                return indexed;
+            }
+        }
+
+        return null;
+    }
+
     private static List<MediaItem> Matching(IReadOnlyList<MediaItem> items, MediaKind kind) =>
         [.. items.Where(item => item.Kind == kind).DistinctBy(item => item.Id)];
 }

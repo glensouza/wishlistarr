@@ -33,9 +33,12 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         string titleName,
         RequestActor actor,
         bool countsTowardAllowance = false,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? reason = null,
+        bool mergeExisting = true)
     {
         ValidateActor(actor);
+        ValidateReason(reason);
         if (title.TmdbId <= 0)
         {
             throw new ArgumentException("TMDB ids are positive.", nameof(title));
@@ -63,12 +66,20 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                 request => request.KidProfileId == kidProfileId
                     && request.Kind == title.Kind
                     && request.TmdbId == title.TmdbId
-                    && request.State != RequestState.Denied,
+                    && request.State != RequestState.Denied
+                    && request.State != RequestState.Revoked,
                 ct);
+            if (existing is not null && !mergeExisting)
+            {
+                return new RequestResult(RequestOutcome.Unchanged, existing);
+            }
+
             if (existing is not null)
             {
                 int merged = await db.MediaRequests
-                    .Where(request => request.Id == existing.Id && request.State != RequestState.Denied)
+                    .Where(request => request.Id == existing.Id
+                        && request.State != RequestState.Denied
+                        && request.State != RequestState.Revoked)
                     .ExecuteUpdateAsync(
                         setters => setters
                             .SetProperty(request => request.RequestCount, request => request.RequestCount + 1)
@@ -99,7 +110,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                 LastRequestedAt = now,
                 StateChangedAt = now,
             };
-            MediaRequestEvent item = NewEvent(null, RequestState.Pending, actor, null, now);
+            MediaRequestEvent item = NewEvent(null, RequestState.Pending, actor, reason, now);
             created.Events.Add(item);
             db.MediaRequests.Add(created);
             try
@@ -123,7 +134,8 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         RequestState to,
         RequestActor actor,
         string? reason = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        RequestState? expectedFrom = null)
     {
         ValidateActor(actor);
         ValidateReason(reason);
@@ -139,6 +151,11 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
             if (request.State == to)
             {
                 return new RequestResult(RequestOutcome.Unchanged, request);
+            }
+
+            if (expectedFrom is RequestState expected && request.State != expected)
+            {
+                return new RequestResult(RequestOutcome.Rejected, request, $"The request is {request.State}, not {expected}.");
             }
 
             if (RequestStateMachine.Find(request.State, to) is not RequestTransition transition)
@@ -203,6 +220,9 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
 
         return await this.TransitionAsync(requestId, target, actor, reason, ct);
     }
+
+    public Task<MediaRequest?> GetAsync(int requestId, CancellationToken ct = default) =>
+        this.LoadFreshAsync(requestId, ct);
 
     public async Task<IReadOnlyList<MediaRequestEvent>> GetHistoryAsync(int requestId, CancellationToken ct = default) =>
         await db.MediaRequestEvents.AsNoTracking()

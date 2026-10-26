@@ -22,4 +22,6 @@
     <ProjectReference Include="..\Wishlistarr.Integrations\Wishlistarr.Integrations.csproj" />
   </ItemGroup>
 
+  <Import Project="..\..\build\LicenseNotices.targets" />
+
 </Project>

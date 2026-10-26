@@ -9,6 +9,7 @@ import HealthBanner from './HealthBanner'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
 import LogViewer from './LogViewer'
+import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
 import RequestHistoryPanel from './RequestHistoryPanel'
@@ -43,6 +44,10 @@ export default function ParentArea() {
       {isParent && (
         <>
           <HealthBanner />
+          <p>
+            <Link to="/about">{t('about.link')}</Link>
+          </p>
+          <RequestsAdmin />
           <KidProfilesAdmin />
           <KidDevicesAdmin />
           <RequestHistoryPanel />

@@ -277,6 +277,29 @@ public sealed class MediaRequestTests
     }
 
     [Fact]
+    public async Task Asking_again_after_a_revocation_starts_a_new_request()
+    {
+        using RequestApiFactory factory = new();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int revoked = (await factory.CreateAsync(ada)).Request!.Id;
+        await factory.MoveAsync(revoked, RequestState.Approved, RequestApiFactory.Parent);
+        await factory.MoveAsync(revoked, RequestState.Available, RequestApiFactory.Dispatch);
+        await factory.MoveAsync(revoked, RequestState.Labeled, RequestApiFactory.Dispatch);
+        await factory.MoveAsync(revoked, RequestState.Revoked, RequestApiFactory.Parent);
+
+        RequestResult again = await factory.CreateAsync(ada);
+        RequestResult merged = await factory.CreateAsync(ada);
+        RequestResult back = await factory.MoveAsync(revoked, RequestState.Labeled, RequestApiFactory.Dispatch);
+
+        Assert.Equal(RequestOutcome.Created, again.Outcome);
+        Assert.NotEqual(revoked, again.Request!.Id);
+        Assert.Equal(RequestOutcome.Merged, merged.Outcome);
+        Assert.Equal(again.Request.Id, merged.Request!.Id);
+        Assert.Equal(RequestOutcome.Rejected, back.Outcome);
+        Assert.Equal([RequestState.Revoked, RequestState.Pending], (await factory.GetRequestsAsync()).Select(request => request.State));
+    }
+
+    [Fact]
     public async Task Kids_can_only_request_for_their_own_active_profile()
     {
         using RequestApiFactory factory = new();
@@ -356,6 +379,27 @@ public sealed class MediaRequestTests
     }
 
     [Fact]
+    public async Task The_approved_to_available_guard_does_not_move_a_failed_request()
+    {
+        using RequestApiFactory factory = new();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int id = (await factory.CreateAsync(ada)).Request!.Id;
+        await factory.MoveAsync(id, RequestState.Approved, RequestApiFactory.Parent);
+        await factory.MoveAsync(id, RequestState.Failed, RequestApiFactory.Dispatch);
+
+        RequestResult guarded = await factory.WithRequestsAsync(requests => requests.TransitionAsync(
+            id,
+            RequestState.Available,
+            RequestApiFactory.Dispatch,
+            expectedFrom: RequestState.Approved));
+        RequestResult unguarded = await factory.MoveAsync(id, RequestState.Available, RequestApiFactory.Dispatch);
+
+        Assert.Equal(RequestOutcome.Rejected, guarded.Outcome);
+        Assert.Equal(RequestState.Failed, guarded.Request!.State);
+        Assert.Equal(RequestOutcome.Changed, unguarded.Outcome);
+    }
+
+    [Fact]
     public async Task Competing_decisions_let_exactly_one_win()
     {
         using RequestApiFactory factory = new();
@@ -376,6 +420,33 @@ public sealed class MediaRequestTests
         Assert.Equal(winner.Request!.State, request.State);
         Assert.Equal(1, request.Version);
         Assert.Equal(2, (await factory.GetHistoryAsync(id)).Count);
+    }
+
+    [Fact]
+    public async Task A_move_that_names_the_wrong_starting_state_changes_nothing()
+    {
+        using RequestApiFactory factory = new();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int id = (await factory.CreateAsync(ada)).Request!.Id;
+        await factory.MoveAsync(id, RequestState.Approved, RequestApiFactory.Parent);
+        await factory.MoveAsync(id, RequestState.Available, RequestApiFactory.Dispatch);
+        await factory.MoveAsync(id, RequestState.Failed, RequestApiFactory.Dispatch, "No label");
+
+        RequestResult denied = await factory.WithRequestsAsync(requests => requests.TransitionAsync(
+            id,
+            RequestState.Denied,
+            RequestApiFactory.Parent,
+            expectedFrom: RequestState.Pending));
+        RequestResult matching = await factory.WithRequestsAsync(requests => requests.TransitionAsync(
+            id,
+            RequestState.Available,
+            RequestApiFactory.Dispatch,
+            expectedFrom: RequestState.Failed));
+
+        Assert.Equal(RequestOutcome.Rejected, denied.Outcome);
+        Assert.Equal(RequestState.Failed, denied.Request!.State);
+        Assert.Equal(RequestOutcome.Changed, matching.Outcome);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Denied);
     }
 
     [Fact]
