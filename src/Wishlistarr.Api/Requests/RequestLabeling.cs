@@ -17,16 +17,37 @@ public sealed partial class RequestLabeling(
     ILogger<RequestLabeling> logger)
 {
     public const string LabelSource = "request";
+    public const string StoppedReason = "Labeling was stopped before it started.";
 
     public async Task<RequestLabelResult> LabelAsync(
         int requestId,
         IReadOnlyList<MediaItem> matches,
         KidProfile profile,
         RequestActor actor,
-        string source = LabelSource)
+        CancellationToken ct = default)
     {
-        using IDisposable held = await locks.AcquireAsync(requestId, CancellationToken.None);
-        return await this.LabelLockedAsync(requestId, matches, profile, actor, source);
+        IDisposable held;
+        try
+        {
+            held = await locks.AcquireAsync(requestId, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // The request is already stored as available, so a caller that gives up waiting ends it as failed instead of leaving it there until it counts as stuck.
+            RequestResult stopped = await requests.TransitionAsync(
+                requestId,
+                RequestState.Failed,
+                actor,
+                StoppedReason,
+                CancellationToken.None,
+                RequestState.Available);
+            return new RequestLabelResult(stopped, false);
+        }
+
+        using (held)
+        {
+            return await this.LabelLockedAsync(requestId, matches, profile, actor);
+        }
     }
 
     // The caller holds the request lock, so no revoke or other label write for this request runs at the same time.

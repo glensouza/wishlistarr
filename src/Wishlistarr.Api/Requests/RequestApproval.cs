@@ -159,18 +159,19 @@ public sealed partial class RequestApproval(
             return new DecisionItem(id, DecisionStatus.Succeeded, RequestState.Approved);
         }
 
-        return await this.LabelAsync(approved.Request!, libraryCheck.Items, profile, actor);
+        return await this.LabelAsync(approved.Request!, libraryCheck.Items, profile, actor, ct);
     }
 
     private async Task<DecisionItem> LabelAsync(
         MediaRequest request,
         IReadOnlyList<MediaItem> matches,
         KidProfile profile,
-        RequestActor actor)
+        RequestActor actor,
+        CancellationToken ct)
     {
         RequestActor system = actor.Kind == RequestActorKind.System ? actor : RequestActor.System(ApprovalComponent);
 
-        // The approval is already stored, so the move to available and the label finish even if the caller goes away.
+        // The approval is already stored, so the move to available and the label finish even if the caller goes away. Only a caller that gives up while waiting for the request lock ends it early, as failed.
         RequestResult available = await requests.TransitionAsync(
             request.Id,
             RequestState.Available,
@@ -182,7 +183,7 @@ public sealed partial class RequestApproval(
             return FromResult(request.Id, available, approving: true);
         }
 
-        RequestResult moved = (await labeling.LabelAsync(request.Id, matches, profile, system)).Result;
+        RequestResult moved = (await labeling.LabelAsync(request.Id, matches, profile, system, ct)).Result;
         RequestState state = moved.Request?.State ?? RequestState.Failed;
         return new DecisionItem(
             request.Id,

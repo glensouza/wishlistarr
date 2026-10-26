@@ -249,17 +249,21 @@ public sealed partial class RequestAccess(
         int id = request.Id;
         RequestState from = request.State;
 
-        // Once a label is removed, the request has to be marked revoked or the label put back, so the rest ignores the caller going away.
+        // Once a label is removed, the request has to be marked revoked or the label put back, so the rest ignores the caller going away but not the deadline.
         CancellationToken none = CancellationToken.None;
-        HashSet<string> taken = await this.LabelsOfOtherProfilesAsync(profile.Id, none);
+        CancellationTokenSource? deadline = null;
         List<RemovedLabel> removed = [];
+        RemovedLabel? inFlight = null;
         bool notOwned = false;
         bool inUse = false;
         try
         {
+            deadline = new(options.Value.LabelTimeout, time);
+            CancellationToken ct = deadline.Token;
+            HashSet<string> taken = await this.LabelsOfOtherProfilesAsync(profile.Id, ct);
             foreach (MediaItem item in items)
             {
-                if (await labels.FindProfileLabelsAsync(item.Id, profile.Id, none) is not ProfileLabels found)
+                if (await labels.FindProfileLabelsAsync(item.Id, profile.Id, ct) is not ProfileLabels found)
                 {
                     continue;
                 }
@@ -273,10 +277,14 @@ public sealed partial class RequestAccess(
                         continue;
                     }
 
-                    LabelWriteResult result = await labels.RemoveAsync(item.Id, owned.Label, none);
+                    // A removal that throws may still have reached Plex, so a label that was there is put back like one that was removed.
+                    RemovedLabel attempt = new(item.Id, owned.Label, owned.Source);
+                    inFlight = found.Item.Labels.Contains(owned.Label, LabelComparer) ? attempt : null;
+                    LabelWriteResult result = await labels.RemoveAsync(item.Id, owned.Label, ct);
+                    inFlight = null;
                     if (result.Outcome == LabelWriteOutcome.Removed)
                     {
-                        removed.Add(new RemovedLabel(item.Id, owned.Label, owned.Source));
+                        removed.Add(attempt);
                     }
                     else if (!IsGone(result, owned.Label))
                     {
@@ -292,10 +300,19 @@ public sealed partial class RequestAccess(
                 }
             }
         }
-        catch (Exception ex) when (ex is MediaServerException or HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is MediaServerException or HttpRequestException or OperationCanceledException)
         {
             this.LogRevokeFailed(ex, id);
+            if (inFlight is not null)
+            {
+                removed.Add(inFlight);
+            }
+
             return await this.UndoRevokeAsync(id, from, profile.Id, removed, DecisionStatus.Failed);
+        }
+        finally
+        {
+            deadline?.Dispose();
         }
 
         RequestResult moved;
@@ -325,6 +342,7 @@ public sealed partial class RequestAccess(
         IReadOnlyList<RemovedLabel> removed,
         DecisionStatus status)
     {
+        CancellationTokenSource? deadline = null;
         try
         {
             // A request that has moved on, for example to revoked, must not get its labels back.
@@ -339,17 +357,22 @@ public sealed partial class RequestAccess(
                 return new RevokeItem(id, status, current?.State);
             }
 
+            deadline = new(options.Value.LabelTimeout, time);
             foreach (RemovedLabel label in removed)
             {
-                await labels.AddAsync(label.ItemId, label.Label, profileId, label.Source, CancellationToken.None);
+                await labels.AddAsync(label.ItemId, label.Label, profileId, label.Source, deadline.Token);
             }
 
             return new RevokeItem(id, status, from);
         }
-        catch (Exception ex) when (ex is MediaServerException or HttpRequestException or TaskCanceledException or DbUpdateException)
+        catch (Exception ex) when (ex is MediaServerException or HttpRequestException or OperationCanceledException or DbUpdateException)
         {
             this.LogRevokeUndoFailed(ex, id);
             return new RevokeItem(id, DecisionStatus.Failed, from);
+        }
+        finally
+        {
+            deadline?.Dispose();
         }
     }
 

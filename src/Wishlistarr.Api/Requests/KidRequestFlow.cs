@@ -184,7 +184,7 @@ public sealed partial class KidRequestFlow(
 
         if (instant)
         {
-            RequestResult labeled = (await labeling.LabelAsync(request.Id, matches, profile, InstantLabelActor)).Result;
+            RequestResult labeled = (await labeling.LabelAsync(request.Id, matches, profile, InstantLabelActor, ct)).Result;
             return new KidRequestResult(KidRequestOutcome.Created, labeled.Request ?? request);
         }
 

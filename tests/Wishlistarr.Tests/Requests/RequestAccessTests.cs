@@ -872,6 +872,88 @@ public sealed class RequestAccessTests
     }
 
     [Fact]
+    public async Task A_revoke_whose_removal_hangs_ends_failed_at_the_deadline_and_keeps_the_label()
+    {
+        using DeadlineFactory factory = new(MatrixIndex(), TimeSpan.FromMilliseconds(300));
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        TaskCompletionSource hang = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Plex.Delay = request => request.Method == "PUT" ? hang.Task : Task.CompletedTask;
+
+        try
+        {
+            JsonElement body = await RevokeAsync(parent, new { ids = new[] { id } }).WaitAsync(TimeSpan.FromSeconds(10));
+
+            AssertNotRevoked(body, id, await factory.GetRequestsAsync(), await factory.GetHistoryAsync(id));
+            Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+            Assert.Single(await factory.GetLedgerAsync());
+        }
+        finally
+        {
+            hang.SetException(new InvalidOperationException("dropped"));
+        }
+    }
+
+    [Fact]
+    public async Task A_revoke_waiting_for_the_request_lock_stops_when_its_caller_gives_up()
+    {
+        using KidRequestApiFactory factory = new(MatrixIndex());
+        await factory.LinkPlexAsync();
+        (_, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        RequestLocks locks = factory.Services.GetRequiredService<RequestLocks>();
+        using IServiceScope scope = factory.Services.CreateScope();
+        RequestAccess access = scope.ServiceProvider.GetRequiredService<RequestAccess>();
+
+        using (await locks.AcquireAsync(id))
+        {
+            using CancellationTokenSource gaveUp = new(TimeSpan.FromMilliseconds(200));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => access.RevokeManyAsync([id], RequestActor.Parent(null, "Parent"), null, gaveUp.Token).WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+
+        Assert.Equal(RequestState.Labeled, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
+        Assert.Single(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Labeling_that_gives_up_waiting_for_the_request_lock_ends_the_request_as_failed()
+    {
+        using KidRequestApiFactory factory = new(MatrixIndex());
+        await factory.LinkPlexAsync();
+        (HttpClient kid, int ada) = await factory.SignInKidAsync();
+        int id = await AskAsync(kid, 700);
+        using IServiceScope scope = factory.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        await db.MediaRequests
+            .Where(request => request.Id == id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(request => request.State, RequestState.Available)
+                .SetProperty(request => request.Version, request => request.Version + 1));
+        KidProfile profile = await db.KidProfiles.AsNoTracking().SingleAsync(row => row.Id == ada);
+        RequestLocks locks = factory.Services.GetRequiredService<RequestLocks>();
+        RequestLabeling labeling = scope.ServiceProvider.GetRequiredService<RequestLabeling>();
+        IReadOnlyList<MediaItem> matches = [new MediaItem("101", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1999, MediaKind.Movie, "1", [])];
+        RequestLabelResult result;
+
+        using (await locks.AcquireAsync(id))
+        {
+            using CancellationTokenSource gaveUp = new(TimeSpan.FromMilliseconds(200));
+            result = await labeling.LabelAsync(id, matches, profile, RequestActor.System("test"), gaveUp.Token).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal(RequestState.Failed, result.Result.Request?.State);
+        Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(RequestLabeling.StoppedReason, (await factory.GetHistoryAsync(id))[^1].Reason);
+        Assert.Equal(0, factory.LabelWrites);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
     public async Task The_parent_list_checks_every_failed_request_with_one_index_call_and_no_Plex_call()
     {
         FakeLibraryIndex index = TwoCopyIndex();
