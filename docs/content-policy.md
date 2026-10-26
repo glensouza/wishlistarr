@@ -83,7 +83,7 @@ Outside the US, a few letter ratings are recognized (`U` in GB and FR, `G` and `
 
 ## Profile configuration
 
-Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids and allowed original languages. `ContentPolicy.FromAgeLimits` turns each age limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on. `ContentPolicy.ForProfile` does the same and copies the three lists. See [kid profiles](kid-profiles.md) for how they are saved.
+Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids and allowed original languages. [Home](kid-home.md) shows a title only when the decision is `Allowed`, so a title that needs approval or whose lookup failed is left out rather than masked. `ContentPolicy.FromAgeLimits` turns each age limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on. `ContentPolicy.ForProfile` does the same and copies the three lists. See [kid profiles](kid-profiles.md) for how they are saved.
 
 `Preschool` cannot be reached from an age limit. TV-Y, G and TV-G are all suitable for every age, so no age separates them; a policy can still set `Preschool` as its max level directly to allow only TV-Y.
 

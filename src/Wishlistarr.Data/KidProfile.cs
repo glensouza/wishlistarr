@@ -1,3 +1,4 @@
+using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.Content;
 
 namespace Wishlistarr.Data;
@@ -33,6 +34,8 @@ public sealed class KidProfile
     public List<int> BlockedKeywordIds { get; set; } = [];
 
     public List<string> AllowedOriginalLanguages { get; set; } = [];
+
+    public List<string> HomeRows { get; set; } = [.. HomeRowTypes.Defaults];
 
     public int FailedPinCount { get; set; }
 

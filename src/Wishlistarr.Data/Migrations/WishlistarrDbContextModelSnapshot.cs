@@ -211,6 +211,10 @@ namespace Wishlistarr.Data.Migrations
                     b.Property<int>("FailedPinCount")
                         .HasColumnType("INTEGER");
 
+                    b.PrimitiveCollection<string>("HomeRows")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset?>("LastFailedPinAt")
                         .HasColumnType("TEXT");
 
@@ -360,6 +364,9 @@ namespace Wishlistarr.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
+
+                    b.Property<long?>("PlexAddedAtUnix")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset?>("PlexUpdatedAt")
                         .HasColumnType("TEXT");

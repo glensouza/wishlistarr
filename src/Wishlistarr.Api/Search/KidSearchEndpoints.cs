@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Integrations.Tmdb;
 
@@ -58,7 +59,7 @@ public static class KidSearchEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         kid.MapGet("/images/tmdb/{size}/{file}", (string size, string file, TmdbImageProxy proxy, HttpContext http, CancellationToken ct) =>
-            size == KidSearch.PosterSize
+            size == KidContentPipeline.PosterSize
                 ? TmdbEndpoints.ServeImageAsync(size, file, proxy, http, ct)
                 : Task.FromResult<IResult>(Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The image size or path is not allowed.")))
             .WithTags("Images")

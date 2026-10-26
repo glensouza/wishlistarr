@@ -74,6 +74,8 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
     public bool Ready { get; set; } = true;
 
+    public IReadOnlyList<LibraryCatalogEntry>? Recent { get; set; }
+
     public int Calls { get; private set; }
 
     public Func<Task>? Gate { get; set; }
@@ -129,6 +131,22 @@ public sealed class FakeLibraryIndex : ILibraryIndex
         }
 
         return Task.FromResult<IndexedGuids?>(new IndexedGuids(FakePlexServer.MachineIdentifier, guids));
+    }
+
+    public Task<IReadOnlyList<LibraryCatalogEntry>?> ListRecentAsync(int limit, CancellationToken ct = default)
+    {
+        if (!this.Ready)
+        {
+            return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>(null);
+        }
+
+        if (limit <= 0)
+        {
+            return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>([]);
+        }
+
+        IReadOnlyList<LibraryCatalogEntry> recent = this.Recent ?? [];
+        return Task.FromResult<IReadOnlyList<LibraryCatalogEntry>?>(recent.Take(limit).ToList());
     }
 }
 
@@ -188,6 +206,7 @@ public class KidRequestApiFactory : AuthApiFactory
         int[]? blockedGenreIds = null,
         int[]? blockedKeywordIds = null,
         string[]? allowedOriginalLanguages = null,
+        string[]? homeRows = null,
         bool autoApprove = false,
         string? autoApproveMovieRating = null,
         string? autoApproveTvRating = null)
@@ -205,6 +224,7 @@ public class KidRequestApiFactory : AuthApiFactory
                 blockedGenreIds,
                 blockedKeywordIds,
                 allowedOriginalLanguages,
+                homeRows,
                 autoApprove,
                 autoApproveMovieRating,
                 autoApproveTvRating,

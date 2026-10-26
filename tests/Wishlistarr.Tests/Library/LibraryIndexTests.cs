@@ -583,6 +583,80 @@ public sealed class LibraryIndexTests
         });
     }
 
+    [Fact]
+    public async Task Recent_titles_are_the_newest_distinct_tmdb_items_on_the_ready_server()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        DateTimeOffset newest = Early.AddDays(3);
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "Old Copy", [Tmdb("603")], updatedAt: Early.AddDays(10), addedAt: Early));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("102", MediaKind.Movie, "New Copy", [Tmdb("603")], updatedAt: Early, addedAt: newest));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("103", MediaKind.Movie, "Middle", [Tmdb("700")], updatedAt: Early.AddDays(20), addedAt: Early.AddDays(2)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("104", MediaKind.Show, "Bluey", [Tmdb("82728")], updatedAt: Early.AddDays(30), addedAt: Early.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("105", MediaKind.Movie, "No Tmdb", [Imdb("tt0000001")], updatedAt: newest.AddDays(1), addedAt: newest.AddDays(1)));
+        harness.Scanner.Entries.Add(FakeScanner.Entry("106", MediaKind.Movie, "Never Added", [Tmdb("900")], updatedAt: Early.AddDays(40)));
+
+        Assert.Null(await harness.RecentAsync(10));
+
+        await harness.FullAsync();
+
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700)],
+            (await harness.RecentAsync(2) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
+            (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+
+        await harness.InScopeAsync(async services =>
+        {
+            WishlistarrDbContext db = services.GetRequiredService<WishlistarrDbContext>();
+            LibraryTitle title = await db.LibraryTitles.SingleAsync(item => item.TmdbId == 603);
+            db.LibraryItems.Add(new LibraryItem
+            {
+                ServerId = "other-server",
+                RatingKey = "999",
+                Guid = "plex://movie/999",
+                Kind = MediaKind.Movie,
+                LibraryId = "1",
+                Title = "Foreign Server",
+                Year = 2001,
+                PlexAddedAtUnix = newest.AddDays(5).ToUnixTimeSeconds(),
+                IndexedAt = newest,
+                TitleId = title.Id,
+            });
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        Assert.Equal(
+            [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
+            (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+    }
+
+    [Fact]
+    public async Task A_caller_that_gives_up_while_the_ready_check_runs_does_not_poison_later_calls()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        await harness.FullAsync();
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Scanner.ServerIdGate = gate;
+
+        await harness.InScopeAsync(async services =>
+        {
+            ILibraryIndex index = services.GetRequiredService<ILibraryIndex>();
+            using CancellationTokenSource gaveUp = new();
+            Task<IReadOnlyList<MediaItem>?> abandoned = index.FindAsync(MediaKind.Movie, Tmdb("603"), gaveUp.Token);
+            await gaveUp.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
+
+            gate.SetResult();
+
+            Assert.NotNull(await index.FindAsync(MediaKind.Movie, Tmdb("603")));
+            Assert.NotNull(await index.ListRecentAsync(5));
+            return 0;
+        });
+    }
+
     private static async Task<string> QueryPlanAsync(LibraryHarness harness, string sql)
     {
         await using SqliteConnection connection = new($"Data Source={harness.DatabasePath}");

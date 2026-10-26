@@ -52,6 +52,36 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         return [.. items.Select(ToMediaItem)];
     }
 
+    public async Task<IReadOnlyList<LibraryCatalogEntry>?> ListRecentAsync(int limit, CancellationToken ct = default)
+    {
+        if (limit <= 0)
+        {
+            return [];
+        }
+
+        if (await this.GetReadyServerAsync(ct) is not string serverId)
+        {
+            return null;
+        }
+
+        int capped = Math.Clamp(limit, 1, 100);
+        List<int> titleIds = await db.LibraryItems
+            .AsNoTracking()
+            .Where(item => item.ServerId == serverId && item.TitleId != null && item.CanonicalTitle!.TmdbId > 0)
+            .GroupBy(item => item.TitleId!.Value)
+            .Select(group => new { TitleId = group.Key, AddedAt = group.Max(item => item.PlexAddedAtUnix), LastId = group.Max(item => item.Id) })
+            .OrderByDescending(row => row.AddedAt)
+            .ThenByDescending(row => row.LastId)
+            .Take(capped)
+            .Select(row => row.TitleId)
+            .ToListAsync(ct);
+        Dictionary<int, LibraryTitle> titles = await db.LibraryTitles
+            .AsNoTracking()
+            .Where(title => titleIds.Contains(title.Id))
+            .ToDictionaryAsync(title => title.Id, ct);
+        return [.. titleIds.Select(id => titles[id]).Select(title => new LibraryCatalogEntry(title.Kind, title.TmdbId))];
+    }
+
     public async Task<IndexedGuids?> FindGuidsAsync(IReadOnlyCollection<TitleKey> titles, CancellationToken ct = default)
     {
         if (await this.GetReadyServerAsync(ct) is not string serverId)
@@ -91,7 +121,8 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
             await db.LibraryItemLabels.Select(label => label.Label).Distinct().CountAsync(ct));
     }
 
-    private Task<string?> GetReadyServerAsync(CancellationToken ct) => this.readyServer ??= this.LoadReadyServerAsync(ct);
+    private Task<string?> GetReadyServerAsync(CancellationToken ct) =>
+        (this.readyServer ??= this.LoadReadyServerAsync(CancellationToken.None)).WaitAsync(ct);
 
     private async Task<string?> LoadReadyServerAsync(CancellationToken ct)
     {
@@ -117,6 +148,7 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
         LibraryIdSource.Imdb => new ExternalId(ExternalIdSource.Imdb, id.Value),
         _ => null,
     };
+
 }
 
 public sealed record LibraryStatus(

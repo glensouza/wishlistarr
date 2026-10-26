@@ -436,7 +436,8 @@ internal sealed partial class PlexMediaServer(
     private static LibraryEntry ToEntry(PlexMetadata item, MediaKind kind, string libraryId, bool detailed) => new(
         new MediaItem(item.RatingKey!, item.Guid ?? string.Empty, item.Title ?? string.Empty, item.Year, kind, libraryId, PlexGuids.Collect(item)),
         detailed ? [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)] : null,
-        item.UpdatedAt is long updated ? DateTimeOffset.FromUnixTimeSeconds(updated) : null);
+        item.UpdatedAt is long updated ? DateTimeOffset.FromUnixTimeSeconds(updated) : null,
+        item.AddedAt is long added ? DateTimeOffset.FromUnixTimeSeconds(added) : null);
 
     private async IAsyncEnumerable<LibraryEntry> ReadEntriesAsync(
         PlexServerContext server,

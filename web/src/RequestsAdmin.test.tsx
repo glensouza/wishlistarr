@@ -47,6 +47,7 @@ const ada: KidProfile = {
   autoApprove: false,
   autoApproveMovieRating: null,
   autoApproveTvRating: null,
+  homeRows: ['popular', 'library', 'genre'],
   isLocked: false,
   blockedGenreIds: [],
   blockedKeywordIds: [],
