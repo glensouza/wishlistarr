@@ -72,6 +72,32 @@ public static class RequestViews
         return reasons;
     }
 
+    // A write that timed out or threw may still have reached Plex, so only those failures can have left a label behind.
+    public static async Task<HashSet<int>> LabelMayRemainAsync(
+        WishlistarrDbContext db,
+        IReadOnlyCollection<int> failedIds,
+        CancellationToken ct)
+    {
+        if (failedIds.Count == 0)
+        {
+            return [];
+        }
+
+        List<MediaRequestEvent> events = await db.MediaRequestEvents.AsNoTracking()
+            .Where(item => failedIds.Contains(item.MediaRequestId) && item.ToState == RequestState.Failed)
+            .OrderBy(item => item.Id)
+            .ToListAsync(ct);
+        Dictionary<int, string?> last = [];
+        foreach (MediaRequestEvent item in events)
+        {
+            last[item.MediaRequestId] = item.Reason;
+        }
+
+        return [.. last
+            .Where(pair => pair.Value is RequestLabeling.TimeoutReason or RequestLabeling.WriteFailedReason)
+            .Select(pair => pair.Key)];
+    }
+
     public static async Task<IReadOnlyList<KidHistoryEntry>> KidHistoryAsync(
         WishlistarrDbContext db,
         int profileId,

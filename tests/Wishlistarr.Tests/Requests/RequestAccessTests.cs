@@ -861,6 +861,7 @@ public sealed class RequestAccessTests
             JsonElement revoked = await RevokeAsync(parent, new { ids = new[] { id } });
 
             Assert.True(Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("canRevoke").GetBoolean());
+            Assert.True(Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("labelMayRemain").GetBoolean());
             Assert.Equal("succeeded", Item(revoked, id).GetProperty("status").GetString());
             Assert.False(Item(revoked, id).GetProperty("labelNotOwned").GetBoolean());
             Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
@@ -950,6 +951,8 @@ public sealed class RequestAccessTests
 
         Assert.Equal(RequestState.Failed, result.Result.Request?.State);
         Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+        JsonElement listed = await (await factory.CreateSignedInClientAsync()).GetFromJsonAsync<JsonElement>("/api/v1/requests?state=failed");
+        Assert.False(Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("labelMayRemain").GetBoolean());
         Assert.Equal(RequestLabeling.StoppedReason, (await factory.GetHistoryAsync(id))[^1].Reason);
         Assert.Equal(0, factory.LabelWrites);
         Assert.Empty(await factory.GetLedgerAsync());
@@ -980,6 +983,8 @@ public sealed class RequestAccessTests
         Assert.Equal(1, index.GuidCalls);
         Assert.Equal(lookups, index.Calls);
         Assert.Equal(plexCalls, factory.Plex.Requests.Count);
+        Assert.Equal(2, listed.GetProperty("unfinished").GetInt32());
+        Assert.Equal(2, (await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests?state=pending")).GetProperty("unfinished").GetInt32());
     }
 
     [Fact]
@@ -1019,6 +1024,7 @@ public sealed class RequestAccessTests
         JsonElement listed = await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests?state=failed");
 
         Assert.False(Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("canRevoke").GetBoolean());
+        Assert.True(Assert.Single(listed.GetProperty("items").EnumerateArray()).GetProperty("labelMayRemain").GetBoolean());
     }
 
     [Fact]
@@ -1036,6 +1042,7 @@ public sealed class RequestAccessTests
         JsonElement refused = await RevokeAsync(parent, new { ids = new[] { id } });
 
         Assert.False(Assert.Single(early.GetProperty("items").EnumerateArray()).GetProperty("canRevoke").GetBoolean());
+        Assert.Equal(0, early.GetProperty("unfinished").GetInt32());
         Assert.Equal("conflict", Item(refused, id).GetProperty("status").GetString());
         Assert.Equal("available", Item(refused, id).GetProperty("state").GetString());
         Assert.Equal(["Ada"], factory.Plex.Item("101").Labels);
@@ -1045,6 +1052,8 @@ public sealed class RequestAccessTests
         JsonElement revoked = await RevokeAsync(parent, new { ids = new[] { id } });
 
         Assert.True(Assert.Single(late.GetProperty("items").EnumerateArray()).GetProperty("canRevoke").GetBoolean());
+        Assert.True(Assert.Single(late.GetProperty("items").EnumerateArray()).GetProperty("labelMayRemain").GetBoolean());
+        Assert.Equal(1, late.GetProperty("unfinished").GetInt32());
         Assert.Equal("succeeded", Item(revoked, id).GetProperty("status").GetString());
         Assert.Equal(RequestState.Revoked, Assert.Single(await factory.GetRequestsAsync()).State);
         Assert.Empty(factory.Plex.Item("101").Labels);

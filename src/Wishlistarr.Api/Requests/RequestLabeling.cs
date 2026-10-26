@@ -18,6 +18,8 @@ public sealed partial class RequestLabeling(
 {
     public const string LabelSource = "request";
     public const string StoppedReason = "Labeling was stopped before it started.";
+    public const string TimeoutReason = "Plex did not answer in time.";
+    public const string WriteFailedReason = "The Plex label could not be written.";
 
     public async Task<RequestLabelResult> LabelAsync(
         int requestId,
@@ -107,8 +109,8 @@ public sealed partial class RequestLabeling(
         {
             this.LogLabelFailed(ex, requestId);
             failure = deadline?.IsCancellationRequested == true
-                ? "Plex did not answer in time."
-                : "The Plex label could not be written.";
+                ? TimeoutReason
+                : WriteFailedReason;
         }
         finally
         {

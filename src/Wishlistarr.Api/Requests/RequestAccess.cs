@@ -174,6 +174,15 @@ public sealed partial class RequestAccess(
         return revocable;
     }
 
+    public async Task<int> CountUnfinishedAsync(CancellationToken ct = default)
+    {
+        IQueryable<MediaRequest> listed = db.MediaRequests.AsNoTracking()
+            .Where(request => db.KidProfiles.Any(profile => profile.Id == request.KidProfileId));
+        int failed = await listed.CountAsync(request => request.State == RequestState.Failed, ct);
+        List<MediaRequest> available = await listed.Where(request => request.State == RequestState.Available).ToListAsync(ct);
+        return failed + available.Count(this.IsStuck);
+    }
+
     private async Task<RevokeItem> RevokeOneAsync(int id, RequestActor actor, string? reason, CancellationToken ct)
     {
         MediaRequest? seen = await requests.GetAsync(id, ct);

@@ -42,6 +42,7 @@ public static class RequestEndpoints
                     profile => profile.Id,
                     (request, profile) => new ListedRequest { Request = request, KidName = profile.Name });
             int total;
+            int unfinished;
             List<ListedRequest> listed;
             await db.Database.OpenConnectionAsync(ct);
             await using (SqliteTransaction snapshot = ((SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: true))
@@ -53,12 +54,17 @@ public static class RequestEndpoints
                     .Skip(skip)
                     .Take(take)
                     .ToListAsync(ct);
+                unfinished = await access.CountUnfinishedAsync(ct);
             }
 
             List<MediaRequest> rows = [.. listed.Select(item => item.Request)];
             IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(rows, ct);
             Dictionary<int, string> reasons = await RequestViews.DenialReasonsAsync(db, [.. rows.Select(request => request.Id)], ct);
             IReadOnlySet<int> revocable = await access.RevocableAsync(rows, ct);
+            HashSet<int> mayRemain = await RequestViews.LabelMayRemainAsync(
+                db,
+                [.. rows.Where(request => request.State == RequestState.Failed).Select(request => request.Id)],
+                ct);
             List<ParentRequestResponse> body = [];
             foreach (ListedRequest item in listed)
             {
@@ -74,13 +80,14 @@ public static class RequestEndpoints
                     request.RequestCount,
                     request.CreatedAt,
                     request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason) ? reason : null,
-                    revocable.Contains(request.Id)));
+                    revocable.Contains(request.Id),
+                    mayRemain.Contains(request.Id) || (request.State == RequestState.Available && revocable.Contains(request.Id))));
             }
 
-            return Results.Ok(new ParentRequestPage(body, total, take, skip));
+            return Results.Ok(new ParentRequestPage(body, total, take, skip, unfinished));
         })
             .WithName("ListRequests")
-            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text. canRevoke says whether a parent can revoke the request now.")
+            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text. canRevoke says whether a parent can revoke the request now, labelMayRemain whether a label may have been left in Plex, and unfinished counts the failed and stuck requests.")
             .Produces<ParentRequestPage>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
@@ -284,7 +291,7 @@ file sealed class ListedRequest
 
 public sealed record DecisionBody(IReadOnlyList<int>? Ids, string? Reason);
 
-public sealed record ParentRequestPage(IReadOnlyList<ParentRequestResponse> Items, int Total, int Limit, int Offset);
+public sealed record ParentRequestPage(IReadOnlyList<ParentRequestResponse> Items, int Total, int Limit, int Offset, int Unfinished);
 
 public sealed record DecisionBodyResponse(IReadOnlyList<DecisionItem> Results);
 
@@ -314,4 +321,5 @@ public sealed record ParentRequestResponse(
     int RequestCount,
     DateTimeOffset CreatedAt,
     string? DenialReason,
-    bool CanRevoke);
+    bool CanRevoke,
+    bool LabelMayRemain);
