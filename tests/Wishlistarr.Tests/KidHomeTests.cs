@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -480,6 +482,130 @@ public sealed class KidHomeTests
     }
 
     [Fact]
+    public async Task Home_waits_for_cancelled_calls_to_finish_before_it_answers()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        (_, int profileId) = await factory.SignInKidAsync(homeRows: ["popular", "genre:35"]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        HomeClient tmdb = new() { HangGenre = "*", CancelGate = gate };
+        ManualTimeProvider time = new();
+        KidHome home = NewHome(scope, tmdb, time);
+
+        Task<HomeLoad> pending = home.LoadAsync(profileId);
+        using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
+        while (tmdb.HangingCalls < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        time.Advance(KidContentPipeline.LookupBudget);
+        while (tmdb.CancelledCalls < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        await Task.Delay(100, guard.Token);
+        Assert.False(pending.IsCompleted);
+
+        gate.SetResult();
+        HomeLoad load = await pending.WaitAsync(guard.Token);
+
+        Assert.Equal(HomeLoadStatus.Ready, load.Status);
+        Assert.Equal(0, tmdb.HangingCalls);
+    }
+
+    [Fact]
+    public async Task A_call_that_fails_after_the_budget_is_observed()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        (_, int profileId) = await factory.SignInKidAsync(homeRows: ["popular", "genre:35"]);
+        List<Exception> unobserved = [];
+        void Record(object? sender, UnobservedTaskExceptionEventArgs args)
+        {
+            lock (unobserved)
+            {
+                unobserved.AddRange(args.Exception.Flatten().InnerExceptions);
+            }
+
+            args.SetObserved();
+        }
+
+        TaskScheduler.UnobservedTaskException += Record;
+        try
+        {
+            HomeLoad load = await LoadWithLateFailureAsync(factory, profileId);
+            Assert.Equal(HomeLoadStatus.Ready, load.Status);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Record;
+        }
+
+        lock (unobserved)
+        {
+            Assert.DoesNotContain(unobserved, failure => failure is TmdbNotConfiguredException);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<HomeLoad> LoadWithLateFailureAsync(KidRequestApiFactory factory, int profileId)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        HomeClient tmdb = new() { HangGenre = "*", CancelGate = gate, LateNotConfigured = true };
+        ManualTimeProvider time = new();
+        KidHome home = NewHome(scope, tmdb, time);
+        using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
+
+        Task<HomeLoad> pending = home.LoadAsync(profileId);
+        while (tmdb.HangingCalls < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        time.Advance(KidContentPipeline.LookupBudget);
+        while (tmdb.CancelledCalls < 4)
+        {
+            await Task.Delay(10, guard.Token);
+        }
+
+        gate.SetResult();
+        return await pending.WaitAsync(guard.Token);
+    }
+
+    [Fact]
+    public async Task A_genre_row_only_calls_discover_for_the_media_types_the_genre_has()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        (_, int profileId) = await factory.SignInKidAsync(homeRows: ["genre:10762", "genre:35", "genre:16", "genre:99"]);
+        using IServiceScope scope = factory.Services.CreateScope();
+        HomeClient tmdb = new()
+        {
+            Listed =
+            [
+                new TmdbListedGenre(10762, "Kids", false, true),
+                new TmdbListedGenre(35, "Comedy", true, false),
+                new TmdbListedGenre(16, "Animation", true, true),
+            ],
+        };
+        KidHome home = NewHome(scope, tmdb, new ManualTimeProvider());
+
+        await home.LoadAsync(profileId);
+
+        TmdbMediaType[] TypesFor(string genre) =>
+            [.. tmdb.Discovers.Where(call => call.Genres == genre).Select(call => call.Type).Order()];
+
+        Assert.Equal([TmdbMediaType.Tv], TypesFor("10762"));
+        Assert.Equal([TmdbMediaType.Movie], TypesFor("35"));
+        Assert.Equal([TmdbMediaType.Movie, TmdbMediaType.Tv], TypesFor("16"));
+        Assert.Equal([TmdbMediaType.Movie, TmdbMediaType.Tv], TypesFor("99"));
+    }
+
+    [Fact]
     public async Task Genre_rows_carry_the_tmdb_genre_name()
     {
         using KidRequestApiFactory factory = PolicyFactory();
@@ -509,6 +635,9 @@ public sealed class KidHomeTests
         Assert.Equal(
             ["Comedy", "Western"],
             options.GetProperty("genres").EnumerateArray().Select(genre => genre.GetProperty("name").GetString()));
+        Assert.Equal(
+            [(true, false), (false, true)],
+            options.GetProperty("genres").EnumerateArray().Select(genre => (genre.GetProperty("movie").GetBoolean(), genre.GetProperty("tv").GetBoolean())));
         Assert.Equal(HttpStatusCode.Forbidden, (await kid.GetAsync("/api/v1/kid-profiles/home-options")).StatusCode);
 
         using KidRequestApiFactory down = PolicyFactory();
@@ -552,16 +681,28 @@ public sealed class KidHomeTests
     private sealed class HomeClient : ITmdbClient
     {
         private int hanging;
+        private int cancelled;
 
         public string? HangGenre { get; init; }
 
         public int TimeoutDetailId { get; init; }
+
+        public IReadOnlyList<TmdbListedGenre> Listed { get; init; } = [new TmdbListedGenre(35, "Comedy", true, true)];
+
+        public TaskCompletionSource? CancelGate { get; init; }
+
+        public bool LateNotConfigured { get; init; }
+
+        public ConcurrentQueue<(TmdbMediaType Type, string? Genres)> Discovers { get; } = [];
+
+        public int CancelledCalls => Volatile.Read(ref this.cancelled);
 
         public int HangingCalls => Volatile.Read(ref this.hanging);
 
         public async Task<TmdbPage<TmdbSearchResult>> DiscoverAsync(TmdbMediaType type, TmdbDiscoverQuery query, string language = "en-US", CancellationToken ct = default)
         {
             bool movie = type == TmdbMediaType.Movie;
+            this.Discovers.Enqueue((type, query.Genres));
             bool hang = this.HangGenre == "*" || (this.HangGenre is not null && query.Genres == this.HangGenre && !movie);
             if (hang)
             {
@@ -569,6 +710,17 @@ public sealed class KidHomeTests
                 try
                 {
                     await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException) when (this.CancelGate is not null)
+                {
+                    Interlocked.Increment(ref this.cancelled);
+                    await this.CancelGate.Task;
+                    if (this.LateNotConfigured)
+                    {
+                        throw new TmdbNotConfiguredException();
+                    }
+
+                    throw;
                 }
                 finally
                 {
@@ -601,8 +753,8 @@ public sealed class KidHomeTests
             return Task.FromResult(new TmdbDetails(id, $"Shelf {id}", null, null, null, null, null, "2024-01-01", null, null, null, null, null, 0));
         }
 
-        public Task<IReadOnlyList<TmdbGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<TmdbGenre>>([new TmdbGenre(35, "Comedy")]);
+        public Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) =>
+            Task.FromResult(this.Listed);
 
         public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => throw new NotSupportedException();
 

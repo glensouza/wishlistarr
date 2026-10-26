@@ -110,14 +110,16 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
         return results is { Count: > 0 } ? results[0].Id : null;
     }
 
-    public async Task<IReadOnlyList<TmdbGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default)
+    public async Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default)
     {
         GenresResponse movies = await this.GetAsync<GenresResponse>("genre/movie/list", [("language", language)], DetailLifetime, ct);
         GenresResponse shows = await this.GetAsync<GenresResponse>("genre/tv/list", [("language", language)], DetailLifetime, ct);
+        HashSet<int> movieIds = [.. (movies.Genres ?? []).Select(genre => genre.Id)];
+        HashSet<int> showIds = [.. (shows.Genres ?? []).Select(genre => genre.Id)];
         return [.. (movies.Genres ?? []).Concat(shows.Genres ?? [])
             .Where(genre => !string.IsNullOrWhiteSpace(genre.Name))
             .GroupBy(genre => genre.Id)
-            .Select(group => group.First())
+            .Select(group => new TmdbListedGenre(group.Key, group.First().Name, movieIds.Contains(group.Key), showIds.Contains(group.Key)))
             .OrderBy(genre => genre.Name, StringComparer.CurrentCultureIgnoreCase)];
     }
 

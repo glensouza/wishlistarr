@@ -32,9 +32,15 @@ let calls: Call[]
 let profiles: KidProfile[]
 let failNext: { status: number; title: string } | null
 let plexUsers: { id: string; name: string }[] | null
+let optionsFail: number
+let optionsGate: Promise<void> | null
+let optionRequests: number
 
 beforeEach(() => {
   calls = []
+  optionsFail = 0
+  optionsGate = null
+  optionRequests = 0
   profiles = [ada]
   failNext = null
   plexUsers = [
@@ -49,11 +55,17 @@ beforeEach(() => {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }
       if (path === '/api/v1/kid-profiles/home-options') {
+        optionRequests++
+        if (optionsGate) await optionsGate
+        if (optionsFail > 0) {
+          optionsFail--
+          return Response.json({ title: 'TMDB is down' }, { status: 502 })
+        }
         return Response.json({
           defaultRows: ['popular', 'library', 'genre'],
           genres: [
-            { id: 35, name: 'Comedy' },
-            { id: 37, name: 'Western' },
+            { id: 35, name: 'Comedy', movie: true, tv: true },
+            { id: 37, name: 'Western', movie: false, tv: true },
           ],
         })
       }
@@ -377,4 +389,98 @@ it('adds a genre row from the picker and saves it', async () => {
   expect(writes()[0].body).toMatchObject({
     homeRows: ['popular', 'library', 'genre', 'genre:37'],
   })
+})
+
+it('shows a loading state and keeps Save off until the home row choices arrive', async () => {
+  let release: () => void = () => {}
+  optionsGate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect(screen.getByText('Loading home row choices')).toBeTruthy()
+  expect(
+    (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true)
+  expect(screen.getByRole('checkbox', { name: 'By genre' })).toBeTruthy()
+
+  release()
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  )
+  expect(screen.queryByText('Loading home row choices')).toBeNull()
+})
+
+it('reports a failed home options load, blocks saving and recovers on retry', async () => {
+  profiles = [{ ...ada, homeRows: ['library'] }]
+  optionsFail = 1
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'The home row choices could not be loaded.',
+  )
+  expect(
+    (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true)
+  expect(
+    (
+      screen.getByRole('checkbox', {
+        name: 'Popular for my age',
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(false)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  await waitFor(() => expect(optionRequests).toBe(2))
+  await waitFor(() =>
+    expect(
+      (screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false),
+  )
+  expect(screen.queryByRole('alert')).toBeNull()
+
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Popular for my age' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({ homeRows: ['library', 'popular'] })
+})
+
+it('does not save a new profile with no rows when the options cannot load', async () => {
+  profiles = []
+  optionsFail = 1
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Add profile' }))
+  await screen.findByRole('alert')
+
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Cy' } })
+  fireEvent.submit(screen.getByRole('form', { name: 'New profile' }))
+
+  expect(writes()).toHaveLength(0)
+  expect(
+    (
+      screen.getByRole('checkbox', {
+        name: 'New in our library',
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true)
+})
+
+it('says which media types each genre in the picker applies to', async () => {
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+
+  const picker = await screen.findByLabelText('Add a genre row')
+  const labels = Array.from(picker.querySelectorAll('option')).map(
+    (option) => option.textContent,
+  )
+  expect(labels).toContain('Comedy (movies and TV)')
+  expect(labels).toContain('Western (TV)')
 })

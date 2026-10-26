@@ -137,6 +137,12 @@ export const en = {
   'admin.genreRow': 'Genre {id}',
   'admin.addGenreRow': 'Add a genre row',
   'admin.chooseGenre': 'Choose a genre',
+  'admin.genreMovies': '{name} (movies)',
+  'admin.genreShows': '{name} (TV)',
+  'admin.genreBoth': '{name} (movies and TV)',
+  'admin.homeOptionsLoading': 'Loading home row choices',
+  'admin.homeOptionsFailed': 'The home row choices could not be loaded.',
+  'admin.homeOptionsRetry': 'Try again',
   'admin.rulesInvalid':
     'Genres and keywords must be TMDB ids separated by commas.',
   'admin.plexLabel': 'Plex label',

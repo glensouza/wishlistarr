@@ -20,6 +20,8 @@ public sealed class FakeScanner : ILibraryScanner
 
     public string? SelectedServerId { get; set; }
 
+    public TaskCompletionSource? ServerIdGate { get; set; }
+
     public bool Complete { get; set; } = true;
 
     public int LabelScans { get; private set; }
@@ -81,7 +83,15 @@ public sealed class FakeScanner : ILibraryScanner
         return Task.FromResult(new LibraryLabelScan(this.ServerId, byItem, this.Complete));
     }
 
-    public Task<string?> GetServerIdAsync(CancellationToken ct = default) => Task.FromResult<string?>(this.SelectedServerId ?? this.ServerId);
+    public async Task<string?> GetServerIdAsync(CancellationToken ct = default)
+    {
+        if (this.ServerIdGate is TaskCompletionSource gate)
+        {
+            await gate.Task.WaitAsync(ct);
+        }
+
+        return this.SelectedServerId ?? this.ServerId;
+    }
 
     public Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
     {
@@ -118,7 +128,7 @@ public sealed class FakeTmdbFinder : ITmdbClient
 
     public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
-    public Task<IReadOnlyList<TmdbGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
     public Dictionary<(TmdbMediaType Type, int Id), string> Titles { get; } = [];
 

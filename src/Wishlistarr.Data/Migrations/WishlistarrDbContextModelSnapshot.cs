@@ -385,8 +385,6 @@ namespace Wishlistarr.Data.Migrations
 
                     b.HasIndex("TitleId");
 
-                    b.HasIndex("ServerId", "PlexAddedAtUnix");
-
                     b.HasIndex("ServerId", "RatingKey")
                         .IsUnique();
 

@@ -11,7 +11,7 @@ using Wishlistarr.Data;
 namespace Wishlistarr.Data.Migrations
 {
     [DbContext(typeof(WishlistarrDbContext))]
-    [Migration("20261025214310_AddLibraryAddedAt")]
+    [Migration("20261026023317_AddLibraryAddedAt")]
     partial class AddLibraryAddedAt
     {
         /// <inheritdoc />
@@ -387,8 +387,6 @@ namespace Wishlistarr.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TitleId");
-
-                    b.HasIndex("ServerId", "PlexAddedAtUnix");
 
                     b.HasIndex("ServerId", "RatingKey")
                         .IsUnique();

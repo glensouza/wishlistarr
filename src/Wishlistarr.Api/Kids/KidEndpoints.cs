@@ -183,7 +183,7 @@ public static class KidEndpoints
 
         profiles.MapGet("/home-options", async (ITmdbClient tmdb, CancellationToken ct) =>
         {
-            IReadOnlyList<TmdbGenre> genres;
+            IReadOnlyList<TmdbListedGenre> genres;
             try
             {
                 genres = await tmdb.GetGenresAsync(ct: ct);
@@ -193,7 +193,7 @@ public static class KidEndpoints
                 genres = [];
             }
 
-            return new HomeRowOptions(HomeRowTypes.Defaults, [.. genres.Select(genre => new HomeGenreOption(genre.Id, genre.Name))]);
+            return new HomeRowOptions(HomeRowTypes.Defaults, [.. genres.Select(genre => new HomeGenreOption(genre.Id, genre.Name, genre.Movie, genre.Tv))]);
         })
             .WithName("GetKidHomeOptions")
             .WithSummary("Returns the default home rows and the TMDB genres a parent can add as rows. The genre list is empty when TMDB cannot be reached.")
@@ -362,6 +362,6 @@ public sealed record KidProfileSummary(
         restrictions);
 }
 
-public sealed record HomeGenreOption(int Id, string Name);
+public sealed record HomeGenreOption(int Id, string Name, bool Movie, bool Tv);
 
 public sealed record HomeRowOptions(IReadOnlyList<string> DefaultRows, IReadOnlyList<HomeGenreOption> Genres);

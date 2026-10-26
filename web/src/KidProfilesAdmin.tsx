@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   avatars,
+  builtInHomeRows,
   createKidProfile,
   deleteKidProfile,
   getHomeOptions,
@@ -33,13 +34,21 @@ type FormState = {
 
 type HomeChoice = { id: string; enabled: boolean }
 
-function homeChoices(configured: string[], defaults: string[]): HomeChoice[] {
-  const choices = configured.map((id) => ({ id, enabled: true }))
+function withDefaults(rows: HomeChoice[], defaults: string[]): HomeChoice[] {
+  const choices = rows.slice()
   for (const id of defaults) {
-    if (!configured.includes(id)) choices.push({ id, enabled: false })
+    if (!rows.some((choice) => choice.id === id)) {
+      choices.push({ id, enabled: false })
+    }
   }
   return choices
 }
+
+const homeChoices = (configured: string[], defaults: string[]) =>
+  withDefaults(
+    configured.map((id) => ({ id, enabled: true })),
+    defaults,
+  )
 
 const emptyForm = (defaults: string[]): FormState => ({
   name: '',
@@ -125,6 +134,8 @@ export default function KidProfilesAdmin() {
   const [editing, setEditing] = useState<KidProfile | 'new' | null>(null)
   const [deleting, setDeleting] = useState<KidProfile | null>(null)
   const [options, setOptions] = useState<HomeOptions | null>(null)
+  const [optionsFailed, setOptionsFailed] = useState(false)
+  const [optionsVersion, setOptionsVersion] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const [version, setVersion] = useState(0)
@@ -145,13 +156,22 @@ export default function KidProfilesAdmin() {
   useEffect(() => {
     let current = true
     getHomeOptions().then(
-      (loaded) => current && setOptions(loaded),
-      () => current && setOptions({ defaultRows: [], genres: [] }),
+      (loaded) => {
+        if (!current) return
+        setOptions(loaded)
+        setOptionsFailed(false)
+      },
+      () => current && setOptionsFailed(true),
     )
     return () => {
       current = false
     }
-  }, [])
+  }, [optionsVersion])
+
+  function retryOptions() {
+    setOptionsFailed(false)
+    setOptionsVersion((current) => current + 1)
+  }
 
   async function unlock(profile: KidProfile) {
     setError(null)
@@ -193,9 +213,11 @@ export default function KidProfilesAdmin() {
           {t('admin.add')}
         </button>
       )}
-      {editing !== null && options !== null && (
+      {editing !== null && (
         <ProfileForm
           options={options}
+          optionsFailed={optionsFailed}
+          onRetryOptions={retryOptions}
           key={editing === 'new' ? 'new' : editing.id}
           profile={editing === 'new' ? null : editing}
           onCancel={() => setEditing(null)}
@@ -247,7 +269,9 @@ function RestrictionNotes({
 }
 
 type ProfileFormProps = {
-  options: HomeOptions
+  options: HomeOptions | null
+  optionsFailed: boolean
+  onRetryOptions: () => void
   profile: KidProfile | null
   onCancel: () => void
   onSaved: () => void
@@ -255,30 +279,31 @@ type ProfileFormProps = {
 
 function ProfileForm({
   options,
+  optionsFailed,
+  onRetryOptions,
   profile,
   onCancel,
   onSaved,
 }: ProfileFormProps) {
   const t = useT()
+  const defaults = options?.defaultRows ?? builtInHomeRows
+  const genres = options?.genres ?? []
   const [form, setForm] = useState<FormState>(
-    profile
-      ? toForm(profile, options.defaultRows)
-      : emptyForm(options.defaultRows),
+    profile ? toForm(profile, defaults) : emptyForm(defaults),
   )
   const [error, setError] = useState<string | null>(null)
+  const homeRows = withDefaults(form.homeRows, defaults)
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
 
   function moveHomeRow(index: number, delta: number) {
-    setForm((current) => {
-      const next = current.homeRows.slice()
-      const target = index + delta
-      if (target < 0 || target >= next.length) return current
-      const [moved] = next.splice(index, 1)
-      next.splice(target, 0, moved)
-      return { ...current, homeRows: next }
-    })
+    const next = homeRows.slice()
+    const target = index + delta
+    if (target < 0 || target >= next.length) return
+    const [moved] = next.splice(index, 1)
+    next.splice(target, 0, moved)
+    set('homeRows', next)
   }
 
   function homeRowName(id: string, translate: typeof t) {
@@ -287,28 +312,25 @@ function ProfileForm({
     if (id === 'genre') return translate('admin.rowGenre')
     const genre = /^genre:(\d+)$/.exec(id)
     if (!genre) return id
-    const known = options.genres.find((item) => item.id === Number(genre[1]))
+    const known = genres.find((item) => item.id === Number(genre[1]))
     return known ? known.name : translate('admin.genreRow', { id: genre[1] })
   }
 
-  const pickable = options.genres.filter(
-    (genre) =>
-      !form.homeRows.some((choice) => choice.id === `genre:${genre.id}`),
+  const pickable = genres.filter(
+    (genre) => !homeRows.some((choice) => choice.id === `genre:${genre.id}`),
   )
 
   function addGenreRow(value: string) {
     if (value === '') return
-    setForm((current) => ({
-      ...current,
-      homeRows: [...current.homeRows, { id: `genre:${value}`, enabled: true }],
-    }))
+    set('homeRows', [...homeRows, { id: `genre:${value}`, enabled: true }])
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError(null)
+    if (options === null) return
     try {
-      const input = toInput(form)
+      const input = toInput({ ...form, homeRows })
       if (input === null) {
         setError(t('admin.rulesInvalid'))
         return
@@ -431,7 +453,18 @@ function ProfileForm({
       <fieldset>
         <legend>{t('admin.homeRows')}</legend>
         <p className="muted">{t('admin.homeRowsHint')}</p>
-        {form.homeRows.map((choice, index) => {
+        {options === null && !optionsFailed && (
+          <p role="status">{t('admin.homeOptionsLoading')}</p>
+        )}
+        {optionsFailed && (
+          <p role="alert">
+            {t('admin.homeOptionsFailed')}{' '}
+            <button type="button" onClick={onRetryOptions}>
+              {t('admin.homeOptionsRetry')}
+            </button>
+          </p>
+        )}
+        {homeRows.map((choice, index) => {
           const name = homeRowName(choice.id, t)
           return (
             <div key={choice.id} className="home-row-choice">
@@ -442,7 +475,7 @@ function ProfileForm({
                   onChange={() =>
                     set(
                       'homeRows',
-                      form.homeRows.map((item, itemIndex) =>
+                      homeRows.map((item, itemIndex) =>
                         itemIndex === index
                           ? { ...item, enabled: !item.enabled }
                           : item,
@@ -463,7 +496,7 @@ function ProfileForm({
               <button
                 type="button"
                 aria-label={t('admin.moveDown', { name })}
-                disabled={index === form.homeRows.length - 1}
+                disabled={index === homeRows.length - 1}
                 onClick={() => moveHomeRow(index, 1)}
               >
                 {t('admin.down')}
@@ -481,7 +514,14 @@ function ProfileForm({
               <option value="">{t('admin.chooseGenre')}</option>
               {pickable.map((genre) => (
                 <option key={genre.id} value={genre.id}>
-                  {genre.name}
+                  {t(
+                    genre.movie && genre.tv
+                      ? 'admin.genreBoth'
+                      : genre.tv
+                        ? 'admin.genreShows'
+                        : 'admin.genreMovies',
+                    { name: genre.name },
+                  )}
                 </option>
               ))}
             </select>
@@ -498,7 +538,9 @@ function ProfileForm({
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button type="submit">{t('admin.save')}</button>
+      <button type="submit" disabled={options === null}>
+        {t('admin.save')}
+      </button>
       <button type="button" onClick={onCancel}>
         {t('admin.cancel')}
       </button>

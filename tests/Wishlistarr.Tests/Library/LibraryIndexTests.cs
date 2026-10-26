@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Library;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
@@ -605,6 +606,31 @@ public sealed class LibraryIndexTests
         Assert.Equal(
             [(MediaKind.Movie, 603), (MediaKind.Movie, 700), (MediaKind.Show, 82728), (MediaKind.Movie, 900)],
             (await harness.RecentAsync(10) ?? []).Select(entry => (entry.Kind, entry.TmdbId)));
+    }
+
+    [Fact]
+    public async Task A_caller_that_gives_up_while_the_ready_check_runs_does_not_poison_later_calls()
+    {
+        await using LibraryHarness harness = await LibraryHarness.CreateAsync();
+        harness.Scanner.Entries.Add(FakeScanner.Entry("101", MediaKind.Movie, "The Matrix", [Tmdb("603")]));
+        await harness.FullAsync();
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Scanner.ServerIdGate = gate;
+
+        await harness.InScopeAsync(async services =>
+        {
+            ILibraryIndex index = services.GetRequiredService<ILibraryIndex>();
+            using CancellationTokenSource gaveUp = new();
+            Task<IReadOnlyList<MediaItem>?> abandoned = index.FindAsync(MediaKind.Movie, Tmdb("603"), gaveUp.Token);
+            await gaveUp.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
+
+            gate.SetResult();
+
+            Assert.NotNull(await index.FindAsync(MediaKind.Movie, Tmdb("603")));
+            Assert.NotNull(await index.ListRecentAsync(5));
+            return 0;
+        });
     }
 
     private static async Task<string> QueryPlanAsync(LibraryHarness harness, string sql)

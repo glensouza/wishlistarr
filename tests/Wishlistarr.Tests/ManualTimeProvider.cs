@@ -9,9 +9,10 @@ public sealed class ManualTimeProvider : TimeProvider
 
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
-        ManualTimer timer = new(callback, state, this.now + dueTime);
+        ManualTimer timer;
         lock (this.timers)
         {
+            timer = new ManualTimer(this, callback, state, dueTime);
             this.timers.Add(timer);
         }
 
@@ -33,28 +34,79 @@ public sealed class ManualTimeProvider : TimeProvider
         }
     }
 
-    private sealed class ManualTimer(TimerCallback callback, object? state, DateTimeOffset due) : ITimer
+    private DateTimeOffset DueAt(TimeSpan dueTime) =>
+        dueTime == Timeout.InfiniteTimeSpan ? DateTimeOffset.MaxValue : this.now + dueTime;
+
+    private sealed class ManualTimer : ITimer
     {
+        private readonly ManualTimeProvider owner;
+        private readonly TimerCallback callback;
+        private readonly object? state;
+        private DateTimeOffset due;
         private bool done;
+        private bool disposed;
 
-        public DateTimeOffset Due => due;
-
-        public void Fire()
+        public ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan dueTime)
         {
-            if (!this.done)
+            this.owner = owner;
+            this.callback = callback;
+            this.state = state;
+            this.due = owner.DueAt(dueTime);
+        }
+
+        public DateTimeOffset Due
+        {
+            get
             {
-                this.done = true;
-                callback(state);
+                lock (this.owner.timers)
+                {
+                    return this.due;
+                }
             }
         }
 
-        public bool Change(TimeSpan dueTime, TimeSpan period) => !this.done;
+        public void Fire()
+        {
+            lock (this.owner.timers)
+            {
+                if (this.done)
+                {
+                    return;
+                }
 
-        public void Dispose() => this.done = true;
+                this.done = true;
+            }
+
+            this.callback(this.state);
+        }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            lock (this.owner.timers)
+            {
+                if (this.disposed)
+                {
+                    return false;
+                }
+
+                this.due = this.owner.DueAt(dueTime);
+                this.done = false;
+                return true;
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (this.owner.timers)
+            {
+                this.disposed = true;
+                this.done = true;
+            }
+        }
 
         public ValueTask DisposeAsync()
         {
-            this.done = true;
+            this.Dispose();
             return ValueTask.CompletedTask;
         }
     }

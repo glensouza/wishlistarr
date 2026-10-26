@@ -96,7 +96,8 @@ public sealed class LibraryIndex(WishlistarrDbContext db, ILibraryScanner scanne
             await db.LibraryItemLabels.Select(label => label.Label).Distinct().CountAsync(ct));
     }
 
-    private Task<string?> GetReadyServerAsync(CancellationToken ct) => this.readyServer ??= this.LoadReadyServerAsync(ct);
+    private Task<string?> GetReadyServerAsync(CancellationToken ct) =>
+        (this.readyServer ??= this.LoadReadyServerAsync(CancellationToken.None)).WaitAsync(ct);
 
     private async Task<string?> LoadReadyServerAsync(CancellationToken ct)
     {

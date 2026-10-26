@@ -2,7 +2,7 @@
 
 `GET /api/v1/kid/home` needs a Kid session. It always answers for the signed-in profile; there is no profile id to pass. The response is `{ rows }`. Each row has `id`, `genreId` and `genreName` (both null except on a genre shelf; the name is TMDB's English name, or null when TMDB's genre list could not be read) and `items`. An item is the same shape search returns: `kind`, `tmdbId`, `title`, `year`, `overview`, `posterUrl`, `availability` and `needsParent`. Empty rows are left out. Responses are sent with `Cache-Control: private, no-store`.
 
-Home uses the same content pipeline as [search](kid-search.md): the profile's content policy, US certification lookups, keyword lookups when the profile blocks keywords, at most 8 lookups at a time, and a 3 second budget. A title is returned only when the decision is `Allowed`. Anything blocked, needing approval, unrated under the default policy, or whose certification or keywords could not be read, is left out entirely. `needsParent` is therefore false on every home item. Search still returns masked titles that need a parent; home does not.
+Home uses the same content pipeline as [search](kid-search.md): the profile's content policy, US certification lookups, keyword lookups when the profile blocks keywords, at most 8 lookups at a time. Gathering the rows has a 3 second budget and the certification pass that follows has its own 3 seconds (see Limits). A title is returned only when the decision is `Allowed`. Anything blocked, needing approval, unrated under the default policy, or whose certification or keywords could not be read, is left out entirely. `needsParent` is therefore false on every home item. Search still returns masked titles that need a parent; home does not.
 
 ## Rows
 
@@ -13,7 +13,7 @@ Parents choose the rows on the profile (`homeRows` on the [profile API](kid-prof
 | `popular` | Popular for my age. One movie discover and one TV discover, ordered by `popularity.desc`. |
 | `library` | New in our library. The newest distinct TMDB titles in the [library index](library.md), by the time Plex added them. Items indexed before the library index stored that time have none until the next full refresh and are listed after the others. |
 | `genre` | Three shelves, Animation (`16`), Family (`10751`) and Comedy (`35`), skipping any id the profile blocks. |
-| `genre:<id>` | One shelf for that TMDB genre id. A blocked id is skipped and not requested. |
+| `genre:<id>` | One shelf for that TMDB genre id. A blocked id is skipped and not requested. A genre that exists only for movies or only for TV is discovered for that type alone; an id TMDB does not list is tried for both. |
 
 `genre:016` is stored as `genre:16`. Duplicate tokens are stored once. The `genre` token counts as one of the ten stored values; the three shelves it expands into do not. An empty list stores no rows and the home answer is `{ "rows": [] }` without calling TMDB.
 

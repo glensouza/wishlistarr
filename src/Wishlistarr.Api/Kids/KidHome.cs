@@ -221,25 +221,27 @@ public sealed partial class KidHome(
         CancellationToken ct)
     {
         IReadOnlyList<KidCandidate>?[] rows = new IReadOnlyList<KidCandidate>?[slots.Count];
-        Task<IReadOnlyDictionary<int, string>> names = Task.FromResult<IReadOnlyDictionary<int, string>>(new Dictionary<int, string>());
         using CancellationTokenSource deadline = new(KidContentPipeline.LookupBudget, time);
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
         using SemaphoreSlim discoverLimit = new(MaxParallelDiscover);
         List<Task> tasks = [];
+        Task<IReadOnlyDictionary<int, TmdbListedGenre>> genres = Task.FromResult<IReadOnlyDictionary<int, TmdbListedGenre>>(
+            new Dictionary<int, TmdbListedGenre>());
+        if (slots.Any(slot => slot.GenreId is not null))
+        {
+            genres = this.LoadGenresAsync(budget.Token);
+            tasks.Add(genres);
+        }
+
         for (int index = 0; index < slots.Count; index++)
         {
             tasks.Add(GatherRowAsync(index, slots[index]));
         }
 
-        if (slots.Any(slot => slot.GenreId is not null))
-        {
-            names = this.LoadGenreNamesAsync(budget.Token);
-            tasks.Add(names);
-        }
-
+        Task all = Task.WhenAll(tasks);
         try
         {
-            await Task.WhenAll(tasks).WaitAsync(budget.Token);
+            await all.WaitAsync(budget.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -248,6 +250,7 @@ public sealed partial class KidHome(
         finally
         {
             await budget.CancelAsync();
+            await all.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
 
         IReadOnlyList<KidCandidate>?[] finished = new IReadOnlyList<KidCandidate>?[rows.Length];
@@ -256,28 +259,41 @@ public sealed partial class KidHome(
             finished[index] = Volatile.Read(ref rows[index]);
         }
 
-        return new Gathered(finished, names.IsCompletedSuccessfully ? names.Result : new Dictionary<int, string>());
+        return new Gathered(
+            finished,
+            genres.IsCompletedSuccessfully
+                ? genres.Result.ToDictionary(pair => pair.Key, pair => pair.Value.Name)
+                : []);
 
         async Task GatherRowAsync(int index, HomeSlot slot)
         {
             IReadOnlyList<KidCandidate> gathered = slot.Id == HomeRowTypes.Library
                 ? await this.GatherLibraryAsync(tally, budget.Token)
-                : await this.GatherDiscoverAsync(slot.GenreId, movieCeiling, tally, discoverLimit, budget.Token);
+                : await this.GatherDiscoverAsync(slot.GenreId, genres, movieCeiling, tally, discoverLimit, budget.Token);
             Volatile.Write(ref rows[index], gathered);
         }
     }
 
     private async Task<IReadOnlyList<KidCandidate>> GatherDiscoverAsync(
         int? genreId,
+        Task<IReadOnlyDictionary<int, TmdbListedGenre>> genres,
         string? movieCeiling,
         TmdbTally tally,
         SemaphoreSlim limit,
         CancellationToken ct)
     {
-        Task<List<KidCandidate>> movies = DiscoverLimitedAsync(TmdbMediaType.Movie);
-        Task<List<KidCandidate>> shows = DiscoverLimitedAsync(TmdbMediaType.Tv);
-        await Task.WhenAll(movies, shows);
-        return Interleave(movies.Result, shows.Result, MaxCandidatesPerRow);
+        bool movies = true;
+        bool shows = true;
+        if (genreId is int id && (await genres.WaitAsync(ct)).TryGetValue(id, out TmdbListedGenre? listed))
+        {
+            movies = listed.Movie;
+            shows = listed.Tv;
+        }
+
+        Task<List<KidCandidate>> movieResults = movies ? DiscoverLimitedAsync(TmdbMediaType.Movie) : Task.FromResult<List<KidCandidate>>([]);
+        Task<List<KidCandidate>> showResults = shows ? DiscoverLimitedAsync(TmdbMediaType.Tv) : Task.FromResult<List<KidCandidate>>([]);
+        await Task.WhenAll(movieResults, showResults);
+        return Interleave(movieResults.Result, showResults.Result, MaxCandidatesPerRow);
 
         async Task<List<KidCandidate>> DiscoverLimitedAsync(TmdbMediaType type)
         {
@@ -327,16 +343,16 @@ public sealed partial class KidHome(
         }
     }
 
-    private async Task<IReadOnlyDictionary<int, string>> LoadGenreNamesAsync(CancellationToken ct)
+    private async Task<IReadOnlyDictionary<int, TmdbListedGenre>> LoadGenresAsync(CancellationToken ct)
     {
         try
         {
-            return (await tmdb.GetGenresAsync(ct: ct)).ToDictionary(genre => genre.Id, genre => genre.Name);
+            return (await tmdb.GetGenresAsync(ct: ct)).ToDictionary(genre => genre.Id);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
         {
             this.LogGenresFailed(ex);
-            return new Dictionary<int, string>();
+            return new Dictionary<int, TmdbListedGenre>();
         }
     }
 

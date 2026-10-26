@@ -30,9 +30,11 @@ export type PlexRestrictions = {
   television: LabelRestriction
 }
 
+export const builtInHomeRows = ['popular', 'library', 'genre']
+
 export type HomeOptions = {
   defaultRows: string[]
-  genres: { id: number; name: string }[]
+  genres: { id: number; name: string; movie: boolean; tv: boolean }[]
 }
 
 export type KidProfileInput = {

@@ -15,20 +15,11 @@ public partial class AddLibraryAddedAt : Migration
             table: "LibraryItems",
             type: "INTEGER",
             nullable: true);
-
-        migrationBuilder.CreateIndex(
-            name: "IX_LibraryItems_ServerId_PlexAddedAtUnix",
-            table: "LibraryItems",
-            columns: ["ServerId", "PlexAddedAtUnix"]);
     }
 
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.DropIndex(
-            name: "IX_LibraryItems_ServerId_PlexAddedAtUnix",
-            table: "LibraryItems");
-
         migrationBuilder.DropColumn(
             name: "PlexAddedAtUnix",
             table: "LibraryItems");
