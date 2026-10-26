@@ -6,6 +6,8 @@ export const youtubeApiUrl = 'https://www.youtube.com/iframe_api'
 export const youtubeHost = 'https://www.youtube-nocookie.com'
 
 const playerEnded = 0
+const loadTimeoutMs = 10000
+const widgetScript = /^https:\/\/www\.youtube\.com\/s\/player\/.*www-widgetapi/
 
 export const isYoutubeId = (key: string | null | undefined): key is string =>
   typeof key === 'string' && /^[A-Za-z0-9_-]{11}$/.test(key)
@@ -43,17 +45,32 @@ declare global {
   }
 }
 
+function removeYoutubeScripts() {
+  document.querySelectorAll('script').forEach((script) => {
+    if (script.src === youtubeApiUrl || widgetScript.test(script.src)) {
+      script.remove()
+    }
+  })
+  if (!window.YT?.Player) delete window.YT
+}
+
 export default function Trailer({
   videoId,
   backdropUrl,
+  loadTimeout = loadTimeoutMs,
 }: {
   videoId: string | null
   backdropUrl: string | null
+  loadTimeout?: number
 }) {
   const t = useT()
   const stageRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<YoutubePlayer | null>(null)
-  const readyRef = useRef<(() => void) | null>(null)
+  const readyRef = useRef<{
+    ready: () => void
+    previous: (() => void) | undefined
+  } | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const generation = useRef(0)
   const closeButton = useRef<HTMLButtonElement>(null)
   const playButton = useRef<HTMLButtonElement>(null)
@@ -68,11 +85,11 @@ export default function Trailer({
     playerRef.current = null
     player?.destroy()
     stageRef.current?.replaceChildren()
-    if (
-      readyRef.current &&
-      window.onYouTubeIframeAPIReady === readyRef.current
-    ) {
-      window.onYouTubeIframeAPIReady = undefined
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = null
+    const pending = readyRef.current
+    if (pending && window.onYouTubeIframeAPIReady === pending.ready) {
+      window.onYouTubeIframeAPIReady = pending.previous
     }
     readyRef.current = null
   }, [])
@@ -157,9 +174,21 @@ export default function Trailer({
       begin()
       return
     }
-    const ready = () => begin()
-    readyRef.current = ready
+    const previous = window.onYouTubeIframeAPIReady
+    const ready = () => {
+      previous?.()
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = null
+      begin()
+    }
+    readyRef.current = { ready, previous }
     window.onYouTubeIframeAPIReady = ready
+    timerRef.current = setTimeout(() => {
+      if (generation.current !== ticket) return
+      removeYoutubeScripts()
+      close()
+      setFailed(true)
+    }, loadTimeout)
     if ([...document.scripts].some((item) => item.src === youtubeApiUrl)) {
       return
     }

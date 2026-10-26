@@ -1,6 +1,14 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import Trailer, { youtubeApiUrl } from './Trailer'
 
 type PlayerOptions = ConstructorParameters<
@@ -266,6 +274,105 @@ it('recovers from a failed script load and plays on retry', async () => {
   window.onYouTubeIframeAPIReady?.()
   await waitFor(() => expect(FakePlayer.last?.played).toBe(true))
   expect(document.querySelector('iframe')).toBeTruthy()
+})
+
+it('calls an existing ready callback and restores it on cleanup', async () => {
+  const user = userEvent.setup()
+  const previous = vi.fn()
+  window.onYouTubeIframeAPIReady = previous
+  const first = render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
+  const second = render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await user.click(
+    within(second.container).getByRole('button', { name: 'Play trailer' }),
+  )
+
+  installApi()
+  window.onYouTubeIframeAPIReady?.()
+
+  expect(previous).toHaveBeenCalledTimes(1)
+  await waitFor(() => expect(FakePlayer.created).toBe(2))
+
+  second.unmount()
+  first.unmount()
+  expect(window.onYouTubeIframeAPIReady).toBe(previous)
+})
+
+it('restores the previous ready callback when closed during load', async () => {
+  const user = userEvent.setup()
+  const previous = vi.fn()
+  window.onYouTubeIframeAPIReady = previous
+  render(<Trailer videoId="M7lc1UVf-VE" backdropUrl={null} />)
+  await user.click(screen.getByRole('button', { name: 'Play trailer' }))
+  expect(window.onYouTubeIframeAPIReady).not.toBe(previous)
+
+  await user.click(screen.getByRole('button', { name: 'Close trailer' }))
+
+  expect(window.onYouTubeIframeAPIReady).toBe(previous)
+})
+
+it('times out a stalled load, removes the scripts and loads fresh ones on retry', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: false })
+  try {
+    render(
+      <Trailer videoId="M7lc1UVf-VE" backdropUrl={null} loadTimeout={1000} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Play trailer' }))
+    const widget = document.createElement('script')
+    widget.src =
+      'https://www.youtube.com/s/player/abc123/www-widgetapi.vflset/www-widgetapi.js'
+    document.head.append(widget)
+    const stalled = [...document.scripts].find(
+      (item) => item.src === youtubeApiUrl,
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(999)
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      'The trailer could not be played.',
+    )
+    expect(scriptLoaded()).toBe(false)
+    expect(widget.isConnected).toBe(false)
+    const play = screen.getByRole('button', { name: 'Play trailer' })
+    expect(document.activeElement).toBe(play)
+
+    fireEvent.click(play)
+
+    const fresh = [...document.scripts].find(
+      (item) => item.src === youtubeApiUrl,
+    )
+    expect(fresh).toBeTruthy()
+    expect(fresh).not.toBe(stalled)
+    expect(screen.queryByRole('alert')).toBeNull()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('does not time out once the API has loaded', async () => {
+  vi.useFakeTimers()
+  try {
+    render(
+      <Trailer videoId="M7lc1UVf-VE" backdropUrl={null} loadTimeout={1000} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Play trailer' }))
+    installApi()
+    act(() => {
+      window.onYouTubeIframeAPIReady?.()
+      vi.advanceTimersByTime(5000)
+    })
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(document.querySelector('iframe')).toBeTruthy()
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 it('ignores a key that is not a YouTube id', () => {
