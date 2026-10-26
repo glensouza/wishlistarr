@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { request } from './api'
 import { useT } from './i18n'
 
@@ -54,7 +54,20 @@ function githubUrl(
 
 const repoPath = '/glensouza/wishlistarr'
 const releasePrefix = `${repoPath}/releases/tag/`
-const upgradePath = new RegExp(`^${repoPath}/blob/[^/]+/docs/upgrading[.]md$`)
+const upgradeFallbackUrl = `https://github.com${repoPath}/blob/main/docs/upgrading.md`
+const semVer =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/
+
+function upgradeNotesUrl(available: Available): string | null {
+  if (available.upgradeNotesUrl === upgradeFallbackUrl)
+    return upgradeFallbackUrl
+  if (!semVer.test(available.version)) return null
+  return githubUrl(
+    available.upgradeNotesUrl,
+    (pathname) =>
+      pathname === `${repoPath}/blob/v${available.version}/docs/upgrading.md`,
+  )
+}
 
 type State =
   | { status: 'loading' }
@@ -77,17 +90,20 @@ export default function UpdateNotice() {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [error, setError] = useState<string | null>(null)
 
+  const mounted = useRef(true)
+
   useEffect(() => {
-    let current = true
-    void loadNotice().then((next) => current && setState(next))
+    mounted.current = true
+    void loadNotice().then((next) => mounted.current && setState(next))
     return () => {
-      current = false
+      mounted.current = false
     }
   }, [])
 
   async function retry() {
     setState({ status: 'loading' })
-    setState(await loadNotice())
+    const next = await loadNotice()
+    if (mounted.current) setState(next)
   }
 
   async function toggle(checkEnabled: boolean) {
@@ -110,11 +126,7 @@ export default function UpdateNotice() {
           pathname.length > releasePrefix.length,
       )
     : null
-  const upgradeHref = available
-    ? githubUrl(available.upgradeNotesUrl, (pathname) =>
-        upgradePath.test(pathname),
-      )
-    : null
+  const upgradeHref = available ? upgradeNotesUrl(available) : null
   const showLinks =
     available !== null && releaseHref !== null && upgradeHref !== null
 

@@ -342,3 +342,115 @@ it('does not show the notice before a parent is signed in', async () => {
   )
   expect(screen.queryByText('Check for new versions')).toBeNull()
 })
+
+const upgradeBase = 'https://github.com/glensouza/wishlistarr/blob'
+const upgradeUrls: [string, string, string, boolean][] = [
+  [
+    'the matching tag',
+    '9.9.9',
+    `${upgradeBase}/v9.9.9/docs/upgrading.md`,
+    true,
+  ],
+  [
+    'a pre-release tag',
+    '1.0.0-rc.1',
+    `${upgradeBase}/v1.0.0-rc.1/docs/upgrading.md`,
+    true,
+  ],
+  ['the main fallback', '9.9.9', `${upgradeBase}/main/docs/upgrading.md`, true],
+  [
+    'another branch',
+    '9.9.9',
+    `${upgradeBase}/develop/docs/upgrading.md`,
+    false,
+  ],
+  ['another tag', '9.9.9', `${upgradeBase}/v9.9.8/docs/upgrading.md`, false],
+  ['a tag without v', '9.9.9', `${upgradeBase}/9.9.9/docs/upgrading.md`, false],
+  [
+    'a traversal',
+    '9.9.9',
+    `${upgradeBase}/v9.9.9/../main/docs/upgrading.md`,
+    false,
+  ],
+  [
+    'an encoded traversal',
+    '9.9.9',
+    `${upgradeBase}/v9.9.9%2F..%2Fmain/docs/upgrading.md`,
+    false,
+  ],
+  [
+    'the fallback with a query',
+    '9.9.9',
+    `${upgradeBase}/main/docs/upgrading.md?x=1`,
+    false,
+  ],
+  [
+    'a version that is not SemVer',
+    'main',
+    `${upgradeBase}/vmain/docs/upgrading.md`,
+    false,
+  ],
+]
+
+it.each(upgradeUrls)(
+  'checks the upgrade notes address against the version: %s',
+  async (_name, version, upgradeUrl, shown) => {
+    stubFetch((path) =>
+      path === '/api/v1/auth/status'
+        ? parent
+        : path === '/api/v1/updates'
+          ? {
+              checkEnabled: true,
+              available: {
+                version,
+                releaseNotesUrl: `https://github.com/glensouza/wishlistarr/releases/tag/v${version}`,
+                upgradeNotesUrl: upgradeUrl,
+              },
+            }
+          : [],
+    )
+    renderAt('/parent')
+    await screen.findByRole('checkbox', { name: 'Check for new versions' })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('link', { name: 'Upgrade notes' }) !== null,
+      ).toBe(shown),
+    )
+  },
+)
+
+it('ignores a retry that finishes after the page is left', async () => {
+  const user = userEvent.setup()
+  let release: (() => void) | undefined
+  let attempts = 0
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      if (path === '/api/v1/auth/antiforgery') {
+        return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
+      }
+      if (path === '/api/v1/auth/status') return Response.json(parent)
+      if (path === '/api/v1/updates') {
+        attempts += 1
+        if (attempts === 1) {
+          return Response.json({ title: 'Nope' }, { status: 401 })
+        }
+        await new Promise<void>((resolve) => {
+          release = resolve
+        })
+        return Response.json(notice)
+      }
+      return Response.json([])
+    }),
+  )
+  const { unmount } = renderAt('/parent')
+  await user.click(await screen.findByRole('button', { name: 'Try again' }))
+  await waitFor(() => expect(release).toBeDefined())
+  unmount()
+  release?.()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(attempts).toBe(2)
+  expect(errors).not.toHaveBeenCalled()
+  errors.mockRestore()
+})
