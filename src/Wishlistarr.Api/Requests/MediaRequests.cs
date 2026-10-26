@@ -33,7 +33,8 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         RequestActor actor,
         bool countsTowardAllowance = false,
         CancellationToken ct = default,
-        string? reason = null)
+        string? reason = null,
+        bool mergeExisting = true)
     {
         ValidateActor(actor);
         ValidateReason(reason);
@@ -67,6 +68,11 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
                     && request.State != RequestState.Denied
                     && request.State != RequestState.Revoked,
                 ct);
+            if (existing is not null && !mergeExisting)
+            {
+                return new RequestResult(RequestOutcome.Unchanged, existing);
+            }
+
             if (existing is not null)
             {
                 int merged = await db.MediaRequests

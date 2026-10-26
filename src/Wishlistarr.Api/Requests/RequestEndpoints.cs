@@ -17,7 +17,7 @@ public static class RequestEndpoints
     {
         RouteGroupBuilder requests = parent.MapGroup("/requests").WithTags("Requests");
 
-        requests.MapGet("/", async (string? state, int? limit, int? offset, WishlistarrDbContext db, RequestTitles titles, CancellationToken ct) =>
+        requests.MapGet("/", async (string? state, int? limit, int? offset, WishlistarrDbContext db, RequestTitles titles, RequestAccess access, CancellationToken ct) =>
         {
             if (!TryState(state, out RequestState? parsed))
             {
@@ -55,6 +55,7 @@ public static class RequestEndpoints
             List<MediaRequest> rows = [.. listed.Select(item => item.Request)];
             IReadOnlyDictionary<int, string> names = await titles.GetManyAsync(rows, ct);
             Dictionary<int, string> reasons = await RequestViews.DenialReasonsAsync(db, [.. rows.Select(request => request.Id)], ct);
+            IReadOnlySet<int> revocable = await access.RevocableAsync(rows, ct);
             List<ParentRequestResponse> body = [];
             foreach (ListedRequest item in listed)
             {
@@ -69,13 +70,14 @@ public static class RequestEndpoints
                     request.State,
                     request.RequestCount,
                     request.CreatedAt,
-                    request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason) ? reason : null));
+                    request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason) ? reason : null,
+                    revocable.Contains(request.Id)));
             }
 
             return Results.Ok(new ParentRequestPage(body, total, take, skip));
         })
             .WithName("ListRequests")
-            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text.")
+            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text. canRevoke says whether a parent can revoke the request now.")
             .Produces<ParentRequestPage>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
@@ -108,7 +110,7 @@ public static class RequestEndpoints
         requests.MapGet("/grant/preview", (string? kind, int? tmdbId, RequestAccess access, CancellationToken ct) =>
             PreviewAsync(kind, tmdbId, access, ct))
             .WithName("PreviewGrant")
-            .WithSummary("Looks up a title by kind and TMDB id before it is given, so the parent can check the name. inLibrary is null when the library could not be checked.")
+            .WithSummary("Looks up a title by kind and TMDB id before it is given, so the parent can check the name. No request or label is changed, but the title may be stored in the title cache. inLibrary is null when the library could not be checked.")
             .Produces<GrantPreviewResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -117,7 +119,7 @@ public static class RequestEndpoints
         requests.MapPost("/revoke", (DecisionBody? body, HttpContext context, RequestAccess access, CancellationToken ct) =>
             RevokeAsync(body, context, access, ct))
             .WithName("RevokeRequests")
-            .WithSummary("Removes the app-owned Plex label for each labeled request and marks it revoked. A label the app did not apply is left in place and reported with labelNotOwned. If Plex cannot be reached, the request stays as it was.")
+            .WithSummary("Removes the app-owned Plex labels for each labeled or failed request, or one stuck as available, and marks it revoked. A label the app did not apply is left in place and reported with labelNotOwned; a label that is now another profile's is left in place and reported with labelInUse. If Plex cannot be reached, the request stays as it was.")
             .Produces<RevokeBodyResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
     }
@@ -188,6 +190,7 @@ public static class RequestEndpoints
             GrantStatus.TitleNotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "That title could not be found."),
             GrantStatus.NotInLibrary => Results.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "That title is not in the library."),
             GrantStatus.Conflict => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "That profile already has a request for this title."),
+            GrantStatus.InProgress => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "That title is still being given. Try again in a moment."),
             _ => Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The title could not be given."),
         };
     }
@@ -307,4 +310,5 @@ public sealed record ParentRequestResponse(
     RequestState State,
     int RequestCount,
     DateTimeOffset CreatedAt,
-    string? DenialReason);
+    string? DenialReason,
+    bool CanRevoke);

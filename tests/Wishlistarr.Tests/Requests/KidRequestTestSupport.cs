@@ -41,18 +41,26 @@ public sealed class DecisionSaveGate : SaveChangesInterceptor
 {
     public Func<Task>? Gate { get; set; }
 
+    public Func<Task>? GrantCreateGate { get; set; }
+
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData,
         InterceptionResult<int> result,
         CancellationToken cancellationToken = default)
     {
-        bool decision = eventData.Context!.ChangeTracker.Entries<MediaRequestEvent>().Any(entry =>
-            entry.State == EntityState.Added
-            && entry.Entity.FromState == RequestState.Pending
-            && entry.Entity.ToState is RequestState.Approved or RequestState.Denied);
+        List<MediaRequestEvent> added = [.. eventData.Context!.ChangeTracker.Entries<MediaRequestEvent>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity)];
+        bool decision = added.Any(item => item.FromState == RequestState.Pending && item.ToState is RequestState.Approved or RequestState.Denied);
         if (decision && this.Gate is not null)
         {
             await this.Gate();
+        }
+
+        bool grantCreated = added.Any(item => item.FromState is null && item.ActorKind == RequestActorKind.Parent);
+        if (grantCreated && this.GrantCreateGate is not null)
+        {
+            await this.GrantCreateGate();
         }
 
         return result;
@@ -79,6 +87,9 @@ public sealed class FakeLibraryIndex : ILibraryIndex
 
         list.Add(item);
     }
+
+    public void Remove(MediaKind kind, int tmdbId) =>
+        this.items.Remove((kind, new ExternalId(ExternalIdSource.Tmdb, tmdbId.ToString(CultureInfo.InvariantCulture))));
 
     public async Task<IReadOnlyList<MediaItem>?> FindAsync(MediaKind kind, ExternalId id, CancellationToken ct = default)
     {

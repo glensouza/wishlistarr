@@ -119,12 +119,12 @@ public sealed partial class KidRequestFlow(
             profile.AutoApprove,
             profile.AutoApproveMovieRating,
             profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
-        bool inspectLibrary = !revokedBefore && decision.Outcome == ContentOutcome.Allowed;
+        bool inspectLibrary = decision.Outcome == ContentOutcome.Allowed;
         (IReadOnlyList<MediaItem> matches, bool libraryKnown) = inspectLibrary
             ? await this.FindInLibraryAsync(title, ct)
             : ([], false);
         bool inLibrary = libraryKnown && matches.Count > 0;
-        bool instant = decision.Outcome == ContentOutcome.Allowed && inLibrary;
+        bool instant = !revokedBefore && decision.Outcome == ContentOutcome.Allowed && inLibrary;
         bool autoNow = auto && libraryKnown && !instant;
         bool counts = !instant;
 

@@ -73,6 +73,7 @@ builder.Services.AddPlex<StoredAppSettings>();
 builder.Services.AddArr<StoredAppSettings>();
 builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
+builder.Services.AddSingleton<RequestLocks>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddScoped<MediaRequests>();
 builder.Services.AddOptions<ApprovalOptions>()

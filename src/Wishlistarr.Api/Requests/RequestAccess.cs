@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Content;
@@ -16,6 +17,7 @@ public enum GrantStatus
     TitleNotFound,
     NotInLibrary,
     Conflict,
+    InProgress,
     Unavailable,
 }
 
@@ -29,7 +31,7 @@ public enum GrantPreviewStatus
 
 public sealed record GrantPreview(GrantPreviewStatus Status, string? Title = null, bool? InLibrary = null);
 
-public sealed record RevokeItem(int Id, DecisionStatus Status, RequestState? State, bool LabelNotOwned = false);
+public sealed record RevokeItem(int Id, DecisionStatus Status, RequestState? State, bool LabelNotOwned = false, bool LabelInUse = false);
 
 public sealed partial class RequestAccess(
     WishlistarrDbContext db,
@@ -38,6 +40,9 @@ public sealed partial class RequestAccess(
     LibraryLookup library,
     LabelWriter labels,
     RequestLabeling labeling,
+    RequestLocks locks,
+    IOptions<ApprovalOptions> options,
+    TimeProvider time,
     ILogger<RequestAccess> logger)
 {
     public const string GrantReason = "Parent grant";
@@ -102,6 +107,7 @@ public sealed partial class RequestAccess(
         MediaRequest? open = await this.FindOpenAsync(kidProfileId, title, ct);
         if (open is null)
         {
+            // A request the kid opened in the meantime comes back untouched, so a grant never counts or renames it.
             RequestResult created = await requests.CreateAsync(
                 profile.Id,
                 title,
@@ -109,8 +115,9 @@ public sealed partial class RequestAccess(
                 actor,
                 countsTowardAllowance: false,
                 ct: ct,
-                reason: GrantReason);
-            if (created is not { Outcome: RequestOutcome.Created or RequestOutcome.Merged, Request: MediaRequest stored })
+                reason: GrantReason,
+                mergeExisting: false);
+            if (created is not { Outcome: RequestOutcome.Created or RequestOutcome.Unchanged, Request: MediaRequest stored })
             {
                 return new GrantItem(GrantStatus.ProfileNotFound, null);
             }
@@ -152,9 +159,70 @@ public sealed partial class RequestAccess(
         return results;
     }
 
+    public async Task<IReadOnlySet<int>> RevocableAsync(IReadOnlyList<MediaRequest> rows, CancellationToken ct = default)
+    {
+        HashSet<int> revocable = [];
+        foreach (MediaRequest request in rows)
+        {
+            bool allowed = request.State switch
+            {
+                RequestState.Labeled => true,
+                RequestState.Available => this.IsStuck(request),
+                RequestState.Failed => await this.HasAppLabelsAsync(request, ct),
+                _ => false,
+            };
+            if (allowed)
+            {
+                revocable.Add(request.Id);
+            }
+        }
+
+        return revocable;
+    }
+
     private async Task<RevokeItem> RevokeOneAsync(int id, RequestActor actor, string? reason, CancellationToken ct)
     {
+        MediaRequest? seen = await requests.GetAsync(id, ct);
+        if (this.Settle(id, seen) is RevokeItem early)
+        {
+            return early;
+        }
+
+        KidProfile? profile = await db.KidProfiles.AsNoTracking().FirstOrDefaultAsync(row => row.Id == seen!.KidProfileId, ct);
+        if (profile is null)
+        {
+            return new RevokeItem(id, DecisionStatus.NotFound, null);
+        }
+
+        IReadOnlyList<MediaItem> items;
+        try
+        {
+            items = await library.FindAsync(new TitleKey(seen!.Kind, seen.TmdbId), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is MediaServerException or HttpRequestException or TaskCanceledException)
+        {
+            this.LogRevokeFailed(ex, id);
+            return new RevokeItem(id, DecisionStatus.Failed, seen!.State);
+        }
+
+        if (items.Count == 0)
+        {
+            return new RevokeItem(id, DecisionStatus.Failed, seen.State);
+        }
+
+        using IDisposable held = await locks.AcquireAsync(id, ct);
         MediaRequest? request = await requests.GetAsync(id, ct);
+        if (this.Settle(id, request) is RevokeItem settled)
+        {
+            return settled;
+        }
+
+        return await this.RevokeLockedAsync(request!, profile, items, actor, reason);
+    }
+
+    // A failed request has finished labeling and a stuck one has no label write left, so both can be revoked like a labeled one.
+    private RevokeItem? Settle(int id, MediaRequest? request)
+    {
         if (request is null)
         {
             return new RevokeItem(id, DecisionStatus.NotFound, null);
@@ -165,38 +233,34 @@ public sealed partial class RequestAccess(
             return new RevokeItem(id, DecisionStatus.AlreadyDecided, request.State);
         }
 
-        // Only a labeled request is revoked. Earlier states can still have a label write in flight that would land after the removal.
-        if (request.State != RequestState.Labeled)
+        bool revocable = request.State switch
         {
-            return new RevokeItem(id, DecisionStatus.Conflict, request.State);
-        }
+            RequestState.Labeled or RequestState.Failed => true,
+            RequestState.Available => this.IsStuck(request),
+            _ => false,
+        };
+        return revocable ? null : new RevokeItem(id, DecisionStatus.Conflict, request.State);
+    }
 
-        KidProfile? profile = await db.KidProfiles.AsNoTracking().FirstOrDefaultAsync(row => row.Id == request.KidProfileId, ct);
-        if (profile is null)
-        {
-            return new RevokeItem(id, DecisionStatus.NotFound, null);
-        }
+    private bool IsStuck(MediaRequest request) =>
+        time.GetUtcNow() - request.StateChangedAt >= options.Value.StuckAfter;
 
-        IReadOnlyList<MediaItem> items;
-        try
-        {
-            items = await library.FindAsync(new TitleKey(request.Kind, request.TmdbId), ct);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is MediaServerException or HttpRequestException or TaskCanceledException)
-        {
-            this.LogRevokeFailed(ex, id);
-            return new RevokeItem(id, DecisionStatus.Failed, request.State);
-        }
-
-        if (items.Count == 0)
-        {
-            return new RevokeItem(id, DecisionStatus.Failed, request.State);
-        }
+    private async Task<RevokeItem> RevokeLockedAsync(
+        MediaRequest request,
+        KidProfile profile,
+        IReadOnlyList<MediaItem> items,
+        RequestActor actor,
+        string? reason)
+    {
+        int id = request.Id;
+        RequestState from = request.State;
 
         // Once a label is removed, the request has to be marked revoked or the label put back, so the rest ignores the caller going away.
         CancellationToken none = CancellationToken.None;
+        HashSet<string> taken = await this.LabelsOfOtherProfilesAsync(profile.Id, none);
         List<RemovedLabel> removed = [];
         bool notOwned = false;
+        bool inUse = false;
         try
         {
             foreach (MediaItem item in items)
@@ -208,6 +272,13 @@ public sealed partial class RequestAccess(
 
                 foreach (OwnedLabel owned in found.Owned)
                 {
+                    // An archived profile's label can belong to a newer profile by now, and that profile still relies on it.
+                    if (taken.Contains(owned.Label))
+                    {
+                        inUse = true;
+                        continue;
+                    }
+
                     LabelWriteResult result = await labels.RemoveAsync(item.Id, owned.Label, none);
                     if (result.Outcome == LabelWriteOutcome.Removed)
                     {
@@ -215,12 +286,13 @@ public sealed partial class RequestAccess(
                     }
                     else if (!IsGone(result, owned.Label))
                     {
-                        return await this.UndoRevokeAsync(id, profile.Id, removed, DecisionStatus.Failed, request.State);
+                        return await this.UndoRevokeAsync(id, from, profile.Id, removed, DecisionStatus.Failed);
                     }
                 }
 
                 if (found.Item.Labels.Contains(profile.PlexLabel, LabelComparer)
-                    && !found.Owned.Any(owned => LabelComparer.Equals(owned.Label, profile.PlexLabel)))
+                    && !found.Owned.Any(owned => LabelComparer.Equals(owned.Label, profile.PlexLabel))
+                    && !taken.Contains(profile.PlexLabel))
                 {
                     notOwned = true;
                 }
@@ -229,59 +301,78 @@ public sealed partial class RequestAccess(
         catch (Exception ex) when (ex is MediaServerException or HttpRequestException or TaskCanceledException)
         {
             this.LogRevokeFailed(ex, id);
-            return await this.UndoRevokeAsync(id, profile.Id, removed, DecisionStatus.Failed, request.State);
+            return await this.UndoRevokeAsync(id, from, profile.Id, removed, DecisionStatus.Failed);
         }
 
         RequestResult moved;
         try
         {
-            moved = await requests.TransitionAsync(id, RequestState.Revoked, actor, reason, none, RequestState.Labeled);
+            moved = await requests.TransitionAsync(id, RequestState.Revoked, actor, reason, none, from);
         }
         catch (DbUpdateConcurrencyException ex)
         {
             this.LogRevokeFailed(ex, id);
-            return await this.UndoRevokeAsync(id, profile.Id, removed, DecisionStatus.Conflict, request.State);
+            return await this.UndoRevokeAsync(id, from, profile.Id, removed, DecisionStatus.Conflict);
         }
 
         return moved.Outcome switch
         {
-            RequestOutcome.Changed => new RevokeItem(id, DecisionStatus.Succeeded, RequestState.Revoked, notOwned),
-            RequestOutcome.Unchanged => new RevokeItem(id, DecisionStatus.AlreadyDecided, RequestState.Revoked, notOwned),
+            RequestOutcome.Changed => new RevokeItem(id, DecisionStatus.Succeeded, RequestState.Revoked, notOwned, inUse),
+            RequestOutcome.Unchanged => new RevokeItem(id, DecisionStatus.AlreadyDecided, RequestState.Revoked, notOwned, inUse),
             RequestOutcome.NotFound => new RevokeItem(id, DecisionStatus.NotFound, null),
-            _ => await this.UndoRevokeAsync(id, profile.Id, removed, DecisionStatus.Conflict, moved.Request?.State ?? request.State),
+            _ => await this.UndoRevokeAsync(id, from, profile.Id, removed, DecisionStatus.Conflict),
         };
     }
 
     private async Task<RevokeItem> UndoRevokeAsync(
         int id,
+        RequestState from,
         int profileId,
         IReadOnlyList<RemovedLabel> removed,
-        DecisionStatus status,
-        RequestState state)
+        DecisionStatus status)
     {
         try
         {
+            // A request that has moved on, for example to revoked, must not get its labels back.
+            MediaRequest? current = await requests.GetAsync(id, CancellationToken.None);
+            if (current?.State != from)
+            {
+                if (removed.Count > 0)
+                {
+                    this.LogRevokeUndoSkipped(id, current?.State);
+                }
+
+                return new RevokeItem(id, status, current?.State);
+            }
+
             foreach (RemovedLabel label in removed)
             {
                 await labels.AddAsync(label.ItemId, label.Label, profileId, label.Source, CancellationToken.None);
             }
 
-            return new RevokeItem(id, status, state);
+            return new RevokeItem(id, status, from);
         }
         catch (Exception ex) when (ex is MediaServerException or HttpRequestException or TaskCanceledException or DbUpdateException)
         {
             this.LogRevokeUndoFailed(ex, id);
-            return new RevokeItem(id, DecisionStatus.Failed, state);
+            return new RevokeItem(id, DecisionStatus.Failed, from);
         }
     }
 
     private async Task<GrantItem> FinishGrantAsync(
-        MediaRequest request,
+        MediaRequest seen,
         KidProfile profile,
         IReadOnlyList<MediaItem> items,
         RequestActor parent,
         CancellationToken ct)
     {
+        using IDisposable held = await locks.AcquireAsync(seen.Id, ct);
+        MediaRequest? request = await requests.GetAsync(seen.Id, ct);
+        if (request is null)
+        {
+            return new GrantItem(GrantStatus.Conflict, seen);
+        }
+
         if (request.State == RequestState.Pending)
         {
             RequestResult approved = await requests.TransitionAsync(request.Id, RequestState.Approved, parent, GrantReason, ct, RequestState.Pending);
@@ -293,28 +384,61 @@ public sealed partial class RequestAccess(
             request = next;
         }
 
-        // The parent's decision is stored, so the move to available and the label finish even if the caller goes away.
-        RequestActor system = RequestActor.System(GrantComponent);
-        if (request.State is RequestState.Approved or RequestState.Failed)
+        // Only a request this call moves to available is labeled here. One that is already available has a label write of its own that has not finished.
+        if (request.State is not (RequestState.Approved or RequestState.Failed))
         {
-            RequestResult available = await requests.TransitionAsync(
-                request.Id,
-                RequestState.Available,
-                system,
-                ct: CancellationToken.None,
-                expectedFrom: request.State);
-            if (available is not { Outcome: RequestOutcome.Changed, Request: MediaRequest next })
+            return request.State switch
             {
-                return Settled(available, request);
-            }
-
-            request = next;
+                RequestState.Labeled => new GrantItem(GrantStatus.AlreadyGranted, request),
+                RequestState.Available => new GrantItem(GrantStatus.InProgress, request),
+                _ => new GrantItem(GrantStatus.Conflict, request),
+            };
         }
 
-        RequestLabelResult labeled = await labeling.LabelAsync(request.Id, items, profile, system, GrantSource);
+        // The parent's decision is stored, so the move to available and the label finish even if the caller goes away.
+        RequestActor system = RequestActor.System(GrantComponent);
+        RequestResult available = await requests.TransitionAsync(
+            request.Id,
+            RequestState.Available,
+            system,
+            ct: CancellationToken.None,
+            expectedFrom: request.State);
+        if (available is not { Outcome: RequestOutcome.Changed, Request: MediaRequest moved })
+        {
+            return Settled(available, request);
+        }
+
+        RequestLabelResult labeled = await labeling.LabelLockedAsync(moved.Id, items, profile, system, GrantSource);
         return labeled.Result is { Request.State: RequestState.Labeled, Request: MediaRequest done }
             ? new GrantItem(GrantStatus.Granted, done, labeled.LabelNotOwned)
-            : new GrantItem(GrantStatus.Unavailable, labeled.Result.Request ?? request);
+            : new GrantItem(GrantStatus.Unavailable, labeled.Result.Request ?? moved);
+    }
+
+    private async Task<bool> HasAppLabelsAsync(MediaRequest request, CancellationToken ct)
+    {
+        IReadOnlyList<MediaItem> items;
+        try
+        {
+            items = await library.FindAsync(new TitleKey(request.Kind, request.TmdbId), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is MediaServerException or HttpRequestException or TaskCanceledException)
+        {
+            this.LogLabelCheckFailed(ex, request.Id);
+            return false;
+        }
+
+        string[] guids = [.. items.Select(item => item.Guid).Where(guid => !string.IsNullOrEmpty(guid))];
+        return guids.Length > 0
+            && await db.OwnedLabels.AsNoTracking().AnyAsync(owned => owned.KidProfileId == request.KidProfileId && guids.Contains(owned.Guid), ct);
+    }
+
+    private async Task<HashSet<string>> LabelsOfOtherProfilesAsync(int profileId, CancellationToken ct)
+    {
+        List<string> active = await db.KidProfiles.AsNoTracking()
+            .Where(row => row.ArchivedAt == null && row.Id != profileId)
+            .Select(row => row.PlexLabel)
+            .ToListAsync(ct);
+        return active.ToHashSet(LabelComparer);
     }
 
     // A concurrent revoke can remove the label and its ledger row between the read and this removal, which leaves nothing to undo.
@@ -356,10 +480,16 @@ public sealed partial class RequestAccess(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for a grant preview of {Kind} {TmdbId} failed")]
     private partial void LogPreviewLookupFailed(Exception ex, MediaKind kind, int tmdbId);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for the labels of request {RequestId} failed")]
+    private partial void LogLabelCheckFailed(Exception ex, int requestId);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Revoke for request {RequestId} failed before the request was marked revoked")]
     private partial void LogRevokeFailed(Exception ex, int requestId);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Revoke for request {RequestId} removed a label but could neither mark the request revoked nor put the label back; revoking again finishes it")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Revoke for request {RequestId} did not put its labels back because the request is now {State}")]
+    private partial void LogRevokeUndoSkipped(int requestId, RequestState? state);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Revoke for request {RequestId} removed a label but could neither mark the request revoked nor put the label back; the request keeps its state and revoking it again removes what is left")]
     private partial void LogRevokeUndoFailed(Exception ex, int requestId);
 
     private sealed record RemovedLabel(string ItemId, string Label, string Source);
