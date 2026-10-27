@@ -6,6 +6,12 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 {
     public DbSet<Setting> Settings => this.Set<Setting>();
 
+    public DbSet<NotificationSubscription> NotificationSubscriptions => this.Set<NotificationSubscription>();
+
+    public DbSet<NotificationDelivery> NotificationDeliveries => this.Set<NotificationDelivery>();
+
+    public DbSet<NotificationApproval> NotificationApprovals => this.Set<NotificationApproval>();
+
     public DbSet<ParentAccount> ParentAccounts => this.Set<ParentAccount>();
 
     public DbSet<ParentSession> ParentSessions => this.Set<ParentSession>();
@@ -50,6 +56,32 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<NotificationSubscription>(entity =>
+        {
+            entity.Property(row => row.Provider).HasMaxLength(16);
+            entity.HasIndex(row => new { row.ParentAccountId, row.Provider }).IsUnique();
+            entity.HasOne<ParentAccount>().WithMany().HasForeignKey(row => row.ParentAccountId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NotificationDelivery>(entity =>
+        {
+            entity.Property(row => row.Event).HasMaxLength(32);
+            entity.Property(row => row.Message).HasMaxLength(1000);
+            entity.Property(row => row.LastError).HasMaxLength(200);
+            entity.Property(row => row.NextAttemptAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.HasIndex(row => new { row.NotificationSubscriptionId, row.MediaRequestEventId }).IsUnique();
+            entity.HasIndex(row => row.CompletedAt);
+            entity.HasOne(row => row.Subscription).WithMany().HasForeignKey(row => row.NotificationSubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NotificationApproval>(entity =>
+        {
+            entity.Property(row => row.ExpiresAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.HasIndex(row => new { row.ParentAccountId, row.MediaRequestId }).IsUnique();
+            entity.HasOne<ParentAccount>().WithMany().HasForeignKey(row => row.ParentAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<MediaRequest>().WithMany().HasForeignKey(row => row.MediaRequestId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Setting>(entity =>
         {
             entity.HasKey(setting => setting.Key);

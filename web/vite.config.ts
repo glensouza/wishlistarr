@@ -11,6 +11,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': process.env.WISHLISTARR_API_URL ?? 'http://localhost:5082',
+      '/notifications/confirm':
+        process.env.WISHLISTARR_API_URL ?? 'http://localhost:5082',
     },
   },
   test: {

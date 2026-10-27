@@ -4,6 +4,7 @@ using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.MediaServers;
+using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
@@ -45,6 +46,7 @@ public static class ApiEndpoints
         v1.MapUpdates();
         v1.MapWebhookSettings();
         v1.MapObservability();
+        v1.MapNotificationSettings();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")
