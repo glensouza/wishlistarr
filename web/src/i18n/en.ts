@@ -515,7 +515,7 @@ export const en = {
   'controls.previous': 'Previous titles',
   'controls.next': 'Next titles',
   'controls.previewNote':
-    'This previews content rules. The real request may still wait for a parent because of previous revocation, auto-approval settings or allowances.',
+    'This previews content rules. The real request may still wait for a parent because of auto-approval settings or allowances.',
   'controls.duplicateTitle': 'This title is already on the list.',
   'controls.notFound': 'The profile or title was not found.',
   'controls.networkError':
