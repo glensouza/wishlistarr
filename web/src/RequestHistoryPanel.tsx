@@ -54,12 +54,14 @@ function stateLabel(state: string, t: (key: MessageKey) => string) {
       return t('history.labeled')
     case 'failed':
       return t('history.failed')
+    case 'revoked':
+      return t('history.revoked')
     default:
       return state
   }
 }
 
-function formatTime(value: string) {
+export function formatOccurredAt(value: string) {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toLocaleString(undefined, {
@@ -68,14 +70,28 @@ function formatTime(value: string) {
   })
 }
 
-function ProfileEvents({ profile }: { profile: ProfileRef }) {
+export function ProfileEvents({
+  profile,
+  limit,
+  listLabel,
+  errorText,
+}: {
+  profile: ProfileRef
+  limit?: number
+  listLabel?: string
+  errorText?: string
+}) {
   const t = useT()
   const [events, setEvents] = useState<RequestEvent[] | null>(null)
   const [failed, setFailed] = useState(false)
+  const path =
+    limit === undefined
+      ? `/api/v1/kid-profiles/${profile.id}/events`
+      : `/api/v1/kid-profiles/${profile.id}/events?limit=${limit}`
 
   useEffect(() => {
     let current = true
-    request<unknown>('GET', `/api/v1/kid-profiles/${profile.id}/events`)
+    request<unknown>('GET', path)
       .then((body) => {
         if (!current) return
         if (!Array.isArray(body) || !body.every(isEvent)) {
@@ -90,15 +106,15 @@ function ProfileEvents({ profile }: { profile: ProfileRef }) {
     return () => {
       current = false
     }
-  }, [profile.id])
+  }, [path])
 
   return (
     <div className="history-profile">
       <h3>{profile.name}</h3>
-      {failed && <p role="alert">{t('history.loadFailed')}</p>}
+      {failed && <p role="alert">{errorText ?? t('history.loadFailed')}</p>}
       {events !== null && events.length === 0 && <p>{t('history.empty')}</p>}
       {events !== null && events.length > 0 && (
-        <ul className="history-list" aria-label={profile.name}>
+        <ul className="history-list" aria-label={listLabel ?? profile.name}>
           {events.map((item) => (
             <li key={item.id}>
               <strong>
@@ -113,7 +129,7 @@ function ProfileEvents({ profile }: { profile: ProfileRef }) {
                 → {stateLabel(item.toState, t)}
               </span>
               <span>{item.actorName}</span>
-              <span className="muted">{formatTime(item.occurredAt)}</span>
+              <span className="muted">{formatOccurredAt(item.occurredAt)}</span>
               {item.reason && (
                 <span>
                   {t('history.reason')}: {item.reason}

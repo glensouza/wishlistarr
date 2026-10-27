@@ -147,7 +147,7 @@ export default function BackupsAdmin() {
 
   return (
     <section>
-      <h2>{t('backups.title')}</h2>
+      <h2 id="backups-heading">{t('backups.title')}</h2>
       <p className="notice">{t('backups.warning')}</p>
       {retention !== null && (
         <p className="muted">{t('backups.retention', { count: retention })}</p>

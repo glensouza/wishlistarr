@@ -3,6 +3,7 @@ import { useT, type MessageKey } from './i18n'
 import { listKidProfiles, type KidProfile } from './kidProfiles'
 import {
   approveRequests,
+  decisionResultKey,
   denyRequests,
   grantRequest,
   listRequests,
@@ -29,17 +30,6 @@ const stateKey: Record<ParentRequest['state'], MessageKey> = {
 }
 
 type Outcome = DecisionStatus | 'unsent' | 'unknown'
-
-const statusKey: Record<Outcome, MessageKey> = {
-  succeeded: 'requests.result.succeeded',
-  alreadyDecided: 'requests.result.alreadyDecided',
-  notFound: 'requests.result.notFound',
-  failed: 'requests.result.failed',
-  conflict: 'requests.result.conflict',
-  notProcessed: 'requests.result.notProcessed',
-  unsent: 'requests.result.unsent',
-  unknown: 'requests.result.unknown',
-}
 
 const failureKey: Record<
   NonNullable<ParentRequest['dispatchFailure']>,
@@ -392,7 +382,7 @@ export default function RequestsAdmin() {
               <li key={item.id}>
                 {t('requests.itemResult', {
                   title: item.title,
-                  result: t(statusKey[item.status]),
+                  result: t(decisionResultKey[item.status]),
                 })}
               </li>
             ))}

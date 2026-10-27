@@ -59,7 +59,7 @@ export default function TrailerSetting() {
   if (load === 'failed') {
     return (
       <section className="trailer-setting">
-        <h2>{t('parent.trailers')}</h2>
+        <h2 id="trailers-heading">{t('parent.trailers')}</h2>
         <p role="alert" className="error">
           {t('parent.trailersLoadFailed')}
         </p>
@@ -78,7 +78,7 @@ export default function TrailerSetting() {
 
   return (
     <section className="trailer-setting">
-      <h2>{t('parent.trailers')}</h2>
+      <h2 id="trailers-heading">{t('parent.trailers')}</h2>
       <label className="trailer-toggle">
         <input
           type="checkbox"

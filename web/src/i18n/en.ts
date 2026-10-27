@@ -371,6 +371,7 @@ export const en = {
   'history.available': 'Available',
   'history.labeled': 'Labeled',
   'history.failed': 'Failed',
+  'history.revoked': 'Removed',
   'history.reason': 'Reason',
   'history.request': 'Request {id}',
 
@@ -561,6 +562,82 @@ export const en = {
     "This title meets the profile's content rules.",
   'controls.reason.languageAllowed':
     "This title meets the profile's content rules.",
+
+  'queue.heading': 'Waiting for you',
+  'queue.filter': 'Show requests for',
+  'queue.filterAll': 'All kids',
+  'queue.empty': 'Nothing is waiting for approval.',
+  'queue.emptyKid': 'Nothing is waiting for {name}.',
+  'queue.untitled': 'A request',
+  'queue.synopsis': 'Synopsis',
+  'queue.synopsisNone': 'No synopsis is available.',
+  'queue.synopsisFailed': 'The synopsis could not be loaded.',
+  'queue.ratingValue': 'Rated {rating}',
+  'queue.ratingNone': 'No age rating is listed.',
+  'queue.ratingFailed': 'The age rating could not be loaded.',
+  'queue.descriptors': 'Content descriptors',
+  'queue.descriptorsNone': 'No content descriptors are listed.',
+  'queue.providersNone': 'Not listed on a streaming service.',
+  'queue.providersFailed': 'Streaming availability could not be loaded.',
+  'queue.trailerFailed': 'The trailer could not be loaded.',
+  'queue.approve': 'Approve {title} for {name}',
+  'queue.deny': 'Deny {title} for {name}',
+  'queue.note': 'Note for {name}',
+  'queue.noteHint': 'The kid sees this only if you deny the request.',
+  'queue.noteTooLong':
+    'That note is longer than 500 characters. Shorten it, then deny.',
+  'queue.approved': '{title} was approved.',
+  'queue.denied': '{title} was denied.',
+  'queue.loadFailed': 'The approval queue could not be loaded.',
+  'queue.shape':
+    'The approval queue came back in a shape this page does not understand.',
+  'queue.retry': 'Try again',
+  'queue.loading': 'Loading the approval queue',
+  'queue.sendFailed': 'That decision could not be sent. Nothing was changed.',
+  'queue.resultUnknown':
+    'The decision came back in a shape this page does not understand. Reload to see what happened.',
+  'queue.activity': 'Recent activity',
+  'queue.activityFor': 'Recent activity for {name}',
+  'queue.activityFailed': 'Recent activity for {name} could not be loaded.',
+  'queue.actions': 'Quick actions',
+  'queue.actionRequests': 'All requests',
+  'queue.actionProfiles': 'Kid profiles',
+  'queue.actionDevices': 'Kid devices',
+  'queue.actionHistory': 'Full history',
+  'queue.actionBackups': 'Backups',
+  'queue.actionLogs': 'Logs',
+  'queue.actionTrailers': 'Trailer setting',
+  'queue.reasonUnrated':
+    'This title has no usable age rating, so a parent has to decide.',
+  'queue.reasonUnknownGenres':
+    'This profile blocks some genres, and the genres for this title could not be checked.',
+  'queue.reasonRevoked':
+    'A parent removed this title before, so this request waits for a parent.',
+  'queue.reasonAboveCeiling':
+    'It is rated {rating}, which is above the auto-approve limit for this profile.',
+  'queue.reasonAboveCeilingUnrated':
+    'It is above the auto-approve limit for this profile.',
+  'queue.reasonAutoOff':
+    'It is rated {rating}, which this profile allows, and auto-approve is off.',
+  'queue.reasonAutoOffUnrated':
+    'This profile allows it, and auto-approve is off.',
+  'queue.reasonNotAuto':
+    'It is allowed for this profile, and automatic approval did not take it.',
+  'queue.reasonAboveAge':
+    'It is rated {rating}, which is above the age limit for this profile.',
+  'queue.reasonGenre': 'It includes {name}, a genre this profile blocks.',
+  'queue.reasonKeyword': 'It includes {name}, a keyword this profile blocks.',
+  'queue.reasonLanguage':
+    'Its original language ({language}) is not one this profile allows.',
+  'queue.reasonLanguageMissing':
+    'Its original language is not one this profile allows.',
+  'queue.reasonBlocked': 'This title is on the block list for this profile.',
+  'queue.reasonUnavailable':
+    'Why this title needs approval could not be checked. You can still approve or deny it.',
+  'queue.more':
+    '{count} more are waiting. Decide these, then see the rest under',
+  'queue.profilesFailed': 'Kid profiles could not be loaded.',
+  'queue.askedAgain': 'Asked {count} times.',
 } as const
 
 export type MessageKey = keyof typeof en
