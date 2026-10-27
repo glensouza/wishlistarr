@@ -78,8 +78,6 @@ public sealed partial class KidRequestFlow(
         }
 
         string name = evaluation.Name;
-        ContentTitle content = evaluation.Content;
-        ContentPolicy policy = evaluation.Policy;
         ContentDecision decision = evaluation.Decision;
         bool revokedBefore = await this.WasRevokedAsync(profile.Id, title, ct);
         if (decision.Outcome == ContentOutcome.Blocked)
@@ -88,12 +86,7 @@ public sealed partial class KidRequestFlow(
             return new KidRequestResult(KidRequestOutcome.NotAllowed);
         }
 
-        RatingLevel? rating = new RatingRule().Evaluate(content, policy).Reason.Level;
-        bool genresUnknown = policy.HasUnknownGenres(content.GenreIds);
-        bool auto = new AutoApproveRule(
-            profile.AutoApprove,
-            profile.AutoApproveMovieRating,
-            profile.AutoApproveTvRating).AppliesTo(decision, title.Kind, rating, genresUnknown);
+        bool auto = profile.AutoApproval().AppliesTo(decision, title.Kind, evaluation.Level, evaluation.GenresUnknown);
 
         // Both the instant label and auto-approval need a library answer, so not looking up a revoked title keeps it waiting for a parent.
         bool inspectLibrary = !revokedBefore && decision.Outcome == ContentOutcome.Allowed;
@@ -233,4 +226,24 @@ public sealed partial class KidRequestFlow(
     private partial void LogLookupFailed(Exception ex, MediaKind kind, int tmdbId);
 }
 
-public sealed record PolicyEvaluation(string Name, ContentTitle Content, ContentPolicy Policy, ContentDecision Decision, TmdbDetails? Details = null);
+public enum PolicyLookup
+{
+    Details,
+    Certification,
+    Keywords,
+}
+
+public sealed record PolicyEvaluation(
+    string Name,
+    ContentTitle Content,
+    ContentPolicy Policy,
+    ContentDecision Decision,
+    TmdbDetails? Details = null,
+    TmdbCertification? Certification = null,
+    IReadOnlyList<TmdbKeyword>? Keywords = null,
+    PolicyLookup? FailedLookup = null)
+{
+    public RatingLevel? Level => new RatingRule().Evaluate(this.Content, this.Policy).Reason.Level;
+
+    public bool GenresUnknown => this.Policy.HasUnknownGenres(this.Content.GenreIds);
+}

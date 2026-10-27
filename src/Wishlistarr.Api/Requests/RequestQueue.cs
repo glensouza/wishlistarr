@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.Titles;
 using Wishlistarr.Core.Content;
@@ -16,6 +17,7 @@ public enum QueueGap
     Rating,
     Providers,
     Trailer,
+    Keywords,
 }
 
 public enum QueueReasonCode
@@ -69,8 +71,15 @@ public sealed partial class RequestQueue(
     ITmdbClient tmdb,
     RequestTitles titles,
     SettingsStore settings,
+    TimeProvider time,
     ILogger<RequestQueue> logger)
 {
+    public const int MaxParallelLookups = 4;
+
+    public static readonly TimeSpan PageBudget = TimeSpan.FromSeconds(12);
+
+    public static readonly TimeSpan CallLimit = TimeSpan.FromSeconds(5);
+
     public async Task<ApprovalQueuePage?> GetAsync(int? kidProfileId, int limit, int offset, CancellationToken ct)
     {
         if (kidProfileId is int profileId
@@ -79,27 +88,32 @@ public sealed partial class RequestQueue(
             return null;
         }
 
-        IQueryable<QueuedRequest> matching = db.MediaRequests.AsNoTracking()
+        IQueryable<MediaRequest> matching = db.MediaRequests.AsNoTracking()
             .Where(request => request.State == RequestState.Pending)
             .Where(request => kidProfileId == null || request.KidProfileId == kidProfileId)
             .Join(
                 db.KidProfiles.AsNoTracking(),
                 request => request.KidProfileId,
                 profile => profile.Id,
-                (request, profile) => new QueuedRequest { Request = request, Profile = profile });
+                (request, profile) => request);
 
         int total;
-        List<QueuedRequest> listed;
+        List<MediaRequest> listed;
+        Dictionary<int, KidProfile> profiles;
         await db.Database.OpenConnectionAsync(ct);
         await using (SqliteTransaction snapshot = ((SqliteConnection)db.Database.GetDbConnection()).BeginTransaction(deferred: true))
         await using (await db.Database.UseTransactionAsync(snapshot, ct))
         {
             total = await matching.CountAsync(ct);
             listed = await matching
-                .OrderBy(item => item.Request.Id)
+                .OrderBy(request => request.Id)
                 .Skip(offset)
                 .Take(limit)
                 .ToListAsync(ct);
+            int[] profileIds = [.. listed.Select(request => request.KidProfileId).Distinct()];
+            profiles = (await db.KidProfiles.AsNoTracking()
+                .ListWithContentRulesAsync(profile => profileIds.Contains(profile.Id), ct))
+                .ToDictionary(profile => profile.Id);
         }
 
         if (listed.Count == 0)
@@ -107,13 +121,37 @@ public sealed partial class RequestQueue(
             return new ApprovalQueuePage([], total, limit, offset);
         }
 
-        IReadOnlyDictionary<int, string> names = await titles.GetManyAsync([.. listed.Select(item => item.Request)], ct);
-        HashSet<(int ProfileId, MediaKind Kind, int TmdbId)> revoked = await this.RevokedAsync(listed, ct);
+        DateTimeOffset staleBefore = await titles.StaleBeforeAsync(ct);
+        HashSet<(int ProfileId, MediaKind Kind, int TmdbId)> revoked = await this.RevokedAsync([.. profiles.Keys], ct);
         bool trailers = YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
-        List<ApprovalQueueItem> items = [];
-        foreach (QueuedRequest item in listed)
+        TitleLookup[] found = new TitleLookup[listed.Count];
+        using (CancellationTokenSource deadline = new(PageBudget, time))
+        using (CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token))
         {
-            items.Add(await this.DescribeAsync(item, names[item.Request.Id], revoked, trailers, ct));
+            LimitedTmdbClient client = new(tmdb, time);
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, listed.Count),
+                new ParallelOptions { MaxDegreeOfParallelism = MaxParallelLookups, CancellationToken = ct },
+                async (index, _) =>
+                {
+                    MediaRequest request = listed[index];
+                    bool revokedBefore = revoked.Contains((request.KidProfileId, request.Kind, request.TmdbId));
+                    found[index] = await this.LookUpAsync(client, request, profiles[request.KidProfileId], revokedBefore, trailers, budget.Token, ct);
+                });
+            if (deadline.IsCancellationRequested)
+            {
+                this.LogBudgetExceeded(PageBudget.TotalSeconds);
+            }
+        }
+
+        List<ApprovalQueueItem> items = [];
+        for (int index = 0; index < listed.Count; index++)
+        {
+            MediaRequest request = listed[index];
+            TitleLookup lookup = found[index];
+            string title = RequestTitles.Fresh(request, staleBefore)
+                ?? (lookup.Evaluation is null ? string.Empty : await titles.StoreAsync(request.Id, lookup.Evaluation.Name, ct));
+            items.Add(Describe(request, profiles[request.KidProfileId], title, lookup));
         }
 
         return new ApprovalQueuePage(items, total, limit, offset);
@@ -155,173 +193,19 @@ public sealed partial class RequestQueue(
         return names;
     }
 
-    private async Task<HashSet<(int ProfileId, MediaKind Kind, int TmdbId)>> RevokedAsync(
-        IReadOnlyList<QueuedRequest> listed,
-        CancellationToken ct)
+    internal static QueueReason Explain(PolicyEvaluation evaluation, AutoApproveRule rule, MediaKind kind, bool revokedBefore)
     {
-        int[] profileIds = [.. listed.Select(item => item.Profile.Id).Distinct()];
-        var rows = await db.MediaRequests.AsNoTracking()
-            .Where(request => request.State == RequestState.Revoked && profileIds.Contains(request.KidProfileId))
-            .Select(request => new { request.KidProfileId, request.Kind, request.TmdbId })
-            .ToListAsync(ct);
-        return [.. rows.Select(row => (row.KidProfileId, row.Kind, row.TmdbId))];
-    }
-
-    private async Task<ApprovalQueueItem> DescribeAsync(
-        QueuedRequest item,
-        string title,
-        HashSet<(int ProfileId, MediaKind Kind, int TmdbId)> revoked,
-        bool trailers,
-        CancellationToken ct)
-    {
-        MediaRequest request = item.Request;
-        KidProfile profile = item.Profile;
-        TmdbMediaType type = request.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-        List<QueueGap> gaps = [];
-        TmdbDetails? details = null;
-        try
-        {
-            details = await tmdb.GetDetailsAsync(type, request.TmdbId, ct: ct);
-        }
-        catch (Exception ex) when (LookupFailed(ex, ct))
-        {
-            this.LogDetailsFailed(ex, request.Kind, request.TmdbId);
-            gaps.Add(QueueGap.Synopsis);
-            gaps.Add(QueueGap.Rating);
-            gaps.Add(QueueGap.Providers);
-            if (trailers)
-            {
-                gaps.Add(QueueGap.Trailer);
-            }
-        }
-
-        TmdbCertification? certification = null;
-        if (details is not null)
-        {
-            try
-            {
-                certification = await tmdb.GetCertificationAsync(type, request.TmdbId, [RatingScale.UsRegion], ct);
-            }
-            catch (Exception ex) when (LookupFailed(ex, ct))
-            {
-                this.LogCertificationFailed(ex, request.Kind, request.TmdbId);
-                gaps.Add(QueueGap.Rating);
-            }
-        }
-
-        IReadOnlyList<QueueWatchProvider> providers = [];
-        if (details is not null)
-        {
-            try
-            {
-                providers = [.. StreamingNames(await tmdb.GetWatchProvidersAsync(type, request.TmdbId, ct))
-                    .Select(name => new QueueWatchProvider(name))];
-            }
-            catch (Exception ex) when (LookupFailed(ex, ct))
-            {
-                this.LogProvidersFailed(ex, request.Kind, request.TmdbId);
-                gaps.Add(QueueGap.Providers);
-            }
-        }
-
-        string? trailer = null;
-        if (trailers && details is not null)
-        {
-            try
-            {
-                trailer = KidTitleDetails.SelectTrailer((await tmdb.GetVideosAsync(type, request.TmdbId, ct: ct)).Results);
-            }
-            catch (Exception ex) when (LookupFailed(ex, ct))
-            {
-                this.LogTrailerFailed(ex, request.Kind, request.TmdbId);
-                gaps.Add(QueueGap.Trailer);
-            }
-        }
-
-        bool revokedBefore = revoked.Contains((profile.Id, request.Kind, request.TmdbId));
-        QueueReason reason = await this.ExplainAsync(request, profile, details, certification, gaps.Contains(QueueGap.Rating), revokedBefore, ct);
-        return new ApprovalQueueItem(
-            request.Id,
-            profile.Id,
-            profile.Name,
-            request.Kind,
-            request.TmdbId,
-            title,
-            request.RequestCount,
-            request.CreatedAt,
-            details is null ? null : KidTitleDetails.Synopsis(details.Overview),
-            RatingText(certification),
-            Descriptors(certification),
-            providers,
-            trailer,
-            reason,
-            gaps);
-    }
-
-    private async Task<QueueReason> ExplainAsync(
-        MediaRequest request,
-        KidProfile profile,
-        TmdbDetails? details,
-        TmdbCertification? certification,
-        bool ratingFailed,
-        bool revokedBefore,
-        CancellationToken ct)
-    {
-        if (details is null || ratingFailed)
+        ContentDecision decision = evaluation.Decision;
+        TmdbCertification? certification = evaluation.Certification;
+        if (decision.Reason.Code == ContentReasonCode.MetadataUnavailable)
         {
             return Unavailable(certification);
         }
 
-        TmdbMediaType type = request.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-        IReadOnlyList<TmdbKeyword>? keywords = null;
-        if (profile.BlockedKeywordIds.Count > 0)
-        {
-            try
-            {
-                keywords = await tmdb.GetKeywordsAsync(type, request.TmdbId, ct);
-            }
-            catch (Exception ex) when (LookupFailed(ex, ct))
-            {
-                this.LogKeywordsFailed(ex, request.Kind, request.TmdbId);
-                return Unavailable(certification);
-            }
-        }
-
-        IReadOnlyList<int>? genreIds = details.Genres is null ? null : [.. details.Genres.Select(genre => genre.Id)];
-        IReadOnlyList<int>? keywordIds = keywords is null ? null : [.. keywords.Select(keyword => keyword.Id)];
-        ContentTitle content = new(
-            new TitleKey(request.Kind, request.TmdbId),
-            certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
-            genreIds,
-            keywordIds,
-            details.OriginalLanguage);
-        ContentPolicy policy = ContentPolicy.ForProfile(
-            profile.MovieAgeLimit,
-            profile.TvAgeLimit,
-            profile.BlockedGenreIds,
-            profile.BlockedKeywordIds,
-            profile.AllowedOriginalLanguages);
-        ContentDecision decision = ContentPolicyEngine.Default.Evaluate(content, policy);
-        RatingLevel? level = new RatingRule().Evaluate(content, policy).Reason.Level;
-        AutoApproveRule rule = new(profile.AutoApprove, profile.AutoApproveMovieRating, profile.AutoApproveTvRating);
-        return Explain(decision, rule, request.Kind, level, policy.HasUnknownGenres(genreIds), revokedBefore, certification, details, keywords, policy);
-    }
-
-    internal static QueueReason Explain(
-        ContentDecision decision,
-        AutoApproveRule rule,
-        MediaKind kind,
-        RatingLevel? level,
-        bool genresUnknown,
-        bool revokedBefore,
-        TmdbCertification? certification,
-        TmdbDetails? details,
-        IReadOnlyList<TmdbKeyword>? keywords,
-        ContentPolicy policy)
-    {
+        RatingLevel? level = evaluation.Level;
         string? rating = ShownRating(decision.Reason.Rating, certification);
         RatingLevel? shownLevel = decision.Reason.Level ?? level;
-        if (revokedBefore)
+        if (revokedBefore && decision.Outcome != ContentOutcome.Blocked)
         {
             return new QueueReason(QueueReasonCode.RevokedBefore, rating, shownLevel, null, null, null, null);
         }
@@ -335,10 +219,10 @@ public sealed partial class RequestQueue(
         };
         if (fromPolicy is QueueReasonCode policyCode)
         {
-            return Build(policyCode, decision, rating, shownLevel, rule, kind, details, keywords, policy);
+            return Build(policyCode, rating, shownLevel, rule, kind, evaluation);
         }
 
-        QueueReasonCode code = rule.WhyNot(decision, kind, level, genresUnknown) switch
+        QueueReasonCode code = rule.WhyNot(decision, kind, level, evaluation.GenresUnknown) switch
         {
             AutoApproveSkip.GenresUnknown => QueueReasonCode.UnknownGenres,
             AutoApproveSkip.Unrated => QueueReasonCode.Unrated,
@@ -347,29 +231,52 @@ public sealed partial class RequestQueue(
             AutoApproveSkip.NotAllowed => QueueReasonCode.Unavailable,
             _ => QueueReasonCode.NotAutoApproved,
         };
-        return Build(code, decision, rating, shownLevel, rule, kind, details, keywords, policy);
+        return Build(code, rating, shownLevel, rule, kind, evaluation);
+    }
+
+    private static ApprovalQueueItem Describe(MediaRequest request, KidProfile profile, string title, TitleLookup lookup)
+    {
+        PolicyEvaluation? evaluation = lookup.Evaluation;
+        TmdbCertification? certification = evaluation?.Certification;
+        QueueReason reason = evaluation is null
+            ? Unavailable(null)
+            : Explain(evaluation, profile.AutoApproval(), request.Kind, lookup.RevokedBefore);
+        return new ApprovalQueueItem(
+            request.Id,
+            profile.Id,
+            profile.Name,
+            request.Kind,
+            request.TmdbId,
+            title,
+            request.RequestCount,
+            request.CreatedAt,
+            evaluation?.Details is TmdbDetails details ? KidTitleDetails.Synopsis(details.Overview) : null,
+            RatingText(certification),
+            Descriptors(certification),
+            lookup.Providers,
+            lookup.Trailer,
+            reason,
+            lookup.Gaps);
     }
 
     private static QueueReason Build(
         QueueReasonCode code,
-        ContentDecision decision,
         string? rating,
         RatingLevel? level,
         AutoApproveRule rule,
         MediaKind kind,
-        TmdbDetails? details,
-        IReadOnlyList<TmdbKeyword>? keywords,
-        ContentPolicy policy)
+        PolicyEvaluation evaluation)
     {
+        ContentReason decided = evaluation.Decision.Reason;
         RatingLevel? max = code switch
         {
             QueueReasonCode.AboveCeiling => kind == MediaKind.Movie ? rule.MaxMovieRating : rule.MaxTvRating,
-            QueueReasonCode.AboveRatingLimit => decision.Reason.MaxLevel ?? policy.MaxRatingFor(kind),
+            QueueReasonCode.AboveRatingLimit => decided.MaxLevel ?? evaluation.Policy.MaxRatingFor(kind),
             _ => null,
         };
-        string? genreName = code == QueueReasonCode.BlockedGenre ? GenreName(details, decision.Reason.GenreId) : null;
-        string? keywordName = code == QueueReasonCode.BlockedKeyword ? KeywordName(keywords, decision.Reason.KeywordId) : null;
-        string? language = code == QueueReasonCode.LanguageNotAllowed ? decision.Reason.OriginalLanguage : null;
+        string? genreName = code == QueueReasonCode.BlockedGenre ? GenreName(evaluation.Details, decided.GenreId) : null;
+        string? keywordName = code == QueueReasonCode.BlockedKeyword ? KeywordName(evaluation.Keywords, decided.KeywordId) : null;
+        string? language = code == QueueReasonCode.LanguageNotAllowed ? decided.OriginalLanguage : null;
         return new QueueReason(code, rating, level, max, genreName, keywordName, language);
     }
 
@@ -447,20 +354,95 @@ public sealed partial class RequestQueue(
     }
 
     private static bool LookupFailed(Exception ex, CancellationToken ct) =>
-        !ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException;
+        !ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or OperationCanceledException;
 
-    private sealed class QueuedRequest
+    private async Task<HashSet<(int ProfileId, MediaKind Kind, int TmdbId)>> RevokedAsync(int[] profileIds, CancellationToken ct)
     {
-        public required MediaRequest Request { get; init; }
+        var rows = await db.MediaRequests.AsNoTracking()
+            .Where(request => request.State == RequestState.Revoked && profileIds.Contains(request.KidProfileId))
+            .Select(request => new { request.KidProfileId, request.Kind, request.TmdbId })
+            .ToListAsync(ct);
+        return [.. rows.Select(row => (row.KidProfileId, row.Kind, row.TmdbId))];
+    }
 
-        public required KidProfile Profile { get; init; }
+    private async Task<TitleLookup> LookUpAsync(
+        ITmdbClient client,
+        MediaRequest request,
+        KidProfile profile,
+        bool revokedBefore,
+        bool trailers,
+        CancellationToken budget,
+        CancellationToken ct)
+    {
+        TitleKey key = new(request.Kind, request.TmdbId);
+        TmdbMediaType type = request.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
+        PolicyEvaluation? evaluation = null;
+        try
+        {
+            evaluation = await KidPolicyEvaluator.EvaluateAsync(client, key, profile.ContentPolicy(), revokedBefore, budget);
+        }
+        catch (Exception ex) when (LookupFailed(ex, ct))
+        {
+            this.LogDetailsFailed(ex, request.Kind, request.TmdbId);
+        }
+
+        List<QueueGap> gaps = [];
+        if (evaluation is null || evaluation.FailedLookup == PolicyLookup.Details)
+        {
+            gaps.AddRange([QueueGap.Synopsis, QueueGap.Rating, QueueGap.Providers]);
+            if (trailers)
+            {
+                gaps.Add(QueueGap.Trailer);
+            }
+
+            return new TitleLookup(evaluation, revokedBefore, [], null, gaps);
+        }
+
+        if (evaluation.FailedLookup is PolicyLookup failed)
+        {
+            this.LogLookupFailed(failed, request.Kind, request.TmdbId);
+            gaps.Add(failed == PolicyLookup.Certification ? QueueGap.Rating : QueueGap.Keywords);
+        }
+
+        if (evaluation.Details is null)
+        {
+            return new TitleLookup(evaluation, revokedBefore, [], null, gaps);
+        }
+
+        IReadOnlyList<QueueWatchProvider> providers = [];
+        try
+        {
+            providers = [.. StreamingNames(await client.GetWatchProvidersAsync(type, request.TmdbId, budget))
+                .Select(name => new QueueWatchProvider(name))];
+        }
+        catch (Exception ex) when (LookupFailed(ex, ct))
+        {
+            this.LogProvidersFailed(ex, request.Kind, request.TmdbId);
+            gaps.Add(QueueGap.Providers);
+        }
+
+        string? trailer = null;
+        if (trailers)
+        {
+            try
+            {
+                trailer = KidTitleDetails.SelectTrailer((await client.GetVideosAsync(type, request.TmdbId, ct: budget)).Results);
+            }
+            catch (Exception ex) when (LookupFailed(ex, ct))
+            {
+                this.LogTrailerFailed(ex, request.Kind, request.TmdbId);
+                gaps.Add(QueueGap.Trailer);
+            }
+        }
+
+        return new TitleLookup(evaluation, revokedBefore, providers, trailer, gaps);
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read details for {Kind} {TmdbId}")]
     private partial void LogDetailsFailed(Exception exception, MediaKind kind, int tmdbId);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read the certification for {Kind} {TmdbId}")]
-    private partial void LogCertificationFailed(Exception exception, MediaKind kind, int tmdbId);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read the {Lookup} for {Kind} {TmdbId}")]
+    private partial void LogLookupFailed(PolicyLookup lookup, MediaKind kind, int tmdbId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read watch providers for {Kind} {TmdbId}")]
     private partial void LogProvidersFailed(Exception exception, MediaKind kind, int tmdbId);
@@ -468,6 +450,71 @@ public sealed partial class RequestQueue(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read videos for {Kind} {TmdbId}")]
     private partial void LogTrailerFailed(Exception exception, MediaKind kind, int tmdbId);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read keywords for {Kind} {TmdbId}")]
-    private partial void LogKeywordsFailed(Exception exception, MediaKind kind, int tmdbId);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue stopped calling TMDB after {Seconds} seconds and showed the rest of the page with gaps")]
+    private partial void LogBudgetExceeded(double seconds);
+
+    private sealed record TitleLookup(
+        PolicyEvaluation? Evaluation,
+        bool RevokedBefore,
+        IReadOnlyList<QueueWatchProvider> Providers,
+        string? Trailer,
+        IReadOnlyList<QueueGap> Gaps);
+
+    private sealed class LimitedTmdbClient(ITmdbClient inner, TimeProvider time) : ITmdbClient
+    {
+        public Task<bool> TestApiKeyAsync(CancellationToken ct = default) =>
+            this.RunAsync(inner.TestApiKeyAsync, ct);
+
+        public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.SearchAsync(query, type, page, language, token), ct);
+
+        public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetDetailsAsync(type, id, language, token), ct);
+
+        public Task<IReadOnlyList<TmdbKeyword>> GetKeywordsAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetKeywordsAsync(type, id, token), ct);
+
+        public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetCreditsAsync(type, id, language, token), ct);
+
+        public Task<TmdbCertification?> GetCertificationAsync(TmdbMediaType type, int id, IReadOnlyList<string> regions, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetCertificationAsync(type, id, regions, token), ct);
+
+        public Task<TmdbVideos> GetVideosAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetVideosAsync(type, id, language, token), ct);
+
+        public Task<TmdbImages> GetImagesAsync(TmdbMediaType type, int id, string imageLanguages = "en,null", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetImagesAsync(type, id, imageLanguages, token), ct);
+
+        public Task<TmdbPage<TmdbSearchResult>> DiscoverAsync(TmdbMediaType type, TmdbDiscoverQuery query, string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.DiscoverAsync(type, query, language, token), ct);
+
+        public Task<TmdbPage<TmdbSearchResult>> GetTrendingAsync(TmdbMediaType type, string window = "week", int page = 1, string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetTrendingAsync(type, window, page, language, token), ct);
+
+        public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetWatchProvidersAsync(type, id, token), ct);
+
+        public Task<int?> FindIdAsync(TmdbMediaType type, ExternalIdSource source, string externalId, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.FindIdAsync(type, source, externalId, token), ct);
+
+        public Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetGenresAsync(language, token), ct);
+
+        private async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            using CancellationTokenSource limit = new(CallLimit, time);
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
+            try
+            {
+                return await call(linked.Token);
+            }
+            catch (OperationCanceledException) when (limit.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                // Shaped like an HttpClient timeout so the shared evaluator treats it as a failed lookup rather than a cancellation.
+                throw new TaskCanceledException($"TMDB did not answer within {CallLimit.TotalSeconds} seconds.", new TimeoutException());
+            }
+        }
+    }
 }

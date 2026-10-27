@@ -11,4 +11,15 @@ public static class ContentProfileQuery
         profile?.MarkContentRulesLoaded();
         return profile;
     }
+
+    public static async Task<List<KidProfile>> ListWithContentRulesAsync(this IQueryable<KidProfile> profiles, Expression<Func<KidProfile, bool>> predicate, CancellationToken ct)
+    {
+        List<KidProfile> found = await profiles.Include(row => row.TitleRules).Where(predicate).ToListAsync(ct);
+        foreach (KidProfile profile in found)
+        {
+            profile.MarkContentRulesLoaded();
+        }
+
+        return found;
+    }
 }

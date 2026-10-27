@@ -18,8 +18,8 @@ public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, Tmd
         try
         {
             TmdbDetails details = await tmdb.GetDetailsAsync(kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv, tmdbId, ct: ct);
-            string name = (details.Title ?? details.Name ?? string.Empty).Trim();
-            return name.Length == 0 ? null : (name[..Math.Min(name.Length, MediaRequests.MaxTitleLength)], details);
+            string name = Clip(details.Title ?? details.Name ?? string.Empty);
+            return name.Length == 0 ? null : (name, details);
         }
         catch (TmdbException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
@@ -28,7 +28,29 @@ public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, Tmd
     }
 
     public async Task<string> GetAsync(MediaRequest request, CancellationToken ct) =>
-        await this.ResolveAsync(request, time.GetUtcNow() - await retention.GetAsync(ct), ct);
+        await this.ResolveAsync(request, await this.StaleBeforeAsync(ct), ct);
+
+    public async Task<DateTimeOffset> StaleBeforeAsync(CancellationToken ct) => time.GetUtcNow() - await retention.GetAsync(ct);
+
+    public static string? Fresh(MediaRequest request, DateTimeOffset staleBefore) =>
+        request.Title is { Length: > 0 } stored && request.TitleFetchedAt is DateTimeOffset fetchedAt && fetchedAt >= staleBefore
+            ? stored
+            : null;
+
+    public async Task<string> StoreAsync(int requestId, string fetched, CancellationToken ct)
+    {
+        string name = Clip(fetched);
+        if (name.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        DateTimeOffset now = time.GetUtcNow();
+        await db.MediaRequests.Where(row => row.Id == requestId).ExecuteUpdateAsync(
+            setters => setters.SetProperty(row => row.Title, name).SetProperty(row => row.TitleFetchedAt, now),
+            ct);
+        return name;
+    }
 
     public async Task<IReadOnlyDictionary<int, string>> GetManyAsync(IReadOnlyCollection<MediaRequest> requests, CancellationToken ct)
     {
@@ -38,7 +60,7 @@ public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, Tmd
             return names;
         }
 
-        DateTimeOffset staleBefore = time.GetUtcNow() - await retention.GetAsync(ct);
+        DateTimeOffset staleBefore = await this.StaleBeforeAsync(ct);
         foreach (MediaRequest request in requests)
         {
             names[request.Id] = await this.ResolveAsync(request, staleBefore, ct);
@@ -47,27 +69,24 @@ public sealed class RequestTitles(WishlistarrDbContext db, ITmdbClient tmdb, Tmd
         return names;
     }
 
+    private static string Clip(string name)
+    {
+        string trimmed = name.Trim();
+        return trimmed[..Math.Min(trimmed.Length, MediaRequests.MaxTitleLength)];
+    }
+
     private async Task<string> ResolveAsync(MediaRequest request, DateTimeOffset staleBefore, CancellationToken ct)
     {
-        if (request.Title is { Length: > 0 } stored
-            && request.TitleFetchedAt is DateTimeOffset fetchedAt
-            && fetchedAt >= staleBefore)
+        if (Fresh(request, staleBefore) is string stored)
         {
             return stored;
         }
 
         try
         {
-            if (await this.FetchNameAsync(request.Kind, request.TmdbId, ct) is not string name)
-            {
-                return string.Empty;
-            }
-
-            DateTimeOffset now = time.GetUtcNow();
-            await db.MediaRequests.Where(row => row.Id == request.Id).ExecuteUpdateAsync(
-                setters => setters.SetProperty(row => row.Title, name).SetProperty(row => row.TitleFetchedAt, now),
-                ct);
-            return name;
+            return await this.FetchNameAsync(request.Kind, request.TmdbId, ct) is string name
+                ? await this.StoreAsync(request.Id, name, ct)
+                : string.Empty;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
         {

@@ -438,7 +438,125 @@ public sealed class RequestQueueTests
         Assert.Equal("Dee's film.", deeItem.GetProperty("overview").GetString());
         Assert.Equal("PG", deeItem.GetProperty("rating").GetString());
         Assert.Equal(["Stream"], deeItem.GetProperty("providers").EnumerateArray().Select(provider => provider.GetProperty("name").GetString()));
-        Assert.Empty(deeItem.GetProperty("gaps").EnumerateArray());
+        Assert.Equal(["keywords"], Texts(deeItem.GetProperty("gaps")));
+        Assert.Empty(adaItem.GetProperty("gaps").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task A_title_blocked_after_the_kid_asked_is_explicitly_blocked_like_the_preview()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, int profileId) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        await AskAsync(kid, 700);
+        await AddTitleRuleAsync(parent, profileId, 700, blocked: true);
+
+        JsonElement reason = Assert.Single((await QueueAsync(parent)).GetProperty("items").EnumerateArray()).GetProperty("reason");
+        JsonElement preview = await PreviewAsync(parent, profileId, 700);
+
+        Assert.Equal("blocked", preview.GetProperty("decision").GetString());
+        Assert.Equal("explicitlyBlocked", preview.GetProperty("reasonCode").GetString());
+        Assert.Equal("explicitlyBlocked", reason.GetProperty("code").GetString());
+        Assert.Equal("PG", reason.GetProperty("rating").GetString());
+    }
+
+    [Fact]
+    public async Task An_always_allowed_title_above_the_age_limit_is_not_called_above_the_limit()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, int profileId) = await factory.SignInKidAsync(movieAgeLimit: 8);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await KidRequestApiFactory.RequestAsync(kid, "movie", 603)).StatusCode);
+        await AddTitleRuleAsync(parent, profileId, 603, blocked: false);
+        await AskAsync(kid, 603);
+
+        JsonElement item = Assert.Single((await QueueAsync(parent)).GetProperty("items").EnumerateArray());
+        JsonElement reason = item.GetProperty("reason");
+        JsonElement preview = await PreviewAsync(parent, profileId, 603);
+
+        Assert.Equal("allowed", preview.GetProperty("decision").GetString());
+        Assert.Equal("explicitlyAllowed", preview.GetProperty("reasonCode").GetString());
+        Assert.Equal("autoApproveOff", reason.GetProperty("code").GetString());
+        Assert.Equal("PG-13", reason.GetProperty("rating").GetString());
+        Assert.Equal("teen", reason.GetProperty("level").GetString());
+        Assert.Equal(JsonValueKind.Null, reason.GetProperty("maxLevel").ValueKind);
+        Assert.Equal("A hacker learns the truth.", item.GetProperty("overview").GetString());
+    }
+
+    [Fact]
+    public async Task An_adult_title_is_unavailable_like_the_preview_and_shows_nothing_from_tmdb()
+    {
+        using KidRequestApiFactory factory = new();
+        factory.Tmdb.SetBody("/3/movie/705", """
+            {"id":705,"title":"Movie 705","overview":"Not for kids.","adult":true,"genres":[{"id":18,"name":"Drama"}],"original_language":"en","vote_average":6}
+            """);
+        factory.Tmdb.SetBody("/3/movie/705/release_dates", """{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"PG","type":3}]}]}""");
+        factory.Tmdb.SetBody("/3/movie/705/watch/providers", """{"results":{"US":{"flatrate":[{"provider_id":8,"provider_name":"Stream"}]}}}""");
+        (_, int profileId) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        await CreatePendingAsync(factory, profileId, 705, "Kept Title");
+
+        JsonElement item = Assert.Single((await QueueAsync(parent)).GetProperty("items").EnumerateArray());
+        JsonElement preview = await PreviewAsync(parent, profileId, 705);
+
+        Assert.Equal("blocked", preview.GetProperty("decision").GetString());
+        Assert.Equal("metadataUnavailable", preview.GetProperty("reasonCode").GetString());
+        Assert.Equal("unavailable", item.GetProperty("reason").GetProperty("code").GetString());
+        Assert.Equal("Kept Title", item.GetProperty("title").GetString());
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("overview").ValueKind);
+        Assert.Empty(item.GetProperty("providers").EnumerateArray());
+        Assert.Empty(item.GetProperty("gaps").EnumerateArray());
+        Assert.Equal(0, factory.Tmdb.Count("/3/movie/705/watch/providers"));
+    }
+
+    [Fact]
+    public async Task An_explicit_block_wins_over_an_earlier_revocation_like_the_preview()
+    {
+        using KidRequestApiFactory factory = new();
+        (HttpClient kid, int profileId) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        int revoked = await AskAsync(kid, 700);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            MediaRequest row = await db.MediaRequests.SingleAsync(request => request.Id == revoked);
+            row.State = RequestState.Revoked;
+            await db.SaveChangesAsync();
+        }
+
+        int waiting = await AskAsync(kid, 700);
+        Assert.Equal("revokedBefore", ItemFor(await QueueAsync(parent), profileId).GetProperty("reason").GetProperty("code").GetString());
+        await AddTitleRuleAsync(parent, profileId, 700, blocked: true);
+
+        JsonElement item = Assert.Single((await QueueAsync(parent)).GetProperty("items").EnumerateArray());
+        JsonElement preview = await PreviewAsync(parent, profileId, 700);
+
+        Assert.Equal(waiting, item.GetProperty("id").GetInt32());
+        Assert.Equal("blocked", preview.GetProperty("decision").GetString());
+        Assert.Equal("explicitlyBlocked", preview.GetProperty("reasonCode").GetString());
+        Assert.Equal("explicitlyBlocked", item.GetProperty("reason").GetProperty("code").GetString());
+    }
+
+    private static async Task AddTitleRuleAsync(HttpClient parent, int profileId, int tmdbId, bool blocked)
+    {
+        HttpResponseMessage response = await parent.PostAsJsonAsync(
+            $"/api/v1/kid-profiles/{profileId}/titles",
+            new { kind = "movie", tmdbId, title = $"Movie {tmdbId}", blocked });
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    private static Task<JsonElement> PreviewAsync(HttpClient parent, int profileId, int tmdbId) =>
+        parent.PostAsJsonAsync($"/api/v1/kid-profiles/{profileId}/preview", new { kind = "movie", tmdbId }).ResultBody();
+
+    private static async Task CreatePendingAsync(KidRequestApiFactory factory, int profileId, int tmdbId, string title)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        RequestResult result = await scope.ServiceProvider.GetRequiredService<MediaRequests>().CreateAsync(
+            profileId,
+            new TitleKey(MediaKind.Movie, tmdbId),
+            title,
+            RequestActor.Kid(profileId, "Ada"));
+        Assert.Equal(RequestOutcome.Created, result.Outcome);
     }
 
     private static async Task<int> AskAsync(HttpClient kid, int tmdbId)
