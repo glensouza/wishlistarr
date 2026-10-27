@@ -7,7 +7,7 @@ namespace Wishlistarr.Api.Kids;
 
 public static class KidPolicyEvaluator
 {
-    public static async Task<PolicyEvaluation?> EvaluateAsync(ITmdbClient tmdb, TitleKey key, ContentPolicy policy, bool revoked, CancellationToken ct)
+    public static async Task<PolicyEvaluation?> EvaluateAsync(ITmdbClient tmdb, TitleKey key, ContentPolicy policy, bool revoked, CancellationToken ct, bool keepPartialOnCancel = false)
     {
         TmdbMediaType type = key.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
         ContentTitle content = new(key, []);
@@ -39,6 +39,10 @@ public static class KidPolicyEvaluator
         }
         catch (TmdbException ex) when (ex.StatusCode == global::System.Net.HttpStatusCode.NotFound) { return null; }
         catch (Exception ex) when (ex is not TmdbNotConfiguredException && !ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
+        {
+            return new PolicyEvaluation(name, content, policy, Unavailable, details, certification, FailedLookup: lookup);
+        }
+        catch (OperationCanceledException) when (keepPartialOnCancel)
         {
             return new PolicyEvaluation(name, content, policy, Unavailable, details, certification, FailedLookup: lookup);
         }

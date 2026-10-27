@@ -11,7 +11,7 @@ Store the key in the `tmdb.api_key` setting with `PUT /api/v1/settings/tmdb.api_
 - Every request sends `include_adult=false`.
 - Responses are cached in a dedicated in-memory cache limited to 2000 entries (`CacheMaxEntries`): searches for 10 minutes, discover and trending for 1 hour, details, credits, videos, images, watch providers and keywords for 12 hours. Certifications are cached per title for 7 days, so changing the region order does not cause another request. Failed responses are not cached. Keyword lists for a movie come from `GET /movie/{id}/keywords` (`keywords`) and for a show from `GET /tv/{id}/keywords` (`results`).
 - `429` responses are retried up to 3 times, waiting for `Retry-After` when present and backing off exponentially otherwise. Each wait is capped at 30 seconds and the total wait at 45 seconds; after that the 429 is returned as an error.
-- The parent approval queue limits each TMDB call to 5 seconds, including `429` waits, and each page to 12 seconds, and reports what it could not read as gaps instead of failing. See [Approval queue](requests.md#approval-queue).
+- The parent approval queue limits each TMDB call to 5 seconds, including `429` waits, and each page to 12 seconds, and reports what it could not read as gaps instead of failing. When the API key is missing it makes no TMDB call and sets `tmdbConfigured` to `false` on the page. See [Approval queue](requests.md#approval-queue).
 - Certifications come from `release_dates` for movies (theatrical releases preferred) and `content_ratings` for TV. The caller passes regions in priority order and gets the first one with a rating, along with its content descriptors.
 - The key is never written to logs: HTTP client logging is disabled for TMDB clients.
 

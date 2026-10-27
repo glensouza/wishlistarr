@@ -112,7 +112,7 @@ public static class RequestEndpoints
                 : Results.Ok(page);
         })
             .WithName("GetApprovalQueue")
-            .WithSummary("Lists pending requests for a parent, with the synopsis, US rating and descriptors, US streaming providers, trailer key and the current reason a parent has to decide. A kid session cannot call it. Title details that cannot be read are left out and named in gaps; the request can still be approved or denied.")
+            .WithSummary("Lists pending requests for a parent, with the synopsis, US rating and descriptors, US streaming providers, trailer key and the current reason a parent has to decide. A kid session cannot call it. Title details that cannot be read are left out and named in gaps; the request can still be approved or denied. tmdbConfigured is false when no TMDB key is saved, and then no title details are read.")
             .Produces<ApprovalQueuePage>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);

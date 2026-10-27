@@ -64,11 +64,12 @@ public sealed record ApprovalQueueItem(
     QueueReason Reason,
     IReadOnlyList<QueueGap> Gaps);
 
-public sealed record ApprovalQueuePage(IReadOnlyList<ApprovalQueueItem> Items, int Total, int Limit, int Offset);
+public sealed record ApprovalQueuePage(IReadOnlyList<ApprovalQueueItem> Items, int Total, int Limit, int Offset, bool TmdbConfigured = true);
 
 public sealed partial class RequestQueue(
     WishlistarrDbContext db,
     ITmdbClient tmdb,
+    ITmdbApiKeyProvider keys,
     RequestTitles titles,
     SettingsStore settings,
     TimeProvider time,
@@ -116,9 +117,10 @@ public sealed partial class RequestQueue(
                 .ToDictionary(profile => profile.Id);
         }
 
+        bool configured = await keys.GetApiKeyAsync(ct) is { Length: > 0 };
         if (listed.Count == 0)
         {
-            return new ApprovalQueuePage([], total, limit, offset);
+            return new ApprovalQueuePage([], total, limit, offset, configured);
         }
 
         DateTimeOffset staleBefore = await titles.StaleBeforeAsync(ct);
@@ -136,7 +138,9 @@ public sealed partial class RequestQueue(
                 {
                     MediaRequest request = listed[index];
                     bool revokedBefore = revoked.Contains((request.KidProfileId, request.Kind, request.TmdbId));
-                    found[index] = await this.LookUpAsync(client, request, profiles[request.KidProfileId], revokedBefore, trailers, budget.Token, ct);
+                    found[index] = configured
+                        ? await this.LookUpAsync(client, request, profiles[request.KidProfileId], revokedBefore, trailers, budget.Token, ct)
+                        : new TitleLookup(null, revokedBefore, [], null, MissingDetails(trailers));
                 });
             if (deadline.IsCancellationRequested)
             {
@@ -154,7 +158,7 @@ public sealed partial class RequestQueue(
             items.Add(Describe(request, profiles[request.KidProfileId], title, lookup));
         }
 
-        return new ApprovalQueuePage(items, total, limit, offset);
+        return new ApprovalQueuePage(items, total, limit, offset, configured);
     }
 
     internal static IReadOnlyList<string> StreamingNames(TmdbWatchProviders? providers)
@@ -232,6 +236,17 @@ public sealed partial class RequestQueue(
             _ => QueueReasonCode.NotAutoApproved,
         };
         return Build(code, rating, shownLevel, rule, kind, evaluation);
+    }
+
+    private static List<QueueGap> MissingDetails(bool trailers)
+    {
+        List<QueueGap> gaps = [QueueGap.Synopsis, QueueGap.Rating, QueueGap.Providers];
+        if (trailers)
+        {
+            gaps.Add(QueueGap.Trailer);
+        }
+
+        return gaps;
     }
 
     private static ApprovalQueueItem Describe(MediaRequest request, KidProfile profile, string title, TitleLookup lookup)
@@ -379,7 +394,8 @@ public sealed partial class RequestQueue(
         PolicyEvaluation? evaluation = null;
         try
         {
-            evaluation = await KidPolicyEvaluator.EvaluateAsync(client, key, profile.ContentPolicy(), revokedBefore, budget);
+            evaluation = await KidPolicyEvaluator.EvaluateAsync(client, key, profile.ContentPolicy(), revokedBefore, budget, keepPartialOnCancel: true);
+            ct.ThrowIfCancellationRequested();
         }
         catch (Exception ex) when (LookupFailed(ex, ct))
         {
@@ -389,18 +405,20 @@ public sealed partial class RequestQueue(
         List<QueueGap> gaps = [];
         if (evaluation is null || evaluation.FailedLookup == PolicyLookup.Details)
         {
-            gaps.AddRange([QueueGap.Synopsis, QueueGap.Rating, QueueGap.Providers]);
-            if (trailers)
-            {
-                gaps.Add(QueueGap.Trailer);
-            }
-
-            return new TitleLookup(evaluation, revokedBefore, [], null, gaps);
+            return new TitleLookup(evaluation, revokedBefore, [], null, MissingDetails(trailers));
         }
 
         if (evaluation.FailedLookup is PolicyLookup failed)
         {
-            this.LogLookupFailed(failed, request.Kind, request.TmdbId);
+            if (budget.IsCancellationRequested)
+            {
+                this.LogSkipped(request.Kind, request.TmdbId);
+            }
+            else
+            {
+                this.LogLookupFailed(failed, request.Kind, request.TmdbId);
+            }
+
             gaps.Add(failed == PolicyLookup.Certification ? QueueGap.Rating : QueueGap.Keywords);
         }
 
@@ -417,7 +435,7 @@ public sealed partial class RequestQueue(
         }
         catch (Exception ex) when (LookupFailed(ex, ct))
         {
-            this.LogProvidersFailed(ex, request.Kind, request.TmdbId);
+            this.LogFailure(budget, ex, request, this.LogProvidersFailed);
             gaps.Add(QueueGap.Providers);
         }
 
@@ -430,13 +448,28 @@ public sealed partial class RequestQueue(
             }
             catch (Exception ex) when (LookupFailed(ex, ct))
             {
-                this.LogTrailerFailed(ex, request.Kind, request.TmdbId);
+                this.LogFailure(budget, ex, request, this.LogTrailerFailed);
                 gaps.Add(QueueGap.Trailer);
             }
         }
 
         return new TitleLookup(evaluation, revokedBefore, providers, trailer, gaps);
     }
+
+    private void LogFailure(CancellationToken budget, Exception ex, MediaRequest request, Action<Exception, MediaKind, int> warn)
+    {
+        if (budget.IsCancellationRequested)
+        {
+            this.LogSkipped(request.Kind, request.TmdbId);
+        }
+        else
+        {
+            warn(ex, request.Kind, request.TmdbId);
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Approval queue skipped part of {Kind} {TmdbId} because the page budget ran out")]
+    private partial void LogSkipped(MediaKind kind, int tmdbId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read details for {Kind} {TmdbId}")]
     private partial void LogDetailsFailed(Exception exception, MediaKind kind, int tmdbId);
