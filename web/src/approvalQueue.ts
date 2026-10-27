@@ -24,7 +24,7 @@ const reasonCodes = [
 
 export type QueueReasonCode = (typeof reasonCodes)[number]
 
-const gaps = ['synopsis', 'rating', 'providers', 'trailer'] as const
+const gaps = ['synopsis', 'rating', 'providers', 'trailer', 'keywords'] as const
 
 export type QueueGap = (typeof gaps)[number]
 
@@ -94,6 +94,15 @@ function isGap(value: unknown): value is QueueGap {
   return typeof value === 'string' && gaps.some((gap) => gap === value)
 }
 
+function withKnownGaps(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.gaps)) return value
+  if (value.gaps.some((gap) => typeof gap !== 'string')) return value
+  return {
+    ...value,
+    gaps: value.gaps.filter((gap): gap is QueueGap => isGap(gap)),
+  }
+}
+
 function isItem(value: unknown): value is QueueItem {
   if (!isRecord(value)) return false
   return (
@@ -124,18 +133,29 @@ export function readQueue(body: unknown): QueuePage {
   if (
     !isRecord(body) ||
     !Array.isArray(body.items) ||
-    !body.items.every(isItem) ||
     typeof body.total !== 'number' ||
     typeof body.limit !== 'number' ||
     typeof body.offset !== 'number'
   ) {
     throw new QueueShapeError()
   }
-  return body as QueuePage
+  const items = body.items.map(withKnownGaps)
+  if (!items.every(isItem)) throw new QueueShapeError()
+  return {
+    items,
+    total: body.total,
+    limit: body.limit,
+    offset: body.offset,
+  }
 }
 
-export const listQueue = () =>
-  request<unknown>('GET', '/api/v1/requests/queue').then(readQueue)
+export function listQueue(kidProfileId?: number) {
+  const path =
+    kidProfileId === undefined
+      ? '/api/v1/requests/queue'
+      : `/api/v1/requests/queue?kidProfileId=${kidProfileId}`
+  return request<unknown>('GET', path).then(readQueue)
+}
 
 export function reasonText(reason: QueueReason, t: Translate) {
   const code = knownReasons.has(reason.code) ? reason.code : 'unavailable'

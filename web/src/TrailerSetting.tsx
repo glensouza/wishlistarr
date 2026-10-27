@@ -52,47 +52,44 @@ export default function TrailerSetting() {
     }
   }
 
-  if (load === 'loading') {
-    return <p role="status">{t('app.loading')}</p>
-  }
-
-  if (load === 'failed') {
-    return (
-      <section className="trailer-setting">
-        <h2 id="trailers-heading">{t('parent.trailers')}</h2>
-        <p role="alert" className="error">
-          {t('parent.trailersLoadFailed')}
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setLoad('loading')
-            setAttempt((count) => count + 1)
-          }}
-        >
-          {t('parent.trailersRetry')}
-        </button>
-      </section>
-    )
-  }
-
   return (
     <section className="trailer-setting">
       <h2 id="trailers-heading">{t('parent.trailers')}</h2>
-      <label className="trailer-toggle">
-        <input
-          type="checkbox"
-          checked={enabled}
-          disabled={saving}
-          onChange={(event) => void change(event.target.checked)}
-        />
-        {t('parent.trailersLabel')}
-      </label>
-      <p className="muted">{t('parent.trailersHint')}</p>
-      {failed && (
-        <p role="alert" className="error">
-          {t('parent.trailersFailed')}
-        </p>
+      {load === 'loading' && <p role="status">{t('app.loading')}</p>}
+      {load === 'failed' && (
+        <>
+          <p role="alert" className="error">
+            {t('parent.trailersLoadFailed')}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoad('loading')
+              setAttempt((count) => count + 1)
+            }}
+          >
+            {t('parent.trailersRetry')}
+          </button>
+        </>
+      )}
+      {load === 'loaded' && (
+        <>
+          <label className="trailer-toggle">
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={saving}
+              onChange={(event) => void change(event.target.checked)}
+            />
+            {t('parent.trailersLabel')}
+          </label>
+          <p className="muted">{t('parent.trailersHint')}</p>
+          {failed && (
+            <p role="alert" className="error">
+              {t('parent.trailersFailed')}
+            </p>
+          )}
+        </>
       )}
     </section>
   )

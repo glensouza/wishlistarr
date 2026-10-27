@@ -86,9 +86,16 @@ function page(items: unknown[], total = items.length) {
   return { items, total, limit: 50, offset: 0 }
 }
 
+function queuePath(path: string) {
+  if (!path.startsWith('/api/v1/requests/queue')) return null
+  return {
+    kid: new URL(path, 'http://localhost').searchParams.get('kidProfileId'),
+  }
+}
+
 function install(
   handler: (path: string, method: string) => unknown,
-  approve?: () => Promise<Response> | Response,
+  approve?: (body: unknown) => Promise<Response> | Response,
 ) {
   const calls: Call[] = []
   vi.stubGlobal(
@@ -101,7 +108,7 @@ function install(
       const body = init?.body ? JSON.parse(init.body as string) : undefined
       calls.push({ method, path, body })
       if (path.endsWith('/approve') || path.endsWith('/deny')) {
-        if (approve) return approve()
+        if (approve) return approve(body)
         const ids =
           body &&
           typeof body === 'object' &&
@@ -116,7 +123,7 @@ function install(
           })),
         })
       }
-      const payload = handler(path, method)
+      const payload = await handler(path, method)
       if (payload instanceof Response) return payload
       if (payload === null) {
         return Response.json({ title: 'Missing' }, { status: 404 })
@@ -129,7 +136,17 @@ function install(
 
 function homeData(items: unknown[], total?: number) {
   return install((path) => {
-    if (path === '/api/v1/requests/queue') return page(items, total)
+    const queue = queuePath(path)
+    if (queue) {
+      if (queue.kid === null) return page(items, total)
+      return page(
+        items.filter(
+          (item) =>
+            String((item as { kidProfileId?: unknown }).kidProfileId) ===
+            queue.kid,
+        ),
+      )
+    }
     if (path === '/api/v1/kid-profiles') return profiles
     if (path.includes('/events')) {
       return path.includes('/10/') ? [adaEvent] : [beaEvent]
@@ -341,7 +358,7 @@ it('filters the queue and recent activity by kid', async () => {
 
 it('keeps the queue usable when profiles cannot be loaded', async () => {
   install((path) => {
-    if (path === '/api/v1/requests/queue') return page([ada])
+    if (queuePath(path)) return page([ada])
     if (path === '/api/v1/kid-profiles') return null
     if (path.includes('/events')) return [adaEvent]
     return []
@@ -543,4 +560,314 @@ it('says how many requests are past this page', async () => {
     '#requests-heading',
   )
   expect(more.querySelector('a')?.textContent).toBe('All requests')
+})
+
+it('asks the server for a kid whose requests are not on the first page', async () => {
+  const user = userEvent.setup()
+  const calls = install((path) => {
+    const queue = queuePath(path)
+    if (queue?.kid === '11') return page([bea], 10)
+    if (queue) return page([ada], 60)
+    if (path === '/api/v1/kid-profiles') return profiles
+    if (path.includes('/events')) return []
+    return []
+  })
+  render(<ParentHome />)
+  expect(await screen.findByText(/59 more are waiting/)).toBeTruthy()
+  expect(
+    screen.queryByRole('button', { name: 'Approve Spirited Away for Bea' }),
+  ).toBeNull()
+
+  await user.selectOptions(screen.getByLabelText('Show requests for'), 'Bea')
+  expect(
+    await screen.findByRole('button', {
+      name: 'Approve Spirited Away for Bea',
+    }),
+  ).toBeTruthy()
+  expect(
+    screen.queryByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeNull()
+  expect(screen.queryByText('Nothing is waiting for Bea.')).toBeNull()
+  expect(screen.getByText(/9 more are waiting/)).toBeTruthy()
+
+  await user.selectOptions(
+    screen.getByLabelText('Show requests for'),
+    'All kids',
+  )
+  expect(
+    await screen.findByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeTruthy()
+  expect(screen.getByText(/59 more are waiting/)).toBeTruthy()
+  expect(
+    calls
+      .filter((call) => call.path.startsWith('/api/v1/requests/queue'))
+      .map((call) => call.path),
+  ).toEqual([
+    '/api/v1/requests/queue',
+    '/api/v1/requests/queue?kidProfileId=11',
+    '/api/v1/requests/queue',
+  ])
+})
+
+it('shows the server error when a kid filter fails and keeps the filter usable', async () => {
+  const user = userEvent.setup()
+  install((path) => {
+    const queue = queuePath(path)
+    if (queue?.kid === '11') {
+      return Response.json(
+        { title: 'The kid profile does not exist.' },
+        { status: 404 },
+      )
+    }
+    if (queue) return page([ada, bea])
+    if (path === '/api/v1/kid-profiles') return profiles
+    if (path.includes('/events')) return []
+    return []
+  })
+  render(<ParentHome />)
+  await screen.findByRole('button', { name: 'Approve The Matrix for Ada' })
+  const filter = screen.getByLabelText('Show requests for')
+  await user.selectOptions(filter, 'Bea')
+
+  expect((await screen.findByRole('alert')).textContent).toContain(
+    'The kid profile does not exist.',
+  )
+  expect(
+    screen.queryByText('The approval queue could not be loaded.'),
+  ).toBeNull()
+  expect(screen.queryByText('Nothing is waiting for Bea.')).toBeNull()
+  expect((filter as HTMLSelectElement).disabled).toBe(false)
+
+  await user.selectOptions(filter, 'All kids')
+  expect(
+    await screen.findByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+it('ignores a queue page that arrives after another kid was chosen', async () => {
+  const user = userEvent.setup()
+  let releaseBea: (response: Response) => void = () => {}
+  const beaGate = new Promise<Response>((resolve) => {
+    releaseBea = resolve
+  })
+  const calls = install((path) => {
+    const queue = queuePath(path)
+    if (queue?.kid === '11') return beaGate
+    if (queue?.kid === '10') return page([ada], 1)
+    if (queue) return page([ada, bea], 2)
+    if (path === '/api/v1/kid-profiles') return profiles
+    if (path.includes('/events')) return []
+    return []
+  })
+  render(<ParentHome />)
+  await screen.findByRole('button', { name: 'Approve The Matrix for Ada' })
+
+  await user.selectOptions(screen.getByLabelText('Show requests for'), 'Bea')
+  expect(screen.getByText('Loading the approval queue')).toBeTruthy()
+  expect(
+    (screen.getByLabelText('Show requests for') as HTMLSelectElement).disabled,
+  ).toBe(false)
+  expect(screen.queryByText('Nothing is waiting for Bea.')).toBeNull()
+  expect(
+    calls.some(
+      (call) => call.path === '/api/v1/requests/queue?kidProfileId=11',
+    ),
+  ).toBe(true)
+
+  await user.selectOptions(screen.getByLabelText('Show requests for'), 'Ada')
+  expect(
+    await screen.findByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeTruthy()
+  expect(
+    screen.queryByRole('button', { name: 'Approve Spirited Away for Bea' }),
+  ).toBeNull()
+
+  await act(async () => {
+    releaseBea(Response.json(page([bea], 1)))
+  })
+  expect(
+    screen.getByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeTruthy()
+  expect(
+    screen.queryByRole('button', { name: 'Approve Spirited Away for Bea' }),
+  ).toBeNull()
+})
+
+const cy = {
+  ...ada,
+  id: 3,
+  kidProfileId: 12,
+  kidName: 'Cy',
+  title: 'Up',
+  requestCount: 1,
+  providers: [],
+  trailerKey: null,
+}
+
+it('moves focus to the previous request when the last one is decided', async () => {
+  const user = userEvent.setup()
+  homeData([ada, bea])
+  render(<ParentHome />)
+  await user.click(
+    await screen.findByRole('button', {
+      name: 'Approve Spirited Away for Bea',
+    }),
+  )
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Approve The Matrix for Ada' }),
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Approve Spirited Away for Bea' }),
+  ).toBeNull()
+})
+
+it('keeps focus off a request that is still being decided', async () => {
+  const releases = new Map<number, (response: Response) => void>()
+  install(
+    (path) => {
+      if (queuePath(path)) return page([ada, bea])
+      if (path === '/api/v1/kid-profiles') return profiles
+      if (path.includes('/events')) return []
+      return []
+    },
+    (body) =>
+      new Promise((resolve) => {
+        const ids =
+          body &&
+          typeof body === 'object' &&
+          Array.isArray((body as { ids?: unknown }).ids)
+            ? (body as { ids: number[] }).ids
+            : []
+        releases.set(ids[0] ?? 0, resolve)
+      }),
+  )
+  render(<ParentHome />)
+  const approveAda = await screen.findByRole('button', {
+    name: 'Approve The Matrix for Ada',
+  })
+  const approveBea = screen.getByRole('button', {
+    name: 'Approve Spirited Away for Bea',
+  })
+  await act(async () => {
+    approveBea.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    approveAda.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+
+  await act(async () => {
+    releases.get(2)?.(
+      Response.json({
+        results: [{ id: 2, status: 'succeeded', state: 'approved' }],
+      }),
+    )
+  })
+  expect(document.activeElement).toBe(document.getElementById('queue-kid'))
+  expect(
+    screen.queryByRole('button', { name: 'Approve Spirited Away for Bea' }),
+  ).toBeNull()
+  expect(
+    (
+      screen.getByRole('button', {
+        name: 'Approve The Matrix for Ada',
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true)
+
+  await act(async () => {
+    releases.get(1)?.(
+      Response.json({
+        results: [{ id: 1, status: 'succeeded', state: 'approved' }],
+      }),
+    )
+  })
+  expect(document.activeElement).toBe(document.getElementById('queue-empty'))
+  expect(
+    screen.queryByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeNull()
+  expect(screen.getByText('Nothing is waiting for approval.')).toBeTruthy()
+})
+
+it('moves focus past a request that is still being decided', async () => {
+  const releases = new Map<number, (response: Response) => void>()
+  install(
+    (path) => {
+      if (queuePath(path)) return page([ada, bea, cy])
+      if (path === '/api/v1/kid-profiles') return profiles
+      if (path.includes('/events')) return []
+      return []
+    },
+    (body) =>
+      new Promise((resolve) => {
+        const ids =
+          body &&
+          typeof body === 'object' &&
+          Array.isArray((body as { ids?: unknown }).ids)
+            ? (body as { ids: number[] }).ids
+            : []
+        releases.set(ids[0] ?? 0, resolve)
+      }),
+  )
+  render(<ParentHome />)
+  const approveAda = await screen.findByRole('button', {
+    name: 'Approve The Matrix for Ada',
+  })
+  const approveBea = screen.getByRole('button', {
+    name: 'Approve Spirited Away for Bea',
+  })
+  await act(async () => {
+    approveAda.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    approveBea.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  expect((approveBea as HTMLButtonElement).disabled).toBe(true)
+
+  await act(async () => {
+    releases.get(1)?.(
+      Response.json({
+        results: [{ id: 1, status: 'succeeded', state: 'approved' }],
+      }),
+    )
+  })
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Approve Up for Cy' }),
+  )
+  expect(
+    (
+      screen.getByRole('button', {
+        name: 'Approve Spirited Away for Bea',
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true)
+
+  await act(async () => {
+    releases.get(2)?.(
+      Response.json({
+        results: [{ id: 2, status: 'succeeded', state: 'approved' }],
+      }),
+    )
+  })
+  expect(document.activeElement).toBe(
+    screen.getByRole('button', { name: 'Approve Up for Cy' }),
+  )
+  expect(
+    screen.queryByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeNull()
+})
+
+it('shows a keyword gap and still loads the card when another gap is unknown', async () => {
+  homeData([
+    {
+      ...ada,
+      gaps: ['keywords', 'posters'],
+    },
+  ])
+  render(<ParentHome />)
+  expect(
+    await screen.findByText('The keywords for this title could not be loaded.'),
+  ).toBeTruthy()
+  expect(screen.getByText('A hacker learns the truth.')).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Approve The Matrix for Ada' }),
+  ).toBeTruthy()
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.queryByText('posters')).toBeNull()
 })

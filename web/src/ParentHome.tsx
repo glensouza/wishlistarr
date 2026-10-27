@@ -73,10 +73,26 @@ function kidOptions(profiles: Kid[], items: QueueItem[]) {
     )
 }
 
-function visibleItems(page: QueuePage, filter: string) {
-  return page.items.filter(
-    (item) => filter === '' || String(item.kidProfileId) === filter,
-  )
+function kidId(filter: string) {
+  if (filter === '') return undefined
+  const id = Number(filter)
+  if (!Number.isInteger(id) || id < 1) return undefined
+  return id
+}
+
+function nextQueueFocus(
+  listed: QueueItem[],
+  decidedId: number,
+  busy: ReadonlySet<number>,
+) {
+  const ready = (row: QueueItem) => row.id !== decidedId && !busy.has(row.id)
+  const index = listed.findIndex((row) => row.id === decidedId)
+  const after = index < 0 ? listed : listed.slice(index + 1)
+  const before = index < 0 ? [] : listed.slice(0, index)
+  const next = after.find(ready) ?? [...before].reverse().find(ready)
+  if (next) return `queue-approve-${next.id}`
+  const stillThere = listed.some((row) => row.id !== decidedId)
+  return stillThere ? 'queue-kid' : 'queue-empty'
 }
 
 export default function ParentHome() {
@@ -94,28 +110,47 @@ export default function ParentHome() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const pendingFocus = useRef<string | null>(null)
   const [focusTick, setFocusTick] = useState(0)
+  const queueRef = useRef<QueueLoad>({ kind: 'loading' })
+  const queueGeneration = useRef(0)
 
   function focusOn(id: string) {
     pendingFocus.current = id
     setFocusTick((tick) => tick + 1)
   }
 
+  function showQueue(next: QueueLoad) {
+    queueRef.current = next
+    setQueueLoad(next)
+  }
+
   function retry() {
-    setQueueLoad({ kind: 'loading' })
+    showQueue({ kind: 'loading' })
     setProfileLoad({ kind: 'loading' })
     setAttempt((count) => count + 1)
   }
 
   useEffect(() => {
     let current = true
-    listQueue().then(
+    listQueue(kidId(filter)).then(
       (page) => {
-        if (current) setQueueLoad({ kind: 'ready', page })
+        if (!current) return
+        queueGeneration.current += 1
+        queueRef.current = { kind: 'ready', page }
+        setQueueLoad(queueRef.current)
       },
       (error: unknown) => {
-        if (current) setQueueLoad({ kind: 'error', error })
+        if (!current) return
+        queueRef.current = { kind: 'error', error }
+        setQueueLoad(queueRef.current)
       },
     )
+    return () => {
+      current = false
+    }
+  }, [attempt, filter])
+
+  useEffect(() => {
+    let current = true
     request<unknown>('GET', '/api/v1/kid-profiles').then(
       (body) => {
         if (!current) return
@@ -143,13 +178,14 @@ export default function ParentHome() {
   const page = queueLoad.kind === 'ready' ? queueLoad.page : null
   const profiles = profileLoad.kind === 'ready' ? profileLoad.profiles : []
   const options = kidOptions(profiles, page?.items ?? [])
-  const shown = page === null ? [] : visibleItems(page, filter)
+  const shown = page === null ? [] : page.items
   const selected = options.find((kid) => String(kid.id) === filter) ?? null
   const activity =
     filter === '' ? options : options.filter((kid) => String(kid.id) === filter)
 
   async function decide(item: QueueItem, approving: boolean) {
-    if (inFlight.current.has(item.id) || page === null) return
+    if (inFlight.current.has(item.id) || queueRef.current.kind !== 'ready')
+      return
     const title = displayTitle(item, t)
     const note = notes[item.id] ?? ''
     if (!approving && note.trim().length > maxNote) {
@@ -161,6 +197,7 @@ export default function ParentHome() {
       return
     }
 
+    const generation = queueGeneration.current
     inFlight.current.add(item.id)
     setBusy((current) =>
       current.includes(item.id) ? current : [...current, item.id],
@@ -185,10 +222,6 @@ export default function ParentHome() {
         decision.status === 'succeeded' ||
         decision.status === 'alreadyDecided'
       ) {
-        const listed = visibleItems(page, filter)
-        const index = listed.findIndex((row) => row.id === item.id)
-        const remaining = listed.filter((row) => row.id !== item.id)
-        const next = remaining[index] ?? remaining[index - 1]
         setNotice({
           kind: 'status',
           text:
@@ -196,19 +229,25 @@ export default function ParentHome() {
               ? t(approving ? 'queue.approved' : 'queue.denied', { title })
               : t(decisionResultKey.alreadyDecided),
         })
-        focusOn(next ? `queue-approve-${next.id}` : 'queue-empty')
-        setQueueLoad((current) =>
-          current.kind === 'ready'
-            ? {
-                kind: 'ready',
-                page: {
-                  ...current.page,
-                  total: Math.max(0, current.page.total - 1),
-                  items: current.page.items.filter((row) => row.id !== item.id),
-                },
-              }
-            : current,
+        const latest = queueRef.current
+        if (latest.kind !== 'ready' || queueGeneration.current !== generation) {
+          focusOn('queue-kid')
+          return
+        }
+        const target = nextQueueFocus(
+          latest.page.items,
+          item.id,
+          inFlight.current,
         )
+        showQueue({
+          kind: 'ready',
+          page: {
+            ...latest.page,
+            total: Math.max(0, latest.page.total - 1),
+            items: latest.page.items.filter((row) => row.id !== item.id),
+          },
+        })
+        focusOn(target)
         return
       }
       setNotice({
@@ -244,7 +283,10 @@ export default function ParentHome() {
         <select
           id="queue-kid"
           value={filter}
-          onChange={(event) => setFilter(event.target.value)}
+          onChange={(event) => {
+            setFilter(event.target.value)
+            showQueue({ kind: 'loading' })
+          }}
         >
           <option value="">{t('queue.filterAll')}</option>
           {options.map((kid) => (
@@ -362,6 +404,7 @@ function QueueCard({
         <p>{t('queue.askedAgain', { count: item.requestCount })}</p>
       )}
       <p>{reasonText(item.reason, t)}</p>
+      {item.gaps.includes('keywords') && <p>{t('queue.keywordsFailed')}</p>}
       <p>
         <span className="muted">{t('queue.synopsis')}</span>{' '}
         {item.gaps.includes('synopsis')

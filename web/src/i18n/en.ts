@@ -580,6 +580,7 @@ export const en = {
   'queue.providersNone': 'Not listed on a streaming service.',
   'queue.providersFailed': 'Streaming availability could not be loaded.',
   'queue.trailerFailed': 'The trailer could not be loaded.',
+  'queue.keywordsFailed': 'The keywords for this title could not be loaded.',
   'queue.approve': 'Approve {title} for {name}',
   'queue.deny': 'Deny {title} for {name}',
   'queue.note': 'Note for {name}',
