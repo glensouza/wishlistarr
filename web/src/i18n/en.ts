@@ -442,6 +442,13 @@ export const en = {
   'requests.revoked': 'Removed',
   'requests.labeledHeading': 'On their list',
   'requests.revokeTitle': 'Remove {title}',
+  'requests.retryTitle': 'Try {title} again',
+  'requests.retryFailed': 'That title could not be sent again.',
+  'requests.retryDone': '{title} is being sent again.',
+  'requests.failure.notConfigured':
+    'The download service is not set up. Finish its settings, then try again.',
+  'requests.failure.unavailable':
+    'The download service did not accept it. Check that it is running, then try again.',
   'requests.revokeFailed': 'That title could not be removed.',
   'requests.revokeDone': '{title} was removed from their list.',
   'requests.revokeNotOwned':

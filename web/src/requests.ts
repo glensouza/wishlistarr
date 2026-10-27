@@ -23,6 +23,8 @@ export type ParentRequest = {
   denialReason: string | null
   canRevoke: boolean
   labelMayRemain: boolean
+  canRetry: boolean
+  dispatchFailure: 'notConfigured' | 'unavailable' | null
 }
 
 export type DecisionStatus =
@@ -108,6 +110,12 @@ export type RevokeItem = DecisionItem & {
 
 export const revokeRequests = (ids: number[]) =>
   request<{ results: RevokeItem[] }>('POST', `${base}/revoke`, {
+    ids,
+    reason: null,
+  })
+
+export const retryRequests = (ids: number[]) =>
+  request<{ results: DecisionItem[] }>('POST', `${base}/retry`, {
     ids,
     reason: null,
   })
