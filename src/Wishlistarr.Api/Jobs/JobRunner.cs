@@ -98,7 +98,7 @@ public sealed class JobRunner(
 
         try
         {
-            await this.StartAsync(definition.Name, (JobRunTrigger)(pending - 1));
+            await this.StartAsync(definition.Name, (JobRunTrigger)(pending - 1), rerunIfRunning: true);
         }
         catch (Exception exception)
         {

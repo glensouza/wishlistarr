@@ -5,7 +5,7 @@ Recurring work runs as named jobs inside the application. A hosted scheduler che
 ## Behaviour
 
 - A job never runs concurrently with itself, whether the second start comes from the schedule or from a manual trigger.
-- Work-triggered starts (after an approval or retry, a webhook or a library event) ask for a rerun when the job is busy. The start still reports that the job is already running, but the running job is followed by exactly one more run, however many starts arrived meanwhile. The extra run is recorded with the trigger of the latest such start. This keeps a change that arrives after the running job looked for work from waiting for the next schedule. Manual and scheduled starts never queue a rerun, and nothing starts once shutdown has begun.
+- Work-triggered starts (after an approval or retry, a webhook or a library event) ask for a rerun when the job is busy. The start still reports that the job is already running, but the running job is followed by at least one more run, and only one per burst of starts. The extra run is recorded with the trigger of the latest such start. This keeps a change that arrives after the running job looked for work from waiting for the next schedule. Manual and scheduled starts never queue a rerun, and nothing starts once shutdown has begun.
 - Every run is stored with its trigger, start time, end time, outcome (`running`, `succeeded`, `failed` or `cancelled`) and error message.
 - On shutdown running jobs receive a cancellation signal and are recorded as `cancelled`. Runs left open by a crash are marked `failed` at the next start.
 - A job is due when it has never run, or when its interval has passed since the start of its last run.

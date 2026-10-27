@@ -210,6 +210,7 @@ public sealed class JobRunnerTests
             ProbeJob.Name, JobRunTrigger.Request, rerunIfRunning: true);
         harness.Probe.Block = false;
         pause.Set();
+        harness.Time.Pause = null;
         await first.Completion;
         await WaitForFinishedRunsAsync(harness, 2);
 
