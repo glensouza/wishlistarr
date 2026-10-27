@@ -303,7 +303,7 @@ public sealed partial class RequestAccess(
                 }
 
                 if (found.Item.Labels.Contains(profile.PlexLabel, LabelComparer)
-                    && !found.Owned.Any(owned => LabelComparer.Equals(owned.Label, profile.PlexLabel))
+                    && !found.Owned.Any(owned => LabelCollation.Comparer.Equals(owned.Label, profile.PlexLabel))
                     && !taken.Contains(profile.PlexLabel))
                 {
                     notOwned = true;

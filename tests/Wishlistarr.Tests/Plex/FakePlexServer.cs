@@ -42,9 +42,9 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         this.ImpostorAddress = impostorAddress;
         this.closedPorts = closedPorts;
         this.ResourcesJson = this.Render(Fixture("resources.json"));
-        this.AddItem(new FakeItem("101", "movie", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1));
-        this.AddItem(new FakeItem("102", "movie", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 1));
-        this.AddItem(new FakeItem("201", "show", "plex://show/5d9c086c46115600200aa2fe", "Bluey", 2));
+        this.AddItem(new FakeItem("101", "movie", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1) { GuidIds = ["imdb://tt0133093", "tmdb://603", "tvdb://169"] });
+        this.AddItem(new FakeItem("102", "movie", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 1) { GuidIds = ["imdb://tt0245429", "tmdb://129", "tvdb://212"] });
+        this.AddItem(new FakeItem("201", "show", "plex://show/5d9c086c46115600200aa2fe", "Bluey", 2) { GuidIds = ["imdb://tt7678620", "tmdb://82728", "tvdb://353546"] });
         this.AddItem(new FakeItem("2011", "season", "plex://season/602e6a7e8f4d2a002c7b5e10", "Season 1", 2) { ParentRatingKey = "201" });
         this.AddItem(new FakeItem("20111", "episode", "plex://episode/5d9c11ae2df347001e3b1a52", "Magic Xylophone", 2)
         {
@@ -109,16 +109,29 @@ public sealed partial class FakePlexServer : IAsyncDisposable
     public FakeItem Item(string ratingKey) => this.items[ratingKey];
 
     // Plex gives an item that is removed and added again a new rating key, and labels set on the old item are gone. A new guid stands for the title being matched to different metadata.
-    public FakeItem ReAddItem(string ratingKey, string newRatingKey, string? newGuid = null)
+    public FakeItem ReAddItem(string ratingKey, string newRatingKey, string? newGuid = null, IReadOnlyList<string>? newIds = null)
     {
         FakeItem old = this.items[ratingKey];
         this.items.TryRemove(ratingKey, out _);
-        FakeItem added = new(newRatingKey, old.Type, newGuid ?? old.Guid, old.Title, old.Section);
+        FakeItem added = new(newRatingKey, old.Type, newGuid ?? old.Guid, old.Title, old.Section) { GuidIds = newIds ?? old.GuidIds };
         this.items[newRatingKey] = added;
         string original = this.renamed.FirstOrDefault(pair => pair.Value == ratingKey).Key ?? ratingKey;
         this.renamed[original] = newRatingKey;
         return added;
     }
+
+    // Fix Match keeps the rating key and replaces the guid, title and external ids with those of the chosen match.
+    public FakeItem Rematch(string ratingKey, string newGuid, string newTitle, params string[] newIds)
+    {
+        FakeItem old = this.items[ratingKey];
+        FakeItem matched = new(ratingKey, old.Type, newGuid, newTitle, old.Section) { GuidIds = newIds };
+        (IReadOnlyList<string> labels, _) = old.Snapshot();
+        matched.SetLabels([.. labels]);
+        this.items[ratingKey] = matched;
+        return matched;
+    }
+
+    public void AddItem(FakeItem item) => this.items[item.RatingKey] = item;
 
     public void DeleteItem(string ratingKey)
     {
@@ -189,11 +202,18 @@ public sealed partial class FakePlexServer : IAsyncDisposable
             string key = item!["ratingKey"]!.GetValue<string>();
             if (this.renamed.TryGetValue(key, out string? newKey))
             {
+                key = newKey;
                 item["ratingKey"] = newKey;
                 item["key"] = $"/library/metadata/{newKey}";
-                if (this.items.TryGetValue(newKey, out FakeItem? current))
+            }
+
+            if (this.items.TryGetValue(key, out FakeItem? current))
+            {
+                item["guid"] = current.Guid;
+                item["title"] = current.Title;
+                if (current.GuidIds.Count > 0)
                 {
-                    item["guid"] = current.Guid;
+                    item["Guid"] = RenderGuids(current);
                 }
             }
         }
@@ -286,7 +306,7 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
         if (path.StartsWith("/library/metadata/", StringComparison.Ordinal) && request.Method == HttpMethods.Get)
         {
-            await this.HandleMetadataAsync(context, path["/library/metadata/".Length..]);
+            await this.HandleMetadataAsync(context, path["/library/metadata/".Length..], request.Query.GetValueOrDefault("includeGuids") == "1");
             this.AfterRequest?.Invoke(request);
             return;
         }
@@ -327,9 +347,11 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         await WriteAsync(context, path.EndsWith("/all", StringComparison.Ordinal) ? this.Page(body, context.Request.Query) : body);
     }
 
-    private void AddItem(FakeItem item) => this.items[item.RatingKey] = item;
+    private static JsonArray RenderGuids(FakeItem item) =>
+        [.. item.GuidIds.Select(id => (JsonNode)new JsonObject { ["id"] = id })];
 
-    private async Task HandleMetadataAsync(HttpContext context, string ratingKey)
+    // Like python-plexapi, which adds includeGuids=1 when it reloads an item, the fake only lists the external guids when they are asked for.
+    private async Task HandleMetadataAsync(HttpContext context, string ratingKey, bool includeGuids)
     {
         if (this.MetadataDelay > TimeSpan.Zero)
         {
@@ -359,6 +381,11 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         if (item.GrandparentRatingKey is not null)
         {
             metadata["grandparentRatingKey"] = item.GrandparentRatingKey;
+        }
+
+        if (includeGuids && item.GuidIds.Count > 0)
+        {
+            metadata["Guid"] = RenderGuids(item);
         }
 
         (IReadOnlyList<string> labels, bool locked) = item.Snapshot();
@@ -515,6 +542,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         public string? ParentRatingKey { get; init; }
 
         public string? GrandparentRatingKey { get; init; }
+
+        public IReadOnlyList<string> GuidIds { get; init; } = [];
 
         public IReadOnlyList<string> Labels => this.Snapshot().Labels;
 

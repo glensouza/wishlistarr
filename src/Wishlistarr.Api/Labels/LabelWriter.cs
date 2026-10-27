@@ -25,7 +25,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
     public const int MaxAttempts = 3;
     public const int MaxSourceLength = 32;
 
-    private static readonly StringComparer LabelComparer = StringComparer.OrdinalIgnoreCase;
+    public static StringComparer LabelComparer { get; } = StringComparer.OrdinalIgnoreCase;
 
     public async Task<LabelWriteResult> AddAsync(string itemId, string label, int kidProfileId, string source, CancellationToken ct = default)
     {
@@ -96,7 +96,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         return result;
     }
 
-    // Puts back a label the ledger already owns on the item's guid. It never creates a ledger row, so a label that was revoked in the meantime stays off.
+    // Puts back a label the ledger already owns on the item's guid. It never creates a ledger row, so a label that was revoked in the meantime stays off,
+    // and the owning profile is checked at the moment of writing, so a profile archived in the meantime does not get its label back.
     public async Task<LabelWriteResult> RestoreAsync(string itemId, string label, CancellationToken ct = default)
     {
         bool owned = true;
@@ -105,10 +106,11 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             async (item, token) =>
             {
                 OwnedLabel? row = await this.FindOwnedAsync(item, label, token);
-                owned = row is not null;
-                return row is null || item.Labels.Contains(label, LabelComparer)
+                owned = row is not null
+                    && await db.KidProfiles.AnyAsync(profile => profile.Id == row.KidProfileId && profile.ArchivedAt == null, token);
+                return !owned || item.Labels.Contains(label, LabelComparer)
                     ? null
-                    : [.. item.Labels, row.Label];
+                    : [.. item.Labels, row!.Label];
             },
             item => item.Labels.Contains(label, LabelComparer),
             item => this.PointAtAsync(item, label),

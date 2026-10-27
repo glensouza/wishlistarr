@@ -16,7 +16,12 @@ public sealed record LibraryScan(string ServerId, IAsyncEnumerable<LibraryEntry>
     public LibraryScanReport Report { get; init; } = new();
 }
 
-public sealed record LibraryLabelScan(string ServerId, IReadOnlyDictionary<string, IReadOnlyList<string>> LabelsByItem, bool Complete);
+public sealed record LibraryLabelScan(string ServerId, IReadOnlyDictionary<string, IReadOnlyList<string>> LabelsByItem, bool Complete)
+{
+    public IReadOnlyDictionary<string, LabeledItem> Items { get; init; } = new Dictionary<string, LabeledItem>(StringComparer.Ordinal);
+}
+
+public sealed record LabeledItem(string Guid, string Title);
 
 public interface ILibraryScanner
 {

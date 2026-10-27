@@ -15,7 +15,7 @@ public sealed class LabelGuardianJob(LabelGuardian guardian, IOptions<LabelGuard
     {
         try
         {
-            await guardian.RunAsync(options.Value.DryRun, ct);
+            await guardian.RunAsync(options.Value.DryRun, pruneHistory: true, ct);
         }
         catch (MediaServerNotConfiguredException exception)
         {
@@ -32,7 +32,7 @@ public sealed class LabelGuardianDryRunJob(LabelGuardian guardian, ILogger<Label
     {
         try
         {
-            await guardian.RunAsync(dryRun: true, ct);
+            await guardian.RunAsync(dryRun: true, pruneHistory: false, ct);
         }
         catch (MediaServerNotConfiguredException exception)
         {

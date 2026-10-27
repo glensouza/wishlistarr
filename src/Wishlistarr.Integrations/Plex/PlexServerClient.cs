@@ -61,7 +61,7 @@ internal sealed class PlexServerClient(IHttpClientFactory factory, IOptions<Plex
 
     public async Task<PlexMetadata?> GetMetadataAsync(PlexServerContext server, string ratingKey, CancellationToken ct)
     {
-        using HttpRequestMessage request = this.Create(HttpMethod.Get, server, $"library/metadata/{Uri.EscapeDataString(ratingKey)}");
+        using HttpRequestMessage request = this.Create(HttpMethod.Get, server, $"library/metadata/{Uri.EscapeDataString(ratingKey)}?includeGuids=1");
         using HttpResponseMessage response = await factory.CreateClient(HttpClientName).SendAsync(request, ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {

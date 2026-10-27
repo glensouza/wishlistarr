@@ -36,6 +36,7 @@ public enum LabelDriftAction
     WouldUpdate,
     AlreadyFixed,
     Skipped,
+    Interrupted,
     Failed,
 }
 

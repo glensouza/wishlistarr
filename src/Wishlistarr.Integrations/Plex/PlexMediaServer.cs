@@ -344,6 +344,7 @@ internal sealed partial class PlexMediaServer(
         PlexServerContext server = await this.RequireServerAsync(ct);
         int pageSize = Math.Max(1, options.Value.PageSize);
         Dictionary<string, List<string>> byItem = new(StringComparer.Ordinal);
+        Dictionary<string, LabeledItem> seen = new(StringComparer.Ordinal);
         bool complete = true;
         PlexContainer sections = await servers.GetSectionsAsync(server, ct);
         foreach (PlexSection section in (sections.Directory ?? []).Where(section => section.Type is "movie" or "show" && IsValidKey(section.Key)))
@@ -373,6 +374,7 @@ internal sealed partial class PlexMediaServer(
                         }
 
                         tags.Add(label.Title!);
+                        seen[item.RatingKey!] = new LabeledItem(item.Guid ?? string.Empty, item.Title ?? string.Empty);
                     }
 
                     if (items.Count < pageSize || (announced is int total && start + items.Count >= total))
@@ -391,7 +393,10 @@ internal sealed partial class PlexMediaServer(
         return new LibraryLabelScan(
             server.ServerId,
             byItem.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value, StringComparer.Ordinal),
-            complete);
+            complete)
+        {
+            Items = seen,
+        };
     }
 
     public Task<string?> GetServerIdAsync(CancellationToken ct = default) => settings.GetAsync(PlexSettingKeys.ServerId, ct);
@@ -467,7 +472,8 @@ internal sealed partial class PlexMediaServer(
             kind,
             libraryId!,
             [.. (item.Labels ?? []).Select(label => label.Tag).OfType<string>().Where(tag => tag.Length > 0)],
-            (item.Fields ?? []).Any(field => field.Name == "label" && field.Locked));
+            (item.Fields ?? []).Any(field => field.Name == "label" && field.Locked),
+            PlexGuids.Collect(item));
     }
 
     private static LibraryEntry ToEntry(PlexMetadata item, MediaKind kind, string libraryId, bool detailed) => new(

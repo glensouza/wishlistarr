@@ -68,6 +68,57 @@ public sealed class GuardianApiFactory : AuthApiFactory
             .ToListAsync();
     }
 
+    public async Task IndexAsync(string ratingKey, string guid, string title, params (LibraryIdSource Source, string Value)[] ids)
+    {
+        using IServiceScope scope = this.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        db.LibraryItems.Add(new LibraryItem
+        {
+            ServerId = FakePlexServer.MachineIdentifier,
+            RatingKey = ratingKey,
+            Guid = guid,
+            Kind = MediaKind.Movie,
+            LibraryId = "1",
+            Title = title,
+            ExternalIds = [.. ids.Select(id => new LibraryExternalId { Source = id.Source, Value = id.Value })],
+        });
+        await db.SaveChangesAsync();
+    }
+
+    public async Task AddLedgerRowAsync(string guid, string ratingKey, string label, int profileId)
+    {
+        using IServiceScope scope = this.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        db.OwnedLabels.Add(new OwnedLabel
+        {
+            ServerId = FakePlexServer.MachineIdentifier,
+            Guid = guid,
+            RatingKey = ratingKey,
+            Label = label,
+            KidProfileId = profileId,
+            Source = "request",
+        });
+        await db.SaveChangesAsync();
+    }
+
+    public async Task ArchiveAsync(int profileId)
+    {
+        using IServiceScope scope = this.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().KidProfiles
+            .Where(profile => profile.Id == profileId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(profile => profile.ArchivedAt, this.Clock.GetUtcNow()));
+    }
+
+    public async Task<List<LabelGuardianReport>> GetReportsAsync()
+    {
+        using IServiceScope scope = this.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LabelGuardianReports
+            .AsNoTracking()
+            .Include(report => report.Entries.OrderBy(entry => entry.Id))
+            .OrderBy(report => report.Id)
+            .ToListAsync();
+    }
+
     public async Task<int> CountReportsAsync()
     {
         using IServiceScope scope = this.Services.CreateScope();
@@ -251,28 +302,16 @@ public sealed class LabelGuardianTests
     public async Task An_item_matched_to_a_new_guid_is_found_through_the_external_ids_in_the_library_index()
     {
         const string newGuid = "plex://movie/6a0000000000000000000603";
+        const string decoyGuid = "plex://movie/6a0000000000000000000604";
         using GuardianApiFactory factory = new();
         await factory.LinkAsync();
         int ada = await factory.CreateProfileAsync("Ada");
         await factory.LabelAsync("101", "Ada", ada);
         await factory.RunJobAsync(LibraryFullRefreshJob.JobName);
         factory.Fake.ReAddItem("101", "1101", newGuid);
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
-            db.LibraryItems.Add(new LibraryItem
-            {
-                ServerId = FakePlexServer.MachineIdentifier,
-                RatingKey = "1101",
-                Guid = newGuid,
-                Kind = MediaKind.Movie,
-                LibraryId = "1",
-                Title = "The Matrix",
-                ExternalIds = [new LibraryExternalId { Source = LibraryIdSource.Tmdb, Value = "603" }],
-            });
-            await db.SaveChangesAsync();
-        }
-
+        factory.Fake.AddItem(new FakePlexServer.FakeItem("1102", "movie", decoyGuid, "Decoy", 1) { GuidIds = ["tmdb://604"] });
+        await factory.IndexAsync("1101", newGuid, "The Matrix", (LibraryIdSource.Tmdb, "603"));
+        await factory.IndexAsync("1102", decoyGuid, "Decoy", (LibraryIdSource.Tmdb, "603"));
         HttpClient client = await factory.CreateAuthorizedClientAsync();
 
         await factory.RunJobAsync(LabelGuardianJob.JobName);
@@ -284,9 +323,229 @@ public sealed class LabelGuardianTests
         Assert.Equal(newGuid, moved.GetProperty("guid").GetString());
         Assert.Equal("repaired", Assert.Single(entries, entry => entry.GetProperty("kind").GetString() == "missing").GetProperty("action").GetString());
         Assert.Equal(["Ada"], factory.Fake.Item("1101").Labels);
+        Assert.Empty(factory.Fake.Item("1102").Labels);
         OwnedLabel row = Assert.Single(await factory.GetLedgerAsync());
         Assert.Equal(newGuid, row.Guid);
         Assert.Equal("1101", row.RatingKey);
+    }
+
+    [Fact]
+    public async Task A_fix_match_on_the_same_rating_key_never_moves_the_label_to_the_new_title()
+    {
+        const string otherGuid = "plex://movie/6b00000000000000000a0001";
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.LabelAsync("101", "Ada", ada);
+        await factory.RunJobAsync(LibraryFullRefreshJob.JobName);
+        factory.Fake.Rematch("101", otherGuid, "Grown-up Title", "imdb://tt9990001", "tmdb://990001", "tvdb://990002");
+        factory.Fake.Item("101").SetLabels();
+        List<OwnedLabel> ledger = await factory.GetLedgerAsync();
+        int puts = factory.Puts;
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement beforeRefresh = await factory.LatestReportAsync(client);
+        await factory.RunJobAsync(LibraryFullRefreshJob.JobName);
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement afterRefresh = await factory.LatestReportAsync(client);
+
+        foreach (JsonElement report in new[] { beforeRefresh, afterRefresh })
+        {
+            JsonElement entry = Assert.Single(report.GetProperty("entries").EnumerateArray());
+            Assert.Equal("unresolved", entry.GetProperty("kind").GetString());
+            Assert.Equal("none", entry.GetProperty("action").GetString());
+            Assert.Equal(MatrixGuid, entry.GetProperty("guid").GetString());
+            Assert.Equal(LabelGuardian.NotFoundDetail, entry.GetProperty("detail").GetString());
+        }
+
+        Assert.Equal(puts, factory.Puts);
+        Assert.Empty(factory.Fake.Item("101").Labels);
+        Assert.Equivalent(ledger, await factory.GetLedgerAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Two_items_with_the_same_external_id_are_reported_as_ambiguous_and_left_alone(bool sameGuid)
+    {
+        const string newGuid = "plex://movie/6a0000000000000000000603";
+        string otherGuid = sameGuid ? newGuid : "plex://movie/6a0000000000000000000613";
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.LabelAsync("101", "Ada", ada);
+        await factory.RunJobAsync(LibraryFullRefreshJob.JobName);
+        factory.Fake.ReAddItem("101", "1101", newGuid);
+        factory.Fake.AddItem(new FakePlexServer.FakeItem("1102", "movie", otherGuid, "The Matrix", 1) { GuidIds = ["tmdb://603"] });
+        await factory.IndexAsync("1101", newGuid, "The Matrix", (LibraryIdSource.Tmdb, "603"));
+        await factory.IndexAsync("1102", otherGuid, "The Matrix", (LibraryIdSource.Tmdb, "603"));
+        List<OwnedLabel> ledger = await factory.GetLedgerAsync();
+        int puts = factory.Puts;
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement report = await factory.LatestReportAsync(client);
+
+        JsonElement entry = Assert.Single(report.GetProperty("entries").EnumerateArray());
+        Assert.Equal("unresolved", entry.GetProperty("kind").GetString());
+        Assert.Equal(LabelGuardian.AmbiguousDetail, entry.GetProperty("detail").GetString());
+        Assert.Equal(puts, factory.Puts);
+        Assert.Empty(factory.Fake.Item("1101").Labels);
+        Assert.Empty(factory.Fake.Item("1102").Labels);
+        Assert.Equivalent(ledger, await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task A_grant_that_takes_the_new_guid_while_the_guardian_runs_is_recorded_as_a_conflict_and_the_run_goes_on()
+    {
+        const string newGuid = "plex://movie/6a0000000000000000000603";
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.LabelAsync("101", "Ada", ada);
+        await factory.LabelAsync("102", "Ada", ada);
+        await factory.RunJobAsync(LibraryFullRefreshJob.JobName);
+        factory.Fake.ReAddItem("101", "1101", newGuid);
+        factory.Fake.Item("102").SetLabels();
+        await factory.IndexAsync("1101", newGuid, "The Matrix", (LibraryIdSource.Tmdb, "603"));
+        int granted = 0;
+        factory.Fake.Delay = async request =>
+        {
+            if (request.Path == "/library/metadata/1101" && Interlocked.Exchange(ref granted, 1) == 0)
+            {
+                await factory.AddLedgerRowAsync(newGuid, "1101", "Ada", ada);
+            }
+        };
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        JobRun run = await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement report = await factory.LatestReportAsync(client);
+
+        Assert.Equal(JobRunOutcome.Succeeded, run.Outcome);
+        JsonElement[] entries = [.. report.GetProperty("entries").EnumerateArray()];
+        JsonElement moved = Assert.Single(entries, entry => entry.GetProperty("kind").GetString() == "moved");
+        Assert.Equal("failed", moved.GetProperty("action").GetString());
+        Assert.Equal(LabelGuardian.ConflictDetail, moved.GetProperty("detail").GetString());
+        JsonElement skipped = Assert.Single(entries, entry => entry.GetProperty("kind").GetString() == "missing" && entry.GetProperty("ratingKey").GetString() == "1101");
+        Assert.Equal("skipped", skipped.GetProperty("action").GetString());
+        JsonElement repaired = Assert.Single(entries, entry => entry.GetProperty("ratingKey").GetString() == "102");
+        Assert.Equal("repaired", repaired.GetProperty("action").GetString());
+        Assert.Equal(["Ada"], factory.Fake.Item("102").Labels);
+        Assert.Equal(["101", "102", "1101"], (await factory.GetLedgerAsync()).Select(row => row.RatingKey));
+    }
+
+    [Fact]
+    public async Task A_profile_archived_while_the_guardian_runs_does_not_get_its_label_back()
+    {
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.LabelAsync("101", "Ada", ada);
+        factory.Fake.Item("101").SetLabels();
+        int puts = factory.Puts;
+        int reads = 0;
+        factory.Fake.Delay = async request =>
+        {
+            if (request.Path == "/library/metadata/101" && Interlocked.Increment(ref reads) == 2)
+            {
+                await factory.ArchiveAsync(ada);
+            }
+        };
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement report = await factory.LatestReportAsync(client);
+
+        JsonElement missing = Assert.Single(report.GetProperty("entries").EnumerateArray());
+        Assert.Equal("missing", missing.GetProperty("kind").GetString());
+        Assert.Equal("skipped", missing.GetProperty("action").GetString());
+        Assert.Equal(LabelGuardian.NotOwnedDetail, missing.GetProperty("detail").GetString());
+        Assert.Equal(puts, factory.Puts);
+        Assert.Empty(factory.Fake.Item("101").Labels);
+    }
+
+    [Fact]
+    public async Task A_shutdown_after_the_write_reached_plex_is_reported_as_interrupted_not_as_untried()
+    {
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.LabelAsync("101", "Ada", ada);
+        factory.Fake.Item("101").SetLabels();
+        using CancellationTokenSource stopping = new();
+        factory.Fake.AfterRequest = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                stopping.Cancel();
+            }
+        };
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            LabelGuardian guardian = scope.ServiceProvider.GetRequiredService<LabelGuardian>();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => guardian.RunAsync(dryRun: false, pruneHistory: true, stopping.Token));
+        }
+
+        LabelGuardianEntry entry = Assert.Single(Assert.Single(await factory.GetReportsAsync()).Entries);
+        Assert.Equal(LabelDriftKind.Missing, entry.Kind);
+        Assert.Equal(LabelDriftAction.Interrupted, entry.Action);
+        Assert.Equal(LabelGuardian.InterruptedDetail, entry.Detail);
+        Assert.Equal(["Ada"], factory.Fake.Item("101").Labels);
+    }
+
+    [Fact]
+    public async Task Ownership_of_a_non_ascii_label_follows_the_ledger_collation()
+    {
+        const string upperName = "\u00C9lodie";
+        const string lowerName = "\u00E9lodie";
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int upper = await factory.CreateProfileAsync(upperName);
+        int lower = await factory.CreateProfileAsync(lowerName);
+        await factory.LabelAsync("101", upperName, upper);
+        int puts = factory.Puts;
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement report = await factory.LatestReportAsync(client);
+
+        JsonElement extra = Assert.Single(report.GetProperty("entries").EnumerateArray());
+        Assert.Equal("extra", extra.GetProperty("kind").GetString());
+        Assert.Equal(lower, extra.GetProperty("kidProfileId").GetInt32());
+        Assert.Equal("101", extra.GetProperty("ratingKey").GetString());
+        Assert.Equal(puts, factory.Puts);
+    }
+
+    [Fact]
+    public async Task Extras_are_judged_by_the_guid_plex_reports_now_not_by_a_stale_library_index()
+    {
+        const string spiritedGuid = "plex://movie/5d776b59ad5437001f79c6f8";
+        using GuardianApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int old = await factory.CreateProfileAsync("Old", archived: true);
+        await factory.RunJobAsync(LibraryFullRefreshJob.JobName);
+        await factory.AddLedgerRowAsync(MatrixGuid, "101", "Ada", old);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryItems
+                .Where(item => item.RatingKey == "102")
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Guid, MatrixGuid));
+        }
+
+        factory.Fake.Item("102").SetLabels("Ada");
+        HttpClient client = await factory.CreateAuthorizedClientAsync();
+
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        JsonElement report = await factory.LatestReportAsync(client);
+
+        JsonElement extra = Assert.Single(report.GetProperty("entries").EnumerateArray());
+        Assert.Equal("extra", extra.GetProperty("kind").GetString());
+        Assert.Equal(ada, extra.GetProperty("kidProfileId").GetInt32());
+        Assert.Equal("102", extra.GetProperty("ratingKey").GetString());
+        Assert.Equal(spiritedGuid, extra.GetProperty("guid").GetString());
     }
 
     [Fact]
@@ -412,6 +671,43 @@ public sealed class LabelGuardianTests
         Assert.Equal(puts, factory.Puts);
         Assert.Empty(factory.Fake.Item("101").Labels);
         Assert.True(report.GetProperty("report").GetProperty("dryRun").GetBoolean());
+    }
+
+    [Fact]
+    public async Task The_scheduled_job_prunes_history_even_when_it_runs_dry_and_a_parent_dry_run_never_does()
+    {
+        using GuardianApiFactory factory = new()
+        {
+            Settings = new Dictionary<string, string?>
+            {
+                ["Auth:LoginAttemptsPerMinute"] = "1000",
+                [$"{LabelGuardianOptions.SectionName}:DryRun"] = "true",
+                [$"{LabelGuardianOptions.SectionName}:HistoryRetention"] = "30.00:00:00",
+            },
+        };
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.LabelAsync("101", "Ada", ada);
+        factory.Fake.Item("101").SetLabels();
+        List<OwnedLabel> ledger = await factory.GetLedgerAsync();
+        int puts = factory.Puts;
+
+        await factory.RunJobAsync(LabelGuardianDryRunJob.JobName);
+        int first = Assert.Single(await factory.GetReportsAsync()).Id;
+        factory.Clock.Advance(TimeSpan.FromDays(31));
+        await factory.RunJobAsync(LabelGuardianDryRunJob.JobName);
+        List<int> afterParentRun = [.. (await factory.GetReportsAsync()).Select(report => report.Id)];
+        await factory.RunJobAsync(LabelGuardianJob.JobName);
+        List<LabelGuardianReport> afterScheduledRun = await factory.GetReportsAsync();
+
+        Assert.Equal(2, afterParentRun.Count);
+        Assert.Contains(first, afterParentRun);
+        Assert.Equal(2, afterScheduledRun.Count);
+        Assert.DoesNotContain(afterScheduledRun, report => report.Id == first);
+        Assert.All(afterScheduledRun, report => Assert.True(report.DryRun));
+        Assert.Equal(puts, factory.Puts);
+        Assert.Empty(factory.Fake.Item("101").Labels);
+        Assert.Equivalent(ledger, await factory.GetLedgerAsync());
     }
 
     [Fact]

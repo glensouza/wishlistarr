@@ -22,6 +22,12 @@ public sealed class PlexLabelTests
         Assert.Equal("1", item.LibraryId);
         Assert.Equal(["Favorites", "Ben"], item.Labels);
         Assert.False(item.Locked);
+        Assert.Equal(
+            [new ExternalId(ExternalIdSource.Imdb, "tt0133093"), new ExternalId(ExternalIdSource.Tmdb, "603"), new ExternalId(ExternalIdSource.Tvdb, "169")],
+            item.ExternalIds);
+        Assert.All(
+            harness.Server.Requests.Where(request => request.Path == "/library/metadata/101"),
+            request => Assert.Equal("1", request.Query.GetValueOrDefault("includeGuids")));
     }
 
     [Theory]

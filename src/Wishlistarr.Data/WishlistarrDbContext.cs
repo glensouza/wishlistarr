@@ -159,7 +159,7 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(label => label.ServerId).HasMaxLength(100);
             entity.Property(label => label.Guid).HasMaxLength(256);
             entity.Property(label => label.RatingKey).HasMaxLength(20);
-            entity.Property(label => label.Label).HasMaxLength(64).UseCollation("NOCASE");
+            entity.Property(label => label.Label).HasMaxLength(64).UseCollation(LabelCollation.Name);
             entity.Property(label => label.Source).HasMaxLength(32);
             entity.HasIndex(label => new { label.ServerId, label.Guid, label.Label }).IsUnique();
             entity.HasOne(label => label.KidProfile)
