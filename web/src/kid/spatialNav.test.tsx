@@ -132,6 +132,26 @@ it('moves by row when buttons in a row sit at different heights', () => {
   expect(document.activeElement).toBe(topTiny)
 })
 
+it('leaves the arrow key alone at the edge and cancels it when focus moves', () => {
+  render(
+    <KidScreen>
+      <button type="button">Only</button>
+      <button type="button">Beside</button>
+    </KidScreen>,
+  )
+  const only = screen.getByRole('button', { name: 'Only' })
+  const beside = screen.getByRole('button', { name: 'Beside' })
+  place(only, 0, 80)
+  place(beside, 220, 80)
+  only.focus()
+  const down = press(only, 'ArrowDown')
+  expect(down.defaultPrevented).toBe(false)
+  expect(document.activeElement).toBe(only)
+  const right = press(only, 'ArrowRight')
+  expect(right.defaultPrevented).toBe(true)
+  expect(document.activeElement).toBe(beside)
+})
+
 it('moves to the spatially nearest control when that control comes later in the page', () => {
   render(
     <KidScreen>

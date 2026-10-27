@@ -55,8 +55,9 @@ export function useKidSpatialNav(rootRef: RefObject<HTMLElement | null>) {
         focusables.filter((element) => element !== origin),
         direction,
       )
+      if (!next) return
       event.preventDefault()
-      if (next) moveFocus(next)
+      moveFocus(next)
     }
 
     document.addEventListener('keydown', onKeyDown)
