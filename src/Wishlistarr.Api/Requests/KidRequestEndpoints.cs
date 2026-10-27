@@ -13,8 +13,8 @@ public static class KidRequestEndpoints
 {
     public const string NotAllowedCode = "notAllowed";
     public const string AllowanceUsedCode = "allowanceUsed";
-    public const int DefaultHistoryPage = 50;
-    public const int MaxHistoryPage = 200;
+    public const int DefaultHistoryPage = RequestEndpoints.DefaultPage;
+    public const int MaxHistoryPage = RequestEndpoints.MaxPage;
 
     public static void MapKidRequests(this RouteGroupBuilder kid)
     {
@@ -25,13 +25,9 @@ public static class KidRequestEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
             }
 
-            int take = limit ?? DefaultHistoryPage;
-            int skip = offset ?? 0;
-            if (take is < 1 or > MaxHistoryPage || skip < 0)
+            if (!RequestEndpoints.TryPage(limit, offset, out int take, out int skip, out string? pageError))
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status400BadRequest,
-                    title: $"The limit is 1 to {MaxHistoryPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.");
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: pageError);
             }
 
             return Results.Ok(await RequestViews.KidHistoryAsync(db, profileId, titles, take, skip, ct));

@@ -89,7 +89,7 @@ public sealed partial class KidRequestFlow(
         }
 
         RatingLevel? rating = new RatingRule().Evaluate(content, policy).Reason.Level;
-        bool genresUnknown = profile.BlockedGenreIds.Count > 0 && content.GenreIds is not { Count: > 0 };
+        bool genresUnknown = policy.HasUnknownGenres(content.GenreIds);
         bool auto = new AutoApproveRule(
             profile.AutoApprove,
             profile.AutoApproveMovieRating,

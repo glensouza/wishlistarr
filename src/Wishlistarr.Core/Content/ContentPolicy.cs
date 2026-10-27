@@ -48,6 +48,9 @@ public sealed record ContentPolicy
 
     public RatingLevel? MaxRatingFor(MediaKind kind) => kind == MediaKind.Movie ? this.MaxMovieRating : this.MaxTvRating;
 
+    public bool HasUnknownGenres(IReadOnlyList<int>? genreIds) =>
+        this.BlockedGenreIds.Count > 0 && genreIds is not { Count: > 0 };
+
     public static ContentPolicy FromAgeLimits(int? movieAgeLimit, int? tvAgeLimit) => new()
     {
         MaxMovieRating = movieAgeLimit is int movieAge ? RatingScale.MaxLevelForAge(movieAge) : null,

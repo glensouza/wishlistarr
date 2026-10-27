@@ -7,6 +7,26 @@ namespace Wishlistarr.Tests.Requests;
 public sealed class AutoApproveRuleTests
 {
     [Fact]
+    public void WhyNot_names_the_reason_AppliesTo_rejects()
+    {
+        ContentDecision allowed = Decision(ContentOutcome.Allowed, ContentReasonCode.WithinRatingLimit, RatingLevel.Teen);
+        AutoApproveRule ceiling = new(false, RatingLevel.ParentalGuidance, null);
+
+        Assert.Null(ceiling.WhyNot(allowed, MediaKind.Movie, RatingLevel.General));
+        Assert.True(ceiling.AppliesTo(allowed, MediaKind.Movie, RatingLevel.General));
+        Assert.Equal(AutoApproveSkip.AboveCeiling, ceiling.WhyNot(allowed, MediaKind.Movie, RatingLevel.Teen));
+        Assert.Equal(AutoApproveSkip.SwitchOff, new AutoApproveRule(false, null, null).WhyNot(allowed, MediaKind.Movie, RatingLevel.General));
+        Assert.Equal(AutoApproveSkip.Unrated, new AutoApproveRule(true, null, null).WhyNot(allowed, MediaKind.Movie, null));
+        Assert.Equal(AutoApproveSkip.GenresUnknown, new AutoApproveRule(true, null, null).WhyNot(allowed, MediaKind.Movie, RatingLevel.General, genresUnknown: true));
+        Assert.Equal(
+            AutoApproveSkip.NotAllowed,
+            new AutoApproveRule(true, null, null).WhyNot(
+                Decision(ContentOutcome.Blocked, ContentReasonCode.BlockedGenre, RatingLevel.General),
+                MediaKind.Movie,
+                RatingLevel.General));
+    }
+
+    [Fact]
     public void A_switch_approves_allowed_rated_titles_and_never_unrated_ones()
     {
         AutoApproveRule rule = new(true, null, null);

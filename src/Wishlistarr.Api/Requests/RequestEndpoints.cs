@@ -25,13 +25,9 @@ public static class RequestEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The state is not a request state.");
             }
 
-            int take = limit ?? DefaultPage;
-            int skip = offset ?? 0;
-            if (take is < 1 or > MaxPage || skip < 0)
+            if (!TryPage(limit, offset, out int take, out int skip, out string? pageError))
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status400BadRequest,
-                    title: $"The limit is 1 to {MaxPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.");
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: pageError);
             }
 
             IQueryable<ListedRequest> matching = db.MediaRequests.AsNoTracking()
@@ -96,6 +92,30 @@ public static class RequestEndpoints
             .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text. canRevoke says whether a parent can revoke the request now, labelMayRemain whether a label may have been left in Plex, canRetry whether a failed request can be sent again, dispatchFailure why sending it failed (notConfigured or unavailable), and unfinished counts the failed and stuck requests.")
             .Produces<ParentRequestPage>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
+
+        requests.MapGet("/queue", async (int? kidProfileId, int? limit, int? offset, HttpContext context, RequestQueue queue, CancellationToken ct) =>
+        {
+            context.Response.Headers.CacheControl = "private, no-store";
+            if (kidProfileId is <= 0)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The kid profile id must be a positive number.");
+            }
+
+            if (!TryPage(limit, offset, out int take, out int skip, out string? pageError))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: pageError);
+            }
+
+            ApprovalQueuePage? page = await queue.GetAsync(kidProfileId, take, skip, ct);
+            return page is null
+                ? Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "The kid profile does not exist.")
+                : Results.Ok(page);
+        })
+            .WithName("GetApprovalQueue")
+            .WithSummary("Lists pending requests for a parent, with the synopsis, US rating and descriptors, US streaming providers, trailer key and the current reason a parent has to decide. A kid session cannot call it. Title details that cannot be read are left out and named in gaps; the request can still be approved or denied.")
+            .Produces<ApprovalQueuePage>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         requests.MapPost("/approve", (DecisionBody? body, HttpContext context, RequestApproval approval, CancellationToken ct) =>
             DecideAsync(body, context, approval, approving: true, ct))
@@ -279,6 +299,20 @@ public static class RequestEndpoints
         return preview.Status == GrantPreviewStatus.Found
             ? Results.Ok(new GrantPreviewResponse(mediaKind, id, preview.Title!, preview.InLibrary))
             : Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "That title could not be found.");
+    }
+
+    internal static bool TryPage(int? limit, int? offset, out int take, out int skip, out string? error)
+    {
+        take = limit ?? DefaultPage;
+        skip = offset ?? 0;
+        if (take is < 1 or > MaxPage || skip < 0)
+        {
+            error = $"The limit is 1 to {MaxPage.ToString(CultureInfo.InvariantCulture)} and the offset is not negative.";
+            return false;
+        }
+
+        error = null;
+        return true;
     }
 
     private static bool TryState(string? state, out RequestState? parsed)

@@ -259,7 +259,7 @@ public sealed partial class KidTitleDetails(
         return null;
     }
 
-    private static string? Synopsis(string? overview)
+    internal static string? Synopsis(string? overview)
     {
         string text = overview?.Trim() ?? string.Empty;
         if (text.Length == 0)

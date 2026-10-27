@@ -1,6 +1,6 @@
 # Requests
 
-A request is a kid profile asking for a movie or show. Requests are stored in the `MediaRequests` table and every change of state is recorded in `MediaRequestEvents`. `MediaRequests` in `Wishlistarr.Api.Requests` creates requests and moves them between states; the transition table itself is `RequestStateMachine` in `Wishlistarr.Core.Requests` and does no I/O. Kids ask for titles through `POST /api/v1/kid/requests` (see [Asking for a title](#asking-for-a-title)) and see their own list through `GET /api/v1/kid/requests` and the wishlist with the weekly allowance left through `GET /api/v1/kid/wishlist` (see [Kid wishlist](#kid-wishlist)).
+A request is a kid profile asking for a movie or show. Requests are stored in the `MediaRequests` table and every change of state is recorded in `MediaRequestEvents`. `MediaRequests` in `Wishlistarr.Api.Requests` creates requests and moves them between states; the transition table itself is `RequestStateMachine` in `Wishlistarr.Core.Requests` and does no I/O. Kids ask for titles through `POST /api/v1/kid/requests` (see [Asking for a title](#asking-for-a-title)) and see their own list through `GET /api/v1/kid/requests` and the wishlist with the weekly allowance left through `GET /api/v1/kid/wishlist` (see [Kid wishlist](#kid-wishlist)). Parents see what is waiting, and why, through `GET /api/v1/requests/queue` (see [Approval queue](#approval-queue)).
 
 ## States
 
@@ -159,6 +159,39 @@ An approved request is sent to the service it was approved with. `fulfilment.mod
 - **Failures.** A send that fails, because the service is not set up, cannot be reached, refuses the request or returns something unexpected, moves the request to `Failed` as the system (`dispatch`). The event reason is one of two fixed sentences, `The download service is not set up.` or `The download service did not accept the request.`, never the service's own answer, its address or a key. The details are in the application log. A kid sees a failed request as waiting, as before.
 - **Retrying.** `POST /api/v1/requests/retry` takes `{ ids, reason }` like deny and revoke (1 to 50 positive ids, an optional reason of at most 500 characters) and returns `{ results: [{ id, status, state }] }`. It needs the Parent role and, for a session cookie or the trusted-network bypass, the antiforgery token; a kid session is rejected. A `Failed` request that failed while being sent moves to `Fulfilling` and the job is started, so `succeeded` means it was queued to be sent again. A request that is already `Approved` or `Fulfilling` is `alreadyDecided`, so repeating a retry is safe. Anything else is `conflict`, including a request that failed while its Plex label was written, which is revoked instead, and a missing request is `notFound`. The parent page shows the reason next to each failed request with a button to try again.
 - **What is not here.** Noticing that the title has arrived and moving the request on to `Available` is separate work. Until then a sent request stays `Fulfilling`.
+
+## Approval queue
+
+`GET /api/v1/requests/queue` is for a parent. A kid session receives `403` and an anonymous caller receives `401`. The response sends `Cache-Control: private, no-store`, including when the call is rejected. It is not the parent list and it is not the kid title screen: the list stays a page of requests, and kid title details do not grow a `providers` field or a `reason`.
+
+`kidProfileId` is optional. Left out, the queue is every pending request that still has a kid profile, including a profile that has been archived. `0` or a negative id is `400` with the title `The kid profile id must be a positive number.` A positive id that matches no profile is `404` with the title `The kid profile does not exist.` `limit` and `offset` are the same as the parent list (1 to 200, default 50, offset not negative) and a bad page is `400` with the same sentence, `The limit is 1 to 200 and the offset is not negative.`
+
+The body is `{ items, total, limit, offset }`. `total` counts every pending request the filter matches, and `items` is that page in id order. The count and the page are read in one deferred SQLite transaction, and that transaction is finished before any TMDB call. Titles on the page are then read one at a time. Details, videos, watch providers and keywords use the TMDB response cache (12 hours); certifications use it for 7 days. A failed read is not cached.
+
+Each item has `id`, `kidProfileId`, `kidName`, `kind` (`movie` or `show`), `tmdbId`, `title`, `requestCount`, `createdAt`, `overview`, `rating`, `descriptors`, `providers`, `trailerKey`, `reason` and `gaps`. `overview` is the same synopsis as a kid title, cut at 2000 characters. `rating` is the US certification text, and `descriptors` are that certification's descriptors with surrounding space removed and repeats dropped. `providers` is `{ name }` only: US subscription (`flatrate`) names, in the order TMDB already sorted them, with blank names skipped and the same name kept once (the first spelling wins). There is no provider id, logo, link, rent or buy list, and no JustWatch URL. `trailerKey` uses the same choice as kid title details. When `kids.youtube_trailers` is not exactly `true`, videos are not requested and `trailerKey` is null.
+
+`reason` is decided again from the profile as it is now, plus whether this profile already has a revoked request for the same kind and TMDB id. It is not a copy of an earlier decision, and the queue does not ask the library or Plex. `code` is one of:
+
+| Code | When |
+| --- | --- |
+| `revokedBefore` | A revoked request already exists for this profile and title. This wins over the current policy. |
+| `unrated` | The policy needs a parent because there is no usable US rating, or auto-approve would skip the title for that reason. |
+| `unknownGenres` | The profile blocks genres and this title's genres could not be checked, or auto-approve would skip it for that reason. |
+| `aboveRatingLimit` | The policy blocks the title for its rating. |
+| `blockedGenre` | The policy blocks one of the title's genres. |
+| `blockedKeyword` | The policy blocks one of the title's keywords. |
+| `languageNotAllowed` | The original language is not one the profile allows. |
+| `explicitlyBlocked` | The policy blocks this title by id. |
+| `aboveCeiling` | The title is allowed, and its rating is above the auto-approve ceiling for this kind. |
+| `autoApproveOff` | The title is allowed, and the profile's auto-approve switch is off. |
+| `notAutoApproved` | The title is allowed and auto-approve would take it, but this request is still pending. |
+| `unavailable` | The reason could not be checked, or the block is one the queue does not name. |
+
+`rating`, `level`, `maxLevel`, `genreName`, `keywordName` and `language` go with the code. `maxLevel` is set only for `aboveCeiling` (that kind's ceiling) and `aboveRatingLimit`. `genreName` and `keywordName` are filled when the id matches the details or the keyword list. A profile that blocks keywords and whose keyword list cannot be read gets `unavailable`; the synopsis, rating and providers from the calls that succeeded stay. The parent page turns these codes into sentences and shows `unavailable` for a code it does not know, so the rest of the card can still be decided.
+
+`gaps` names what could not be read: `synopsis`, `rating`, `providers`, `trailer`. A details failure sets synopsis, rating and providers, and trailer as well when trailers are on, and skips the later calls. A certification failure sets `rating` and makes the reason `unavailable`. A provider failure sets `providers` and leaves `providers` empty; the rest of the item stays. An empty US subscription list is a success, not a gap. A video list with no usable trailer is a success when the list was read. Cancelling the call is not a gap.
+
+The parent home, at the top of `/parent`, loads the first page and shows one card per pending request: the synopsis, the rating and its descriptors, the streaming names with the JustWatch credit from `WatchProviders`, the trailer (the same click-to-play player as a kid title, and no player when the setting is off or the key is not a YouTube id), and the sentence for `reason`. Approve and deny each send one call to the existing approve and deny endpoints, for that one id. Approve sends `reason: null` even if a note is typed. Deny sends the note with surrounding space removed, or `null` when it is blank, and a note longer than 500 characters is not sent. After a decision that removes the card, focus moves to the next request's approve button, or to the previous one when the decided request was last, or to the empty state when none remain. A decision the server did not apply leaves the card in place and moves focus to the error. The kid filter limits that loaded page; it does not ask for another page. When `total` is larger than the page, the home says how many more are waiting and links to the full request list. Recent activity is the profile event list, five events per kid, and the filter limits that to the selected kid. Quick actions jump to the request list, profiles, devices, history, backups, logs and the trailer setting, which are the sections already on the page. The home is one column, with tap targets at least `--tap-size` and no horizontal scrolling.
 
 ## Denial reasons
 
