@@ -86,6 +86,7 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddSingleton<RequestLocks>();
 builder.Services.AddScoped<LabelWriter>();
+builder.Services.AddLabelGuardian(builder.Configuration);
 builder.Services.AddScoped<FulfilmentMode>();
 builder.Services.AddScoped<MediaRequests>();
 builder.Services.AddOptions<ApprovalOptions>()

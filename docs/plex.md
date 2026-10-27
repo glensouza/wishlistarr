@@ -74,7 +74,7 @@ The [library index](library.md) answers the same question from a local copy once
 
 ## Labels
 
-Wishlistarr tags movies and shows with each kid profile's label so Plex content filters can limit what that kid sees. `LabelWriter` adds and removes labels through `IMediaServer.GetLabelsAsync` and `SetLabelsAsync`; there is no endpoint for it yet.
+Wishlistarr tags movies and shows with each kid profile's label so Plex content filters can limit what that kid sees. `LabelWriter` adds and removes labels through `IMediaServer.GetLabelsAsync` and `SetLabelsAsync`; there is no endpoint for it yet. The [label guardian](#label-guardian) checks the result every day.
 
 - TV labels are always applied to the show. A season or episode id is resolved to its show first.
 - Every write reads the item's current labels, sends the complete set back (`label[0].tag.tag=...`) and locks the label field (`label.locked=1`) so a metadata refresh does not drop it. Clearing the last label uses `label[].tag.tag-=...` instead, because an empty set cannot be sent.
@@ -85,3 +85,39 @@ Wishlistarr tags movies and shows with each kid profile's label so Plex content 
 Whether Plex users enforce these labels is described in [plex-restrictions.md](plex-restrictions.md).
 
 Every label the app applies is recorded in the `OwnedLabels` table with the server id, the item guid, the rating key, the label, the kid profile, the source of the change and the time. Items are matched by guid, so the record survives Plex assigning a new rating key. A label that was already on the item is not recorded, and removal only ever touches labels that are in this table, so labels added by hand in Plex are left alone.
+
+## Lookup by guid
+
+`IMediaServer.FindByGuidAsync` finds the items that carry a Plex agent guid (`plex://movie/...`, `plex://show/...`) by asking every movie and show library for `/library/sections/{id}/all?guid=...`, the same filter python-plexapi's `LibrarySection.getGuid` uses for these guids. It is one request per library (more when a page fills). Any other guid, such as a legacy `com.plexapp.agents.imdb://...` guid, returns nothing without a request, because the section filter is only documented for the Plex agents.
+
+## Label guardian
+
+The label guardian checks that the labels in the ownership ledger are still on their items in Plex, follows items that moved and puts back owned labels that went missing. It runs as the `label-guardian` [job](jobs.md) once a day; `label-guardian-dry-run` does the same checks without changing anything and only runs when a parent starts it (`POST /api/v1/jobs/label-guardian-dry-run/run`).
+
+Each run, for the selected server:
+
+1. Reads which items carry which labels with the same label crawl the [library index](library.md#how-labels-are-read) uses. Archived profiles and their ledger rows are skipped.
+2. For each ledger row of an active profile, reads the item at the stored rating key. Plex gives an item that is removed and added again a new rating key, and the old one answers 404. If the stored key does not answer with the ledger's guid, the guardian looks for the guid among the library index's items and then, if that finds nothing, asks Plex by guid (see above). If the guid has gone, for example because the item was matched again, the TMDB, TVDB and IMDb ids the library index holds for the old item are used to find a single new guid. Every candidate is read from Plex and only kept when its guid matches. An item that cannot be found, or whose external ids point at more than one guid, is reported as `unresolved` and its ledger row is left alone.
+3. A ledger row that points at a moved item is reported as `moved` and gets the new rating key (and guid). If another ledger row already owns the label on the new guid, the row is reported as `unresolved` instead.
+4. Every copy with the ledger's guid that does not carry the ledger's label is reported as `missing`, and the label is put back through the label writer with the same read, write and verify steps and per-item lock as any other label write. The repair only writes a label the ledger still owns at the moment of writing and never creates a ledger row, so a label revoked while the guardian runs stays off. The row keeps its source and time.
+5. An item carrying an active profile's label with no ledger row for that guid and label is reported as `extra` and never touched; that is a label someone added by hand. Extras are only checked when the label crawl returned everything Plex announced (`extrasChecked`).
+
+Everything is read before anything is written. If Plex fails or cannot be reached while the guardian is reading, the run fails, nothing is recorded as drift and nothing is repaired. If Plex stops answering during the repairs, the remaining repairs are marked `skipped` and not tried. Each repair has the `Approval:LabelTimeout` deadline. Requests to Plex are made one at a time, and each item is read once per run.
+
+A dry run makes no Plex write and no ledger write. Its report is stored with `dryRun: true`, and its findings carry `wouldRepair` and `wouldUpdate` instead of `repaired` and `updated`. The scheduled job can be made to run dry with `LabelGuardian:DryRun`.
+
+```json
+{
+  "LabelGuardian": {
+    "DryRun": false,
+    "HistoryRetention": "180.00:00:00"
+  }
+}
+```
+
+Reports are kept in `LabelGuardianReports` and `LabelGuardianEntries`. A run that is not a dry run deletes reports older than `HistoryRetention`. The parent endpoints are:
+
+- `GET /api/v1/labels/guardian/reports?limit=20&offset=0` lists reports newest first as `{ items, total, limit, offset }`. Each item has `id`, `startedAt`, `finishedAt`, `dryRun`, `ledgerChecked`, `extrasChecked` and the counts `missing`, `extra`, `moved`, `unresolved`, `repaired` and `failed`. `limit` is 1 to 100 and `offset` is 0 or more; anything else is `400`.
+- `GET /api/v1/labels/guardian/reports/{id}` returns `{ report, profiles, entries }`: the same summary, the counts per kid profile, and every finding with its profile, `kind` (`missing`, `extra`, `moved`, `unresolved`), `action` (`none`, `repaired`, `wouldRepair`, `updated`, `wouldUpdate`, `alreadyFixed`, `skipped`, `failed`), label, guid, rating key, previous rating key and guid for a move, title and a plain-language `detail`. An unknown id is `404`.
+
+What this relies on, and where it comes from: a rating key is a local database id that Plex assigns again when an item is removed and added back (reported in the Plex forum thread "Plex keeps changing rating key number"); a missing rating key answers 404 (python-plexapi's `PlexServer.query` maps a 404 to `NotFound`); and a `plex://` guid comes from the metadata match, so matching the same title again gives the same guid. That last point is not stated by Plex and was not checked against a live server, because only read-only requests were allowed. When it does not hold, the external-id step above still finds the item while the library index holds its old ids.

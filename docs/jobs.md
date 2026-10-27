@@ -48,4 +48,6 @@ The `tmdb-data-purge` job enforces the TMDB data retention described in [tmdb.md
 
 The `request-dispatch` job sends approved requests to Seerr, Sonarr or Radarr. It is started after an approval or a retry (run trigger `Request`) and also runs every minute to pick up anything that was interrupted. See [requests.md](requests.md#dispatching).
 
+The `label-guardian` job compares the label ownership ledger with Plex once a day, follows moved items and puts back owned labels that went missing. `label-guardian-dry-run` runs the same checks without changing Plex or the ledger and only runs when started by a parent. The two never run at the same time. See [plex.md](plex.md#label-guardian).
+
 The `update-check` job asks GitHub whether a newer release exists. It runs once a day. See [upgrading.md](upgrading.md). It is the only call Wishlistarr makes to GitHub by itself.

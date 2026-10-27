@@ -27,6 +27,7 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
     private static readonly HashSet<(string Entity, string Property)> NotFromTmdb =
     [
         (nameof(LibraryItem), nameof(LibraryItem.Title)),
+        (nameof(LabelGuardianEntry), nameof(LabelGuardianEntry.Title)),
         (nameof(KidProfile), nameof(KidProfile.Name)),
         (nameof(KidDevice), nameof(KidDevice.Name)),
     ];
