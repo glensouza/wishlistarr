@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -9,6 +10,8 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -24,9 +27,46 @@ using Wishlistarr.Tests.Requests;
 
 namespace Wishlistarr.Tests.Notifications;
 
+public sealed class RecordingNotificationTrigger : INotificationTrigger
+{
+    private int starts;
+
+    public int Starts => Volatile.Read(ref this.starts);
+
+    public Task StartAsync()
+    {
+        Interlocked.Increment(ref this.starts);
+        return Task.CompletedTask;
+    }
+}
+
+public sealed class ApprovalClaimGate : DbCommandInterceptor
+{
+    public Func<Task>? BeforeClaim { get; set; }
+
+    public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        if (this.BeforeClaim is { } gate && command.CommandText.Contains("UPDATE \"NotificationApprovals\"", StringComparison.Ordinal))
+        {
+            this.BeforeClaim = null;
+            await gate();
+        }
+
+        return result;
+    }
+}
+
 public sealed class NotificationFactory : AuthApiFactory
 {
     public ManualTimeProvider Clock { get; } = new();
+
+    public RecordingNotificationTrigger Trigger { get; } = new();
+
+    public ApprovalClaimGate Claims { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -38,6 +78,9 @@ public sealed class NotificationFactory : AuthApiFactory
             services.AddSingleton<TimeProvider>(this.Clock);
             services.RemoveAll<ILibraryIndex>();
             services.AddSingleton<ILibraryIndex>(new FakeLibraryIndex());
+            services.RemoveAll<INotificationTrigger>();
+            services.AddSingleton<INotificationTrigger>(this.Trigger);
+            services.AddDbContext<WishlistarrDbContext>(options => options.AddInterceptors(this.Claims));
         });
     }
 
@@ -79,6 +122,7 @@ public sealed class NotificationHttpServer : IAsyncDisposable
     public ConcurrentQueue<NotificationHttpRequest> Requests { get; } = new();
     public int Status { get; set; } = 200;
     public string? Redirect { get; set; }
+    public int? RetryAfterSeconds { get; set; }
     public bool AppriseProtocol { get; set; }
     public bool AppriseDefaultTargets { get; set; }
     public bool AppriseValidatesUnusedUrls { get; set; }
@@ -100,6 +144,11 @@ public sealed class NotificationHttpServer : IAsyncDisposable
             if (server.Redirect is not null)
             {
                 context.Response.Headers.Location = server.Redirect;
+            }
+
+            if (server.RetryAfterSeconds is int retryAfter && context.Response.StatusCode == 429)
+            {
+                context.Response.Headers.RetryAfter = retryAfter.ToString(global::System.Globalization.CultureInfo.InvariantCulture);
             }
 
             await context.Response.WriteAsync(context.Response.StatusCode == 200 ? "{\"success\":true}" : "upstream private error");

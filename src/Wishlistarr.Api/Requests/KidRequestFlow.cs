@@ -3,6 +3,7 @@ using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Wishlistarr.Api.Library;
+using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
@@ -34,6 +35,7 @@ public sealed partial class KidRequestFlow(
     RequestLabeling labeling,
     RequestApproval approval,
     SettingsStore settings,
+    INotificationTrigger notifications,
     TimeProvider time,
     ILogger<KidRequestFlow> logger)
 {
@@ -160,6 +162,7 @@ public sealed partial class KidRequestFlow(
 
         if (!autoNow)
         {
+            await notifications.StartAsync();
             return new KidRequestResult(KidRequestOutcome.Created, request);
         }
 

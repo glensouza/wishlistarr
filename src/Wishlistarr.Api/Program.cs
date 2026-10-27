@@ -83,6 +83,7 @@ builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<NotificationSettings>();
 builder.Services.AddScoped<NotificationLinks>();
 builder.Services.AddScoped<NotificationSender>();
+builder.Services.AddScoped<INotificationTrigger, NotificationTrigger>();
 builder.Services.AddScoped<IParentNotifier, QueuedParentNotifier>();
 builder.Services.AddHttpClient(NotificationSender.ClientName)
     .RemoveAllLoggers()

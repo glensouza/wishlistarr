@@ -7,10 +7,23 @@ namespace Wishlistarr.Api.Notifications;
 
 public sealed record NotificationMessage(string Body, string? ApproveUrl = null, string? DenyUrl = null)
 {
-    public string Text => this.ApproveUrl is null ? this.Body : $"{this.Body}\nApprove: {this.ApproveUrl}\nDeny: {this.DenyUrl}";
+    public const int DiscordLimit = 2000;
+
+    public string Text => $"{this.Body}{this.Links}";
+
+    private string Links => this.ApproveUrl is null ? string.Empty : $"\nApprove: {this.ApproveUrl}\nDeny: {this.DenyUrl}";
+
+    public string Fit(int limit)
+    {
+        int room = limit - this.Links.Length;
+        return this.Text.Length <= limit || room < 2 ? this.Text : $"{this.Body[..(room - 1)]}…{this.Links}";
+    }
 }
 
-public sealed class NotificationDeliveryException(string message) : Exception(message);
+public sealed class NotificationDeliveryException(string message, TimeSpan? retryAfter = null) : Exception(message)
+{
+    public TimeSpan? RetryAfter { get; } = retryAfter;
+}
 
 public sealed class NotificationSender(IHttpClientFactory clients)
 {
@@ -57,7 +70,7 @@ public sealed class NotificationSender(IHttpClientFactory clients)
                     query["wait"] = "true";
                     webhook.Query = QueryString.Create(query).ToString();
                     request.RequestUri = webhook.Uri;
-                    request.Content = JsonContent.Create(new { content = message.Text, allowed_mentions = new { parse = Array.Empty<string>() }, flags = 4 });
+                    request.Content = JsonContent.Create(new { content = message.Fit(NotificationMessage.DiscordLimit), allowed_mentions = new { parse = Array.Empty<string>() }, flags = 4 });
                     break;
                 case "apprise":
                     if (!NotificationSettings.TryAppriseEndpoint(config.Url, out bool stateful))
@@ -86,7 +99,7 @@ public sealed class NotificationSender(IHttpClientFactory clients)
             using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
             if (!response.IsSuccessStatusCode || (provider == "apprise" && response.StatusCode != HttpStatusCode.OK))
             {
-                throw new NotificationDeliveryException($"Notification delivery returned HTTP {(int)response.StatusCode}.");
+                throw new NotificationDeliveryException(Describe(response.StatusCode), RetryAfter(response));
             }
         }
         catch (Exception exception) when (exception is HttpRequestException or SmtpException or TaskCanceledException or IOException)
@@ -96,4 +109,17 @@ public sealed class NotificationSender(IHttpClientFactory clients)
             throw new NotificationDeliveryException("The notification service could not be reached or rejected delivery.");
         }
     }
+
+    private static string Describe(HttpStatusCode status) => status switch
+    {
+        HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => $"The notification service rejected the saved credentials (HTTP {(int)status}).",
+        HttpStatusCode.NotFound => "The notification endpoint was not found (HTTP 404). Check the saved URL.",
+        HttpStatusCode.TooManyRequests => "The notification service is limiting how often messages can be sent (HTTP 429).",
+        _ when (int)status is >= 300 and < 400 => $"The notification endpoint redirected (HTTP {(int)status}). Save the final URL instead.",
+        _ => $"Notification delivery returned HTTP {(int)status}.",
+    };
+
+    private static TimeSpan? RetryAfter(HttpResponseMessage response) =>
+        response.StatusCode != HttpStatusCode.TooManyRequests ? null
+        : response.Headers.RetryAfter?.Delta;
 }

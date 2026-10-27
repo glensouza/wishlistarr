@@ -69,8 +69,10 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(row => row.Message).HasMaxLength(1000);
             entity.Property(row => row.LastError).HasMaxLength(200);
             entity.Property(row => row.NextAttemptAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.Property(row => row.CreatedAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
             entity.HasIndex(row => new { row.NotificationSubscriptionId, row.MediaRequestEventId }).IsUnique();
-            entity.HasIndex(row => row.CompletedAt);
+            entity.HasIndex(row => new { row.CompletedAt, row.Attempts, row.NextAttemptAt });
+            entity.HasIndex(row => row.CreatedAt);
             entity.HasOne(row => row.Subscription).WithMany().HasForeignKey(row => row.NotificationSubscriptionId).OnDelete(DeleteBehavior.Cascade);
         });
 

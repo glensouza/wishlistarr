@@ -74,7 +74,7 @@ public partial class AddNotifications : Migration
                 Event = table.Column<string>(type: "TEXT", maxLength: 32, nullable: false),
                 Message = table.Column<string>(type: "TEXT", maxLength: 1000, nullable: false),
                 Attempts = table.Column<int>(type: "INTEGER", nullable: false),
-                CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                CreatedAt = table.Column<long>(type: "INTEGER", nullable: false),
                 NextAttemptAt = table.Column<long>(type: "INTEGER", nullable: false),
                 CompletedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
                 LastError = table.Column<string>(type: "TEXT", maxLength: 200, nullable: true)
@@ -102,9 +102,14 @@ public partial class AddNotifications : Migration
             unique: true);
 
         migrationBuilder.CreateIndex(
-            name: "IX_NotificationDeliveries_CompletedAt",
+            name: "IX_NotificationDeliveries_CompletedAt_Attempts_NextAttemptAt",
             table: "NotificationDeliveries",
-            column: "CompletedAt");
+            columns: ["CompletedAt", "Attempts", "NextAttemptAt"]);
+
+        migrationBuilder.CreateIndex(
+            name: "IX_NotificationDeliveries_CreatedAt",
+            table: "NotificationDeliveries",
+            column: "CreatedAt");
 
         migrationBuilder.CreateIndex(
             name: "IX_NotificationDeliveries_NotificationSubscriptionId_MediaRequestEventId",

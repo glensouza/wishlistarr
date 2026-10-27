@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { request } from './api'
+import { ApiError, request } from './api'
 import { useT, type MessageKey } from './i18n'
 
 const providers = ['ntfy', 'discord', 'apprise', 'smtp'] as const
@@ -32,6 +32,38 @@ const fields: Record<Provider, string[]> = {
   apprise: ['url', 'targets'],
   smtp: ['host', 'port', 'username', 'password', 'from', 'to'],
 }
+// Only 400 and 502 answers carry a reason written by this server; upstream bodies never reach them.
+function reason(failure: unknown) {
+  return failure instanceof ApiError &&
+    (failure.status === 400 || failure.status === 502) &&
+    !failure.message.startsWith('Request failed')
+    ? failure.message
+    : null
+}
+
+function Feedback({
+  message,
+  failed,
+  detail,
+}: {
+  message: MessageKey | null
+  failed: boolean
+  detail: string | null
+}) {
+  const t = useT()
+  return (
+    <>
+      <p role="status">{message && !failed ? t(message) : ''}</p>
+      {message && failed && (
+        <p role="alert">
+          {t(message)}
+          {detail && ` ${detail}`}
+        </p>
+      )}
+    </>
+  )
+}
+
 function isSecret(field: string) {
   return (
     field === 'url' ||
@@ -139,6 +171,7 @@ function BaseUrl({ initial }: { initial: string }) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<MessageKey | null>(null)
   const [failed, setFailed] = useState(false)
+  const [detail, setDetail] = useState<string | null>(null)
   async function save(event: FormEvent) {
     event.preventDefault()
     try {
@@ -155,6 +188,7 @@ function BaseUrl({ initial }: { initial: string }) {
         throw new Error()
     } catch {
       setFailed(true)
+      setDetail(null)
       setMessage('notifications.invalidBaseUrl')
       return
     }
@@ -166,8 +200,9 @@ function BaseUrl({ initial }: { initial: string }) {
       })
       setFailed(false)
       setMessage('notifications.saved')
-    } catch {
+    } catch (failure) {
       setFailed(true)
+      setDetail(reason(failure))
       setMessage('notifications.saveFailed')
     } finally {
       setBusy(false)
@@ -192,8 +227,8 @@ function BaseUrl({ initial }: { initial: string }) {
         </label>
         <p className="muted">{t('notifications.baseUrlHint')}</p>
         <button type="submit">{t('notifications.saveBaseUrl')}</button>
+        <Feedback message={message} failed={failed} detail={detail} />
       </fieldset>
-      {message && <p role={failed ? 'alert' : 'status'}>{t(message)}</p>}
     </form>
   )
 }
@@ -213,6 +248,7 @@ function ProviderForm({ initial }: { initial: NotificationProvider }) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<MessageKey | null>(null)
   const [failed, setFailed] = useState(false)
+  const [detail, setDetail] = useState<string | null>(null)
   function changed() {
     setDirty(true)
     setMessage(null)
@@ -223,7 +259,7 @@ function ProviderForm({ initial }: { initial: NotificationProvider }) {
     try {
       const values = Object.fromEntries(
         Object.entries(configuration).filter(
-          ([key, value]) => !isSecret(key) || value !== '',
+          ([key, value]) => value !== '' || (!isSecret(key) && key !== 'port'),
         ),
       )
       if (test) await request('POST', `/api/v1/notifications/${provider}/test`)
@@ -251,8 +287,9 @@ function ProviderForm({ initial }: { initial: NotificationProvider }) {
       }
       setFailed(false)
       setMessage(test ? 'notifications.testSent' : 'notifications.saved')
-    } catch {
+    } catch (failure) {
       setFailed(true)
+      setDetail(reason(failure))
       setMessage(test ? 'notifications.testFailed' : 'notifications.saveFailed')
     } finally {
       setBusy(false)
@@ -340,7 +377,7 @@ function ProviderForm({ initial }: { initial: NotificationProvider }) {
                   setConfiguration({
                     ...configuration,
                     [field]:
-                      field === 'port'
+                      field === 'port' && event.target.value !== ''
                         ? Number(event.target.value)
                         : event.target.value,
                   })
@@ -374,8 +411,8 @@ function ProviderForm({ initial }: { initial: NotificationProvider }) {
           {t('notifications.test')}
         </button>
         {dirty && <p className="muted">{t('notifications.testHint')}</p>}
+        <Feedback message={message} failed={failed} detail={detail} />
       </fieldset>
-      {message && <p role={failed ? 'alert' : 'status'}>{t(message)}</p>}
     </form>
   )
 }

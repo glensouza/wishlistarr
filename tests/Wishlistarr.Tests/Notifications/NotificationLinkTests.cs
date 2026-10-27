@@ -33,6 +33,7 @@ public sealed partial class NotificationLinkTests
             Assert.Equal("no-store", preview.Headers.CacheControl?.ToString());
             Assert.Equal("no-referrer", preview.Headers.GetValues("Referrer-Policy").Single());
             Assert.Contains("form-action 'self'", preview.Headers.GetValues("Content-Security-Policy").Single());
+            Assert.Equal("DENY", preview.Headers.GetValues("X-Frame-Options").Single());
         }
 
         HttpResponseMessage confirmation = await parent.GetAsync(denyPath);
@@ -183,6 +184,88 @@ public sealed partial class NotificationLinkTests
         Assert.DoesNotContain(Token(links.ApproveUrl!), LogRedactor.Redact(links.ApproveUrl));
         Assert.DoesNotContain(Token(links.DenyUrl!), LogRedactor.Redact(links.DenyUrl));
         Assert.True(links.Text.Length <= 2000);
+    }
+
+    [Fact]
+    public async Task A_decision_made_elsewhere_before_the_claim_leaves_the_link_unused()
+    {
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        (int id, NotificationMessage links) = await LinksAsync(factory, parent);
+        factory.Claims.BeforeClaim = async () =>
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<MediaRequests>().TransitionAsync(id, RequestState.Denied, RequestActor.Parent(1, "Parent"));
+        };
+
+        HttpResponseMessage response = await PostAsync(parent, links.ApproveUrl!);
+
+        Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
+        Assert.Null(factory.Claims.BeforeClaim);
+        Assert.Equal(RequestState.Denied, await StateAsync(factory, id));
+        Assert.Null(await UsedAtAsync(factory));
+    }
+
+    [Fact]
+    public void Decision_pages_distinguish_saved_already_decided_and_failed_outcomes()
+    {
+        DecisionPage saved = NotificationEndpoints.Outcome(new DecisionItem(5, DecisionStatus.Succeeded, RequestState.Approved));
+        DecisionPage elsewhere = NotificationEndpoints.Outcome(new DecisionItem(5, DecisionStatus.AlreadyDecided, RequestState.Denied));
+        DecisionPage failed = NotificationEndpoints.Outcome(new DecisionItem(5, DecisionStatus.Failed, RequestState.Pending));
+
+        Assert.Equal(("Decision saved", 200), (saved.Title, saved.Status));
+        Assert.Contains("is approved", saved.Message);
+        Assert.Equal(("Already decided", 409), (elsewhere.Title, elsewhere.Status));
+        Assert.Contains("is denied", elsewhere.Message);
+        Assert.Equal(409, failed.Status);
+        Assert.Equal(410, NotificationEndpoints.Outcome(null).Status);
+    }
+
+    [Fact]
+    public async Task Trusted_network_access_can_open_but_never_use_a_link()
+    {
+        using NotificationFactory factory = new()
+        {
+            Settings = new Dictionary<string, string?>
+            {
+                ["Auth:LoginAttemptsPerMinute"] = "1000",
+                ["Auth:TrustedNetworkBypass"] = "true",
+                ["Auth:TrustedNetworks:0"] = "192.168.1.0/24",
+                ["Auth:TrustedHosts:0"] = "localhost",
+            },
+        };
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        (int id, NotificationMessage links) = await LinksAsync(factory, parent);
+        using HttpClient lan = factory.CreateClient();
+        lan.DefaultRequestHeaders.Add(AuthApiFactory.RemoteIpHeader, "192.168.1.5");
+        await AuthApiFactory.AddAntiforgeryTokenAsync(lan);
+
+        HttpResponseMessage page = await lan.GetAsync(new Uri(links.DenyUrl!).PathAndQuery);
+        string html = await page.Content.ReadAsStringAsync();
+        Assert.Contains("Sign in to confirm", html);
+        Assert.DoesNotContain("method=\"post\"", html);
+        Assert.Equal(HttpStatusCode.Forbidden, (await PostAsync(lan, links.DenyUrl!)).StatusCode);
+        Assert.Equal(RequestState.Pending, await StateAsync(factory, id));
+        Assert.Null(await UsedAtAsync(factory));
+    }
+
+    [Fact]
+    public async Task Confirmation_page_never_shows_an_expired_title()
+    {
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        (int id, NotificationMessage links) = await LinksAsync(factory, parent);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            DateTimeOffset expired = factory.Clock.GetUtcNow() - TimeSpan.FromDays(400);
+            await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().MediaRequests.Where(row => row.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.TitleFetchedAt, expired));
+        }
+
+        string html = await parent.GetStringAsync(new Uri(links.ApproveUrl!).PathAndQuery);
+
+        Assert.DoesNotContain("Test @everyone title", html);
+        Assert.Contains("Untitled request for Kid 123", html);
     }
 
     [Theory]

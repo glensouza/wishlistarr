@@ -20,7 +20,7 @@ type Call = {
 }
 let calls: Call[]
 let settings: NotificationConfiguration
-let failure: 'load' | 'save' | 'test' | null
+let failure: 'load' | 'save' | 'test' | 'crash' | null
 
 beforeEach(() => {
   resetAntiforgery()
@@ -82,13 +82,27 @@ beforeEach(() => {
         body: init?.body ? JSON.parse(init.body as string) : undefined,
         headers: init?.headers,
       })
+      if (failure === 'crash' && method !== 'GET') {
+        return Response.json(
+          { title: 'Internal detail must not be shown' },
+          { status: 500 },
+        )
+      }
+      if (failure === 'save' && method === 'PUT') {
+        return Response.json(
+          { title: 'SMTP authentication requires STARTTLS.' },
+          { status: 400 },
+        )
+      }
       if (
         (failure === 'load' && method === 'GET') ||
-        (failure === 'save' && method === 'PUT') ||
         (failure === 'test' && path.endsWith('/test'))
       ) {
         return Response.json(
-          { title: 'Sensitive upstream detail must not be shown' },
+          {
+            title:
+              'The notification service rejected the saved credentials (HTTP 401).',
+          },
           { status: 502 },
         )
       }
@@ -243,7 +257,7 @@ it('retains drafts across provider selection and sends a bodyless test for each 
       form.getByRole('button', { name: 'Send test notification' }),
     )
     await waitFor(() =>
-      expect(screen.getByRole('status').textContent).toBe(
+      expect(form.getByRole('status').textContent).toBe(
         'Test notification sent.',
       ),
     )
@@ -339,15 +353,15 @@ it('keeps the public URL draft and offers a retry after save failure', async () 
   await screen.findByText('Settings saved.')
 })
 
-it('shows safe save and test errors, keeping edits available for retry', async () => {
+it('shows the server reason for save and test errors, keeping edits available for retry', async () => {
   const user = await open()
   const form = within(screen.getByRole('group', { name: 'ntfy' }))
   failure = 'save'
   await user.type(form.getByLabelText('Access token'), 'replacement')
   await user.click(form.getByRole('button', { name: 'Save provider' }))
-  expect((await screen.findByRole('alert')).textContent).toContain(
-    'could not save',
-  )
+  const saveAlert = (await form.findByRole('alert')).textContent
+  expect(saveAlert).toContain('could not save')
+  expect(saveAlert).toContain('SMTP authentication requires STARTTLS.')
   expect((form.getByLabelText('Access token') as HTMLInputElement).value).toBe(
     'replacement',
   )
@@ -356,12 +370,9 @@ it('shows safe save and test errors, keeping edits available for retry', async (
   await screen.findByText('Settings saved.')
   failure = 'test'
   await user.click(form.getByRole('button', { name: 'Send test notification' }))
-  expect((await screen.findByRole('alert')).textContent).toContain(
-    'test notification failed',
-  )
-  expect(
-    screen.queryByText('Sensitive upstream detail must not be shown'),
-  ).toBeNull()
+  const testAlert = (await form.findByRole('alert')).textContent
+  expect(testAlert).toContain('test notification failed')
+  expect(testAlert).toContain('rejected the saved credentials (HTTP 401)')
   await waitFor(() =>
     expect(
       (
@@ -371,4 +382,39 @@ it('shows safe save and test errors, keeping edits available for retry', async (
       ).disabled,
     ).toBe(false),
   )
+})
+
+it('never shows the detail of an unexpected server failure', async () => {
+  const user = await open()
+  const form = within(screen.getByRole('group', { name: 'ntfy' }))
+  failure = 'crash'
+  await user.click(form.getByRole('button', { name: 'Send test notification' }))
+  expect((await form.findByRole('alert')).textContent).toContain(
+    'test notification failed',
+  )
+  expect(screen.queryByText(/Internal detail/)).toBeNull()
+})
+
+it('announces results through a status region that is already present', async () => {
+  const user = await open()
+  const form = within(screen.getByRole('group', { name: 'ntfy' }))
+  const status = form.getByRole('status')
+  expect(status.textContent).toBe('')
+  await user.click(form.getByRole('button', { name: 'Send test notification' }))
+  await waitFor(() =>
+    expect(status.textContent).toBe('Test notification sent.'),
+  )
+})
+
+it('leaves a cleared SMTP port to the server default instead of sending zero', async () => {
+  const user = await open()
+  await user.click(screen.getByRole('button', { name: 'Email (SMTP)' }))
+  const form = within(screen.getByRole('group', { name: 'Email (SMTP)' }))
+  await user.clear(form.getByLabelText('SMTP port'))
+  await user.click(form.getByRole('button', { name: 'Save provider' }))
+  await form.findByText('Settings saved.')
+  const saved = calls.find((call) => call.path === '/api/v1/notifications/smtp')
+    ?.body as { configuration: Record<string, unknown> }
+  expect(saved.configuration).not.toHaveProperty('port')
+  expect(saved.configuration.host).toBe('smtp.example')
 })

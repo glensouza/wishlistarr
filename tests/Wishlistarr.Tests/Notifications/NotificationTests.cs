@@ -3,9 +3,12 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Wishlistarr.Api.Notifications;
+using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Core.Kids;
+using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
 
 namespace Wishlistarr.Tests.Notifications;
@@ -164,6 +167,7 @@ public sealed class NotificationTests
         }
 
         Assert.Single(await DeliveriesAsync(factory));
+        Assert.Equal(1, factory.Trigger.Starts);
         await factory.RunAsync();
         Assert.Equal("Repeated failed PIN attempts.", Assert.Single(server.Requests).Body);
         await SaveAsync(parent, "ntfy", new NotificationConfiguration(), enabled: false);
@@ -203,6 +207,189 @@ public sealed class NotificationTests
         await factory.RunAsync();
         Assert.Equal("Ready message.", Assert.Single(server.Requests).Body);
     }
+
+    [Fact]
+    public async Task Pending_notifications_for_requests_decided_before_delivery_are_skipped()
+    {
+        await using NotificationHttpServer server = await NotificationHttpServer.StartAsync();
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        await SaveAsync(parent, "ntfy", new NotificationConfiguration { Url = new Uri(server.Address, "/topic").ToString() });
+        int id = await factory.RequestAsync();
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<MediaRequests>().TransitionAsync(id, RequestState.Approved, RequestActor.Parent(1, "Parent"));
+        }
+
+        await factory.RunAsync();
+
+        Assert.Empty(server.Requests);
+        NotificationDelivery skipped = Assert.Single(await DeliveriesAsync(factory));
+        Assert.NotNull(skipped.CompletedAt);
+        Assert.Equal(0, skipped.Attempts);
+        using IServiceScope check = factory.Services.CreateScope();
+        Assert.Empty(await check.ServiceProvider.GetRequiredService<WishlistarrDbContext>().NotificationApprovals.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Request_messages_name_the_kid_and_title_and_never_use_an_expired_title()
+    {
+        await using NotificationHttpServer server = await NotificationHttpServer.StartAsync();
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        await SaveAsync(parent, "ntfy", new NotificationConfiguration { Url = new Uri(server.Address, "/topic").ToString() }, events: ["pending", "denied"]);
+        int id = await factory.RequestAsync();
+        await factory.RunAsync();
+        Assert.StartsWith("Kid 123 asked for Test @everyone title. It is waiting for your approval.\nApprove: https://wishlistarr.example.invalid/notifications/confirm?token=", Assert.Single(server.Requests).Body);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            DateTimeOffset expired = factory.Clock.GetUtcNow() - TimeSpan.FromDays(400);
+            await db.MediaRequests.Where(row => row.Id == id).ExecuteUpdateAsync(setters => setters.SetProperty(row => row.TitleFetchedAt, expired));
+            await scope.ServiceProvider.GetRequiredService<MediaRequests>().TransitionAsync(id, RequestState.Denied, RequestActor.Parent(1, "Parent"));
+        }
+
+        await factory.RunAsync();
+        Assert.Equal($"Request #{id} for Kid 123 was denied.", server.Requests.Last().Body);
+    }
+
+    [Fact]
+    public async Task Failed_deliveries_back_off_on_schedule_and_stop_after_eight_attempts()
+    {
+        await using NotificationHttpServer server = await NotificationHttpServer.StartAsync();
+        server.Status = 500;
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        await SaveAsync(parent, "ntfy", new NotificationConfiguration { Url = new Uri(server.Address, "/topic").ToString() }, events: ["pinFailures"]);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IParentNotifier>().NotifyAsync(new ParentNotification(ParentNotificationKinds.PinFailures, "Repeated failed PIN attempts."));
+        }
+
+        List<double> delays = [];
+        for (int attempt = 1; attempt <= NotificationJob.MaxAttempts; attempt++)
+        {
+            await factory.RunAsync();
+            NotificationDelivery delivery = Assert.Single(await DeliveriesAsync(factory));
+            Assert.Equal(attempt, delivery.Attempts);
+            TimeSpan delay = delivery.NextAttemptAt - factory.Clock.GetUtcNow();
+            delays.Add(Math.Round(delay.TotalMinutes, 3));
+            factory.Clock.Advance(delay);
+        }
+
+        Assert.Equal([1, 2, 4, 8, 16, 32, 60, 60], delays);
+        await factory.RunAsync();
+        Assert.Equal(NotificationJob.MaxAttempts, server.Requests.Count);
+        NotificationDelivery exhausted = Assert.Single(await DeliveriesAsync(factory));
+        Assert.Null(exhausted.CompletedAt);
+        Assert.Contains("HTTP 500", exhausted.LastError);
+    }
+
+    [Fact]
+    public async Task Rate_limited_deliveries_wait_for_the_retry_after_time()
+    {
+        await using NotificationHttpServer server = await NotificationHttpServer.StartAsync();
+        server.Status = 429;
+        server.RetryAfterSeconds = 600;
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        await SaveAsync(parent, "ntfy", new NotificationConfiguration { Url = new Uri(server.Address, "/topic").ToString() }, events: ["pinFailures"]);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IParentNotifier>().NotifyAsync(new ParentNotification(ParentNotificationKinds.PinFailures, "Repeated failed PIN attempts."));
+        }
+
+        await factory.RunAsync();
+
+        NotificationDelivery delivery = Assert.Single(await DeliveriesAsync(factory));
+        Assert.Equal(10, Math.Round((delivery.NextAttemptAt - factory.Clock.GetUtcNow()).TotalMinutes, 3));
+        Assert.Contains("HTTP 429", delivery.LastError);
+    }
+
+    [Fact]
+    public async Task Finished_deliveries_are_removed_after_thirty_days()
+    {
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        await SaveAsync(parent, "ntfy", new NotificationConfiguration { Url = "https://ntfy.example.invalid/topic" }, events: ["pinFailures"]);
+        DateTimeOffset now = factory.Clock.GetUtcNow();
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            int subscription = await db.NotificationSubscriptions.Select(row => row.Id).SingleAsync();
+            NotificationDelivery Row(string message, TimeSpan age, int attempts, bool completed) => new()
+            {
+                NotificationSubscriptionId = subscription,
+                Event = "pinFailures",
+                Message = message,
+                CreatedAt = now - age,
+                NextAttemptAt = now + TimeSpan.FromHours(1),
+                Attempts = attempts,
+                CompletedAt = completed ? now - age : null,
+            };
+            db.NotificationDeliveries.AddRange(
+                Row("old delivered", TimeSpan.FromDays(31), 1, true),
+                Row("old exhausted", TimeSpan.FromDays(31), NotificationJob.MaxAttempts, false),
+                Row("old waiting", TimeSpan.FromDays(31), 1, false),
+                Row("recent delivered", TimeSpan.FromDays(29), 1, true));
+            await db.SaveChangesAsync();
+        }
+
+        await factory.RunAsync();
+
+        Assert.Equal(["old waiting", "recent delivered"], (await DeliveriesAsync(factory)).Select(row => row.Message));
+    }
+
+    [Fact]
+    public async Task Discord_messages_fit_the_content_limit_and_keep_both_links()
+    {
+        await using NotificationHttpServer server = await NotificationHttpServer.StartAsync();
+        using NotificationFactory factory = new();
+        using IServiceScope scope = factory.Services.CreateScope();
+        NotificationMessage message = new(new string('T', 3000), "https://wishlistarr.example.invalid/a", "https://wishlistarr.example.invalid/d");
+
+        await scope.ServiceProvider.GetRequiredService<NotificationSender>().SendAsync("discord",
+            new NotificationConfiguration { Url = new Uri(server.Address, "/api/webhooks/1/key").ToString() }, message, CancellationToken.None);
+
+        using JsonDocument body = JsonDocument.Parse(Assert.Single(server.Requests).Body);
+        string content = body.RootElement.GetProperty("content").GetString()!;
+        Assert.Equal(NotificationMessage.DiscordLimit, content.Length);
+        Assert.EndsWith("…\nApprove: https://wishlistarr.example.invalid/a\nDeny: https://wishlistarr.example.invalid/d", content);
+    }
+
+    [Theory]
+    [InlineData(401, "rejected the saved credentials")]
+    [InlineData(404, "endpoint was not found")]
+    [InlineData(302, "redirected")]
+    public async Task Test_failures_explain_the_upstream_status(int status, string expected)
+    {
+        await using NotificationHttpServer server = await NotificationHttpServer.StartAsync();
+        server.Status = status;
+        using NotificationFactory factory = new();
+        using HttpClient parent = await factory.CreateSignedInClientAsync();
+        await SaveAsync(parent, "ntfy", new NotificationConfiguration { Url = new Uri(server.Address, "/topic").ToString() }, enabled: false);
+
+        HttpResponseMessage response = await parent.PostAsync("/api/v1/notifications/ntfy/test", null);
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Contains(expected, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Security_notification_failures_never_break_the_kid_sign_in()
+    {
+        using NotificationFactory factory = new();
+        using IServiceScope scope = factory.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        await db.DisposeAsync();
+        QueuedParentNotifier notifier = new(db, factory.Trigger, factory.Clock, NullLogger<QueuedParentNotifier>.Instance);
+
+        await notifier.NotifyAsync(new ParentNotification(ParentNotificationKinds.ProfileLocked, "Locked."));
+
+        Assert.Equal(0, factory.Trigger.Starts);
+    }
+
 
     [Fact]
     public async Task Settings_and_tests_reject_anonymous_kids_and_missing_csrf()

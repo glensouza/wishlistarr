@@ -99,7 +99,8 @@ public sealed class NotificationLinks(WishlistarrDbContext db, IDataProtectionPr
         DateTimeOffset now = time.GetUtcNow();
         // Both choices share one grant, so a second click cannot race an opposite decision.
         int claimed = await db.NotificationApprovals.Where(row => row.Id == payload.Id && row.UsedAt == null
-                && row.ExpiresAt > now && row.ParentAccountId == parentId && row.MediaRequestId == payload.RequestId)
+                && row.ExpiresAt > now && row.ParentAccountId == parentId && row.MediaRequestId == payload.RequestId
+                && db.MediaRequests.Any(request => request.Id == payload.RequestId && request.State == RequestState.Pending))
             .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.UsedAt, now), ct);
         if (claimed != 1)
         {
