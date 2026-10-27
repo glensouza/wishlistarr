@@ -209,6 +209,8 @@ public class KidRequestApiFactory : AuthApiFactory
 
     public FakeTmdbServer Tmdb { get; }
 
+    public FixedKeyProvider TmdbKeys { get; } = new();
+
     public TestClock Clock { get; } = new();
 
     public DecisionSaveGate Saves { get; } = new();
@@ -322,7 +324,7 @@ public class KidRequestApiFactory : AuthApiFactory
                 options.ImageBaseAddress = this.Tmdb.ImageBaseAddress;
             });
             services.RemoveAll<ITmdbApiKeyProvider>();
-            services.AddSingleton<ITmdbApiKeyProvider>(new FixedKeyProvider());
+            services.AddSingleton<ITmdbApiKeyProvider>(this.TmdbKeys);
             services.AddDbContext<WishlistarrDbContext>(options => options.AddInterceptors(this.Saves));
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(this.Clock);

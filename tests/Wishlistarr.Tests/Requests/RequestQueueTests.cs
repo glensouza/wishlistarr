@@ -75,6 +75,7 @@ public sealed class RequestQueueTests
         Assert.Equal(1, body.GetProperty("total").GetInt32());
         Assert.Equal(RequestEndpoints.DefaultPage, body.GetProperty("limit").GetInt32());
         Assert.Equal(0, body.GetProperty("offset").GetInt32());
+        Assert.True(body.GetProperty("tmdbConfigured").GetBoolean());
         Assert.DoesNotContain("http", raw, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("justwatch", raw, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("logo_path", raw, StringComparison.OrdinalIgnoreCase);
@@ -320,6 +321,29 @@ public sealed class RequestQueueTests
         Assert.Equal(["Stream"], item.GetProperty("providers").EnumerateArray().Select(provider => provider.GetProperty("name").GetString()));
         Assert.Equal(["rating"], Texts(item.GetProperty("gaps")));
         Assert.Equal("unavailable", item.GetProperty("reason").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task A_missing_tmdb_key_is_reported_without_tmdb_calls_and_requests_can_still_be_decided()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        int approved = await AskAsync(kid, 700);
+        int denied = await AskAsync(kid, 701);
+        factory.TmdbKeys.Key = null;
+        int detailCalls = factory.Tmdb.Count("/3/movie/700") + factory.Tmdb.Count("/3/movie/701");
+
+        JsonElement body = await QueueAsync(parent);
+
+        Assert.False(body.GetProperty("tmdbConfigured").GetBoolean());
+        Assert.Equal(2, body.GetProperty("items").GetArrayLength());
+        Assert.All(body.GetProperty("items").EnumerateArray(), item => Assert.Equal(["synopsis", "rating", "providers"], Texts(item.GetProperty("gaps"))));
+        Assert.Equal(detailCalls, factory.Tmdb.Count("/3/movie/700") + factory.Tmdb.Count("/3/movie/701"));
+        Assert.Equal(HttpStatusCode.OK, (await parent.PostAsJsonAsync("/api/v1/requests/approve", new { ids = new[] { approved } })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await parent.PostAsJsonAsync("/api/v1/requests/deny", new { ids = new[] { denied }, reason = "Not now" })).StatusCode);
+        Assert.Empty((await QueueAsync(parent)).GetProperty("items").EnumerateArray());
     }
 
     [Fact]
