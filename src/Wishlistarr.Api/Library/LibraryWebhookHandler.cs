@@ -27,11 +27,11 @@ public sealed class LibraryWebhookHandler(LibraryRefresh refresh, JobRunner jobs
                 return;
             }
 
-            JobStartResult started = await jobs.StartAsync(LibraryIncrementalRefreshJob.JobName, JobRunTrigger.Webhook, ct);
+            JobStartResult started = await jobs.StartAsync(LibraryIncrementalRefreshJob.JobName, JobRunTrigger.Webhook, ct, rerunIfRunning: true);
             switch (started.Status)
             {
                 case JobStartStatus.AlreadyRunning:
-                    logger.LogInformation("An incremental library refresh is already running; a {Event} event relies on it or the next one.", webhookEvent.EventType);
+                    logger.LogInformation("An incremental library refresh is already running; it will run again for a {Event} event.", webhookEvent.EventType);
                     break;
                 case JobStartStatus.NotFound or JobStartStatus.Stopping:
                     logger.LogWarning("The library refresh could not be started: {Status}.", started.Status);
