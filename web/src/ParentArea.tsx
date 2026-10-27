@@ -18,6 +18,7 @@ import TrailerSetting from './TrailerSetting'
 import UpdateNotice from './UpdateNotice'
 import ParentHome from './ParentHome'
 import RequestHistoryPanel from './RequestHistoryPanel'
+import NotificationSettings from './NotificationSettings'
 
 export default function ParentArea() {
   const t = useT()
@@ -59,6 +60,7 @@ export default function ParentArea() {
           <ContentControls />
           <KidDevicesAdmin />
           <TrailerSetting />
+          <NotificationSettings />
           <BackupsAdmin />
           <RequestHistoryPanel />
           <LogViewer />

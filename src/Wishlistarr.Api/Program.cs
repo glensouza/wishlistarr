@@ -13,6 +13,7 @@ using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
+using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
@@ -23,6 +24,7 @@ using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core;
+using Wishlistarr.Core.Kids;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Arr;
 using Wishlistarr.Integrations.Plex;
@@ -78,6 +80,15 @@ builder.Services.AddBackups(builder.Configuration);
 builder.Services.AddUpdateCheck();
 builder.Services.AddWebhooks(builder.Configuration);
 builder.Services.AddWishlistarrSecurity(builder.Configuration);
+builder.Services.AddScoped<NotificationSettings>();
+builder.Services.AddScoped<NotificationLinks>();
+builder.Services.AddScoped<NotificationSender>();
+builder.Services.AddScoped<INotificationTrigger, NotificationTrigger>();
+builder.Services.AddScoped<IParentNotifier, QueuedParentNotifier>();
+builder.Services.AddHttpClient(NotificationSender.ClientName)
+    .RemoveAllLoggers()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddBackgroundJob<NotificationJob>(NotificationJob.JobName, "Delivers parent notifications and retries failed deliveries.", TimeSpan.FromMinutes(1));
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
 builder.Services.AddPlex<StoredAppSettings>();
@@ -150,6 +161,7 @@ app.MapAuth();
 app.MapKid();
 app.MapWebhookReceiver();
 app.MapApiV1();
+app.MapNotificationConfirmation();
 
 if (app.Environment.IsDevelopment())
 {

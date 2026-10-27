@@ -144,6 +144,9 @@ it('asks for the parent sign-in when nobody is signed in', async () => {
     screen.queryByRole('checkbox', { name: 'Let kids play YouTube trailers' }),
   ).toBeNull()
   expect(screen.queryByRole('link', { name: 'About' })).toBeNull()
+  expect(
+    screen.queryByRole('button', { name: 'Manage notifications' }),
+  ).toBeNull()
   expect(await axe(container)).toHaveNoViolations()
 })
 
@@ -165,6 +168,9 @@ it('needs the parent password to leave kid mode on a paired device', async () =>
     await screen.findByRole('heading', { name: 'Leave kid mode' }),
   ).toBeTruthy()
   expect(screen.queryByRole('heading', { name: 'Kid profiles' })).toBeNull()
+  expect(
+    screen.queryByRole('button', { name: 'Manage notifications' }),
+  ).toBeNull()
   expect(await axe(container)).toHaveNoViolations()
 
   await user.type(screen.getByLabelText('Username'), 'parent')
@@ -242,6 +248,9 @@ it('shows the kid profiles and devices to a signed-in parent', async () => {
     await screen.findByRole('heading', { name: 'Kid profiles' }),
   ).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'Kid devices' })).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Manage notifications' }),
+  ).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
   const trailers = (await screen.findByRole('checkbox', {
     name: 'Let kids play YouTube trailers',

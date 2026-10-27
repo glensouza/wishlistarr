@@ -43,7 +43,11 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
             }
 
             HttpResponseMessage asParent = await parent.SendAsync(CreateRequest(method, path));
-            if (asParent.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            if (path == "/notifications/confirm")
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, asParent.StatusCode);
+            }
+            else if (asParent.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 leaks.Add($"{method} {path} returned {(int)asParent.StatusCode} for a parent");
             }

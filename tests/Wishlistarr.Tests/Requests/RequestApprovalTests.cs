@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Wishlistarr.Api.Jobs;
+using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Core.MediaServers;
@@ -521,6 +523,19 @@ public sealed class RequestApprovalTests
         MediaRequest request = Assert.Single(await factory.GetRequestsAsync());
         Assert.Equal(RequestState.Pending, request.State);
         Assert.Single(await factory.GetHistoryAsync(request.Id));
+    }
+
+    [Fact]
+    public async Task A_request_waiting_for_a_parent_starts_notification_delivery_at_once()
+    {
+        using KidRequestApiFactory factory = new();
+        await factory.LinkPlexAsync();
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+
+        await AskAsync(kid, 700);
+
+        JobRun? run = await factory.Services.GetRequiredService<JobRunner>().GetLastRunAsync(NotificationJob.JobName);
+        Assert.Equal(JobRunTrigger.Request, run?.Trigger);
     }
 
     [Fact]
