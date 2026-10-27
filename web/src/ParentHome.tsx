@@ -4,6 +4,7 @@ import {
   listQueue,
   QueueShapeError,
   reasonText,
+  type QueueGap,
   type QueueItem,
   type QueuePage,
 } from './approvalQueue'
@@ -59,13 +60,14 @@ function loadError(error: unknown, t: (key: MessageKey) => string) {
   return t('queue.loadFailed')
 }
 
-function kidOptions(profiles: Kid[], items: QueueItem[]) {
+function kidOptions(profiles: Kid[], items: QueueItem[], held: Kid | null) {
   const names = new Map<number, string>()
-  for (const profile of profiles) names.set(profile.id, profile.name)
+  if (held) names.set(held.id, held.name)
   for (const item of items) {
     if (!names.has(item.kidProfileId))
       names.set(item.kidProfileId, item.kidName)
   }
+  for (const profile of profiles) names.set(profile.id, profile.name)
   return [...names.entries()]
     .map(([id, name]) => ({ id, name }))
     .sort((left, right) =>
@@ -95,15 +97,103 @@ function nextQueueFocus(
   return stillThere ? 'queue-kid' : 'queue-empty'
 }
 
+function restingQueue(page: QueuePage) {
+  if (page.items.length > 0) return 'cards' as const
+  return page.total > 0 ? ('more' as const) : ('empty' as const)
+}
+
+function omitDecided(page: QueuePage, decided: ReadonlySet<number>): QueuePage {
+  const items = page.items.filter((item) => !decided.has(item.id))
+  if (items.length === page.items.length) return page
+  const removed = page.items.length - items.length
+  return {
+    ...page,
+    items,
+    total: Math.max(items.length, page.total - removed),
+  }
+}
+
+function claimNextPage(
+  loadingMore: { current: boolean },
+  refillFocus: { current: boolean },
+) {
+  if (loadingMore.current) return false
+  loadingMore.current = true
+  refillFocus.current = true
+  return true
+}
+
+function rememberDecision(
+  decided: Set<number>,
+  id: number,
+  page: QueuePage | null,
+  loadingMore: { current: boolean },
+  refillFocus: { current: boolean },
+) {
+  decided.add(id)
+  if (page === null || !page.items.some((row) => row.id === id)) {
+    return { next: null as QueuePage | null, reload: false }
+  }
+  const next = omitDecided(page, decided)
+  const reload =
+    restingQueue(next) === 'more' && claimNextPage(loadingMore, refillFocus)
+  return { next, reload }
+}
+
+function decisionFocus(
+  before: QueueItem[],
+  decidedId: number,
+  busy: ReadonlySet<number>,
+  after: QueuePage,
+) {
+  const rest = restingQueue(after)
+  if (rest === 'cards') return nextQueueFocus(before, decidedId, busy)
+  return rest === 'more' ? 'queue-more' : 'queue-empty'
+}
+
+function settleArrival(
+  arrived: QueuePage,
+  decided: ReadonlySet<number>,
+  loadingMore: { current: boolean },
+  refillFocus: { current: boolean },
+) {
+  const next = omitDecided(arrived, decided)
+  const dropped = next.items.length !== arrived.items.length
+  if (
+    dropped &&
+    restingQueue(next) === 'more' &&
+    claimNextPage(loadingMore, refillFocus)
+  ) {
+    return { kind: 'reload' as const }
+  }
+  loadingMore.current = false
+  const focusArrived = refillFocus.current
+  refillFocus.current = false
+  if (!focusArrived)
+    return { kind: 'ready' as const, page: next, focus: 'none' as const }
+  if (next.items.length > 0) {
+    return { kind: 'ready' as const, page: next, focus: 'item' as const }
+  }
+  return {
+    kind: 'ready' as const,
+    page: next,
+    focus:
+      restingQueue(next) === 'more' ? ('more' as const) : ('empty' as const),
+  }
+}
+
 export default function ParentHome() {
   const t = useT()
   const inFlight = useRef(new Set<number>())
   const [attempt, setAttempt] = useState(0)
+  const [queueAttempt, setQueueAttempt] = useState(0)
   const [queueLoad, setQueueLoad] = useState<QueueLoad>({ kind: 'loading' })
   const [profileLoad, setProfileLoad] = useState<ProfileLoad>({
     kind: 'loading',
   })
   const [filter, setFilter] = useState('')
+  const [heldKid, setHeldKid] = useState<Kid | null>(null)
+  const [tmdbReady, setTmdbReady] = useState(true)
   const [notes, setNotes] = useState<Record<number, string>>({})
   const [noteErrors, setNoteErrors] = useState<Record<number, string>>({})
   const [busy, setBusy] = useState<number[]>([])
@@ -111,7 +201,9 @@ export default function ParentHome() {
   const pendingFocus = useRef<string | null>(null)
   const [focusTick, setFocusTick] = useState(0)
   const queueRef = useRef<QueueLoad>({ kind: 'loading' })
-  const queueGeneration = useRef(0)
+  const decidedIds = useRef(new Set<number>())
+  const loadingMore = useRef(false)
+  const refillFocus = useRef(false)
 
   function focusOn(id: string) {
     pendingFocus.current = id
@@ -124,30 +216,73 @@ export default function ParentHome() {
   }
 
   function retry() {
+    loadingMore.current = false
+    refillFocus.current = false
     showQueue({ kind: 'loading' })
     setProfileLoad({ kind: 'loading' })
     setAttempt((count) => count + 1)
   }
 
+  function beginNextPage() {
+    if (!claimNextPage(loadingMore, refillFocus)) return false
+    showQueue({ kind: 'loading' })
+    setQueueAttempt((count) => count + 1)
+    focusOn('queue-loading')
+    return true
+  }
+
+  function loadMore() {
+    loadingMore.current = false
+    beginNextPage()
+  }
+
   useEffect(() => {
     let current = true
     listQueue(kidId(filter)).then(
-      (page) => {
+      (arrived) => {
         if (!current) return
-        queueGeneration.current += 1
-        queueRef.current = { kind: 'ready', page }
+        const settled = settleArrival(
+          arrived,
+          decidedIds.current,
+          loadingMore,
+          refillFocus,
+        )
+        if (settled.kind === 'reload') {
+          queueRef.current = { kind: 'loading' }
+          setQueueLoad(queueRef.current)
+          setQueueAttempt((count) => count + 1)
+          pendingFocus.current = 'queue-loading'
+          setFocusTick((tick) => tick + 1)
+          return
+        }
+        setTmdbReady(settled.page.tmdbConfigured)
+        queueRef.current = { kind: 'ready', page: settled.page }
         setQueueLoad(queueRef.current)
+        if (settled.focus === 'none') return
+        pendingFocus.current =
+          settled.focus === 'item'
+            ? `queue-approve-${settled.page.items[0].id}`
+            : settled.focus === 'more'
+              ? 'queue-more'
+              : 'queue-empty'
+        setFocusTick((tick) => tick + 1)
       },
       (error: unknown) => {
         if (!current) return
+        loadingMore.current = false
+        const focusArrived = refillFocus.current
+        refillFocus.current = false
         queueRef.current = { kind: 'error', error }
         setQueueLoad(queueRef.current)
+        if (!focusArrived) return
+        pendingFocus.current = 'queue-load-error'
+        setFocusTick((tick) => tick + 1)
       },
     )
     return () => {
       current = false
     }
-  }, [attempt, filter])
+  }, [attempt, queueAttempt, filter])
 
   useEffect(() => {
     let current = true
@@ -177,11 +312,26 @@ export default function ParentHome() {
 
   const page = queueLoad.kind === 'ready' ? queueLoad.page : null
   const profiles = profileLoad.kind === 'ready' ? profileLoad.profiles : []
-  const options = kidOptions(profiles, page?.items ?? [])
-  const shown = page === null ? [] : page.items
+  const held = heldKid && String(heldKid.id) === filter ? heldKid : null
+  const options = kidOptions(profiles, page?.items ?? [], held)
   const selected = options.find((kid) => String(kid.id) === filter) ?? null
   const activity =
     filter === '' ? options : options.filter((kid) => String(kid.id) === filter)
+  const tmdbOff = page ? !page.tmdbConfigured : !tmdbReady
+  const rest = page === null ? null : restingQueue(page)
+
+  function chooseFilter(value: string) {
+    loadingMore.current = false
+    refillFocus.current = false
+    setFilter(value)
+    if (value === '') {
+      setHeldKid(null)
+    } else {
+      const known = options.find((kid) => String(kid.id) === value)
+      if (known) setHeldKid(known)
+    }
+    showQueue({ kind: 'loading' })
+  }
 
   async function decide(item: QueueItem, approving: boolean) {
     if (inFlight.current.has(item.id) || queueRef.current.kind !== 'ready')
@@ -197,7 +347,6 @@ export default function ParentHome() {
       return
     }
 
-    const generation = queueGeneration.current
     inFlight.current.add(item.id)
     setBusy((current) =>
       current.includes(item.id) ? current : [...current, item.id],
@@ -229,25 +378,29 @@ export default function ParentHome() {
               ? t(approving ? 'queue.approved' : 'queue.denied', { title })
               : t(decisionResultKey.alreadyDecided),
         })
-        const latest = queueRef.current
-        if (latest.kind !== 'ready' || queueGeneration.current !== generation) {
-          focusOn('queue-kid')
+        const ready =
+          queueRef.current.kind === 'ready' ? queueRef.current.page : null
+        const settled = rememberDecision(
+          decidedIds.current,
+          item.id,
+          ready,
+          loadingMore,
+          refillFocus,
+        )
+        if (settled.reload) {
+          showQueue({ kind: 'loading' })
+          setQueueAttempt((count) => count + 1)
+          focusOn('queue-loading')
           return
         }
-        const target = nextQueueFocus(
-          latest.page.items,
-          item.id,
-          inFlight.current,
-        )
-        showQueue({
-          kind: 'ready',
-          page: {
-            ...latest.page,
-            total: Math.max(0, latest.page.total - 1),
-            items: latest.page.items.filter((row) => row.id !== item.id),
-          },
-        })
-        focusOn(target)
+        if (settled.next && ready) {
+          showQueue({ kind: 'ready', page: settled.next })
+          focusOn(
+            decisionFocus(ready.items, item.id, inFlight.current, settled.next),
+          )
+          return
+        }
+        focusOn('queue-kid')
         return
       }
       setNotice({
@@ -279,14 +432,12 @@ export default function ParentHome() {
       </nav>
       <section aria-labelledby="approval-queue-heading">
         <h2 id="approval-queue-heading">{t('queue.heading')}</h2>
+        {tmdbOff && <p role="status">{t('queue.tmdbOff')}</p>}
         <label htmlFor="queue-kid">{t('queue.filter')}</label>
         <select
           id="queue-kid"
           value={filter}
-          onChange={(event) => {
-            setFilter(event.target.value)
-            showQueue({ kind: 'loading' })
-          }}
+          onChange={(event) => chooseFilter(event.target.value)}
         >
           <option value="">{t('queue.filterAll')}</option>
           {options.map((kid) => (
@@ -302,35 +453,48 @@ export default function ParentHome() {
           </p>
         )}
         {queueLoad.kind === 'loading' && (
-          <p role="status">{t('queue.loading')}</p>
+          <p id="queue-loading" role="status" tabIndex={-1}>
+            {t('queue.loading')}
+          </p>
         )}
         {queueLoad.kind === 'error' && (
-          <div role="alert">
+          <div id="queue-load-error" role="alert" tabIndex={-1}>
             <p>{loadError(queueLoad.error, t)}</p>
             <button type="button" onClick={retry}>
               {t('queue.retry')}
             </button>
           </div>
         )}
-        {page !== null && page.total > page.items.length && (
-          <p>
-            {t('queue.more', { count: page.total - page.items.length })}{' '}
-            <a href="#requests-heading">{t('queue.actionRequests')}</a>
-          </p>
+        {page !== null &&
+          rest === 'cards' &&
+          page.total > page.items.length && (
+            <p>
+              {t('queue.more', { count: page.total - page.items.length })}{' '}
+              <a href="#requests-heading">{t('queue.actionRequests')}</a>
+            </p>
+          )}
+        {page !== null && rest === 'more' && (
+          <div>
+            <p>{t('queue.moreWaiting', { count: page.total })}</p>
+            <button type="button" id="queue-more" onClick={loadMore}>
+              {t('queue.loadMore')}
+            </button>
+          </div>
         )}
-        {page !== null && shown.length === 0 && (
+        {page !== null && rest === 'empty' && (
           <p id="queue-empty" tabIndex={-1}>
             {selected
               ? t('queue.emptyKid', { name: selected.name })
               : t('queue.empty')}
           </p>
         )}
-        {page !== null && shown.length > 0 && (
+        {page !== null && rest === 'cards' && (
           <div className="approval-queue">
-            {shown.map((item) => (
+            {page.items.map((item) => (
               <QueueCard
                 key={item.id}
                 item={item}
+                tmdbConfigured={page.tmdbConfigured}
                 note={notes[item.id] ?? ''}
                 noteError={noteErrors[item.id] ?? null}
                 waiting={busy.includes(item.id)}
@@ -368,6 +532,7 @@ export default function ParentHome() {
 
 function QueueCard({
   item,
+  tmdbConfigured,
   note,
   noteError,
   waiting,
@@ -376,6 +541,7 @@ function QueueCard({
   onDeny,
 }: {
   item: QueueItem
+  tmdbConfigured: boolean
   note: string
   noteError: string | null
   waiting: boolean
@@ -385,6 +551,7 @@ function QueueCard({
 }) {
   const t = useT()
   const title = displayTitle(item, t)
+  const hide = (gap: QueueGap) => !tmdbConfigured && item.gaps.includes(gap)
   const names = item.providers
     .map((provider) => provider.name.trim())
     .filter((name) => name.length > 0)
@@ -404,45 +571,54 @@ function QueueCard({
         <p>{t('queue.askedAgain', { count: item.requestCount })}</p>
       )}
       <p>{reasonText(item.reason, t)}</p>
-      {item.gaps.includes('keywords') && <p>{t('queue.keywordsFailed')}</p>}
-      <p>
-        <span className="muted">{t('queue.synopsis')}</span>{' '}
-        {item.gaps.includes('synopsis')
-          ? t('queue.synopsisFailed')
-          : item.overview && item.overview.trim() !== ''
-            ? item.overview
-            : t('queue.synopsisNone')}
-      </p>
-      <p>
-        {item.gaps.includes('rating')
-          ? t('queue.ratingFailed')
-          : item.rating && item.rating.trim() !== ''
-            ? t('queue.ratingValue', { rating: item.rating })
-            : t('queue.ratingNone')}
-      </p>
-      {item.descriptors.length > 0 ? (
-        <ul aria-label={t('queue.descriptors')}>
-          {item.descriptors.map((descriptor) => (
-            <li key={descriptor}>{descriptor}</li>
-          ))}
-        </ul>
-      ) : (
-        <p>{t('queue.descriptorsNone')}</p>
+      {!hide('keywords') && item.gaps.includes('keywords') && (
+        <p>{t('queue.keywordsFailed')}</p>
       )}
-      {item.gaps.includes('providers') ? (
-        <p>{t('queue.providersFailed')}</p>
-      ) : names.length === 0 ? (
-        <p>{t('queue.providersNone')}</p>
-      ) : (
-        <WatchProviders providers={item.providers} />
+      {!hide('synopsis') && (
+        <p>
+          <span className="muted">{t('queue.synopsis')}</span>{' '}
+          {item.gaps.includes('synopsis')
+            ? t('queue.synopsisFailed')
+            : item.overview && item.overview.trim() !== ''
+              ? item.overview
+              : t('queue.synopsisNone')}
+        </p>
       )}
-      {item.gaps.includes('trailer') ? (
-        <p>{t('queue.trailerFailed')}</p>
-      ) : (
-        isYoutubeId(item.trailerKey) && (
-          <Trailer videoId={item.trailerKey} backdropUrl={null} />
-        )
+      {!hide('rating') && (
+        <p>
+          {item.gaps.includes('rating')
+            ? t('queue.ratingFailed')
+            : item.rating && item.rating.trim() !== ''
+              ? t('queue.ratingValue', { rating: item.rating })
+              : t('queue.ratingNone')}
+        </p>
       )}
+      {!hide('rating') &&
+        (item.descriptors.length > 0 ? (
+          <ul aria-label={t('queue.descriptors')}>
+            {item.descriptors.map((descriptor) => (
+              <li key={descriptor}>{descriptor}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>{t('queue.descriptorsNone')}</p>
+        ))}
+      {!hide('providers') &&
+        (item.gaps.includes('providers') ? (
+          <p>{t('queue.providersFailed')}</p>
+        ) : names.length === 0 ? (
+          <p>{t('queue.providersNone')}</p>
+        ) : (
+          <WatchProviders providers={item.providers} />
+        ))}
+      {!hide('trailer') &&
+        (item.gaps.includes('trailer') ? (
+          <p>{t('queue.trailerFailed')}</p>
+        ) : (
+          isYoutubeId(item.trailerKey) && (
+            <Trailer videoId={item.trailerKey} backdropUrl={null} />
+          )
+        ))}
       <label htmlFor={`queue-note-${item.id}`}>
         {t('queue.note', { name: item.kidName })}
       </label>

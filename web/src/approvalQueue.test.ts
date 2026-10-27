@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { readQueue } from './approvalQueue'
+import { QueueShapeError, readQueue } from './approvalQueue'
 
 const item = {
   id: 1,
@@ -38,4 +38,23 @@ it('skips a gap name it does not know and still reads the page', () => {
 
 it('reads a keyword gap', () => {
   expect(readQueue(queue(['keywords'])).items[0].gaps).toEqual(['keywords'])
+})
+
+it('treats a missing TMDB flag as configured', () => {
+  expect(readQueue(queue([])).tmdbConfigured).toBe(true)
+})
+
+it('reads the TMDB flag when the server sends it', () => {
+  expect(
+    readQueue({ ...queue([]), tmdbConfigured: false }).tmdbConfigured,
+  ).toBe(false)
+  expect(readQueue({ ...queue([]), tmdbConfigured: true }).tmdbConfigured).toBe(
+    true,
+  )
+})
+
+it('rejects a TMDB flag that is not true or false', () => {
+  expect(() => readQueue({ ...queue([]), tmdbConfigured: 'no' })).toThrow(
+    QueueShapeError,
+  )
 })

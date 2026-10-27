@@ -568,6 +568,8 @@ export const en = {
   'queue.filterAll': 'All kids',
   'queue.empty': 'Nothing is waiting for approval.',
   'queue.emptyKid': 'Nothing is waiting for {name}.',
+  'queue.tmdbOff':
+    'TMDB is not configured, so title details are not loaded. You can still approve or deny each request.',
   'queue.untitled': 'A request',
   'queue.synopsis': 'Synopsis',
   'queue.synopsisNone': 'No synopsis is available.',
@@ -637,6 +639,8 @@ export const en = {
     'Why this title needs approval could not be checked. You can still approve or deny it.',
   'queue.more':
     '{count} more are waiting. Decide these, then see the rest under',
+  'queue.moreWaiting': '{count} more are waiting.',
+  'queue.loadMore': 'Load the next requests',
   'queue.profilesFailed': 'Kid profiles could not be loaded.',
   'queue.askedAgain': 'Asked {count} times.',
 } as const

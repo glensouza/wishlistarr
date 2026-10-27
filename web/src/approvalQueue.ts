@@ -61,6 +61,7 @@ export type QueuePage = {
   total: number
   limit: number
   offset: number
+  tmdbConfigured: boolean
 }
 
 type Translate = (
@@ -141,11 +142,17 @@ export function readQueue(body: unknown): QueuePage {
   }
   const items = body.items.map(withKnownGaps)
   if (!items.every(isItem)) throw new QueueShapeError()
+  let tmdbConfigured = true
+  if ('tmdbConfigured' in body) {
+    if (typeof body.tmdbConfigured !== 'boolean') throw new QueueShapeError()
+    tmdbConfigured = body.tmdbConfigured
+  }
   return {
     items,
     total: body.total,
     limit: body.limit,
     offset: body.offset,
+    tmdbConfigured,
   }
 }
 
