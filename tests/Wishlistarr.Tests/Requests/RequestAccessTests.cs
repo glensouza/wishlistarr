@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -902,11 +903,12 @@ public sealed class RequestAccessTests
     [Fact]
     public async Task A_revoke_whose_removal_hangs_ends_failed_at_the_deadline_and_keeps_the_label()
     {
-        using DeadlineFactory factory = new(MatrixIndex(), TimeSpan.FromMilliseconds(300));
+        using DeadlineFactory factory = new(MatrixIndex(), TimeSpan.FromMilliseconds(300), tightenLater: true);
         await factory.LinkPlexAsync();
         (_, int ada) = await factory.SignInKidAsync();
         HttpClient parent = await factory.CreateSignedInClientAsync();
         int id = (await GrantAsync(parent, ada, 603)).GetProperty("id").GetInt32();
+        factory.Tighten();
         TaskCompletionSource hang = new(TaskCreationOptions.RunContinuationsAsynchronously);
         factory.Plex.Delay = request => request.Method == "PUT" ? hang.Task : Task.CompletedTask;
 
@@ -1203,12 +1205,18 @@ public sealed class RequestAccessTests
         return index;
     }
 
-    private sealed class DeadlineFactory(FakeLibraryIndex index, TimeSpan labelTimeout) : KidRequestApiFactory(index)
+    private sealed class DeadlineFactory(FakeLibraryIndex index, TimeSpan labelTimeout, bool tightenLater = false) : KidRequestApiFactory(index)
     {
+        public void Tighten() =>
+            this.Services.GetRequiredService<IOptions<ApprovalOptions>>().Value.LabelTimeout = labelTimeout;
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
-            builder.ConfigureTestServices(services => services.Configure<ApprovalOptions>(options => options.LabelTimeout = labelTimeout));
+            if (!tightenLater)
+            {
+                builder.ConfigureTestServices(services => services.Configure<ApprovalOptions>(options => options.LabelTimeout = labelTimeout));
+            }
         }
     }
 
