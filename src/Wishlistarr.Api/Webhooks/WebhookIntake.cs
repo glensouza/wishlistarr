@@ -55,7 +55,7 @@ public sealed class WebhookIntake(
             return WebhookIntakeResult.Duplicate;
         }
 
-        await runner.StartAsync(WebhookEventProcessor.JobName, JobRunTrigger.Webhook, CancellationToken.None);
+        await runner.StartAsync(WebhookEventProcessor.JobName, JobRunTrigger.Webhook, CancellationToken.None, rerunIfRunning: true);
         return WebhookIntakeResult.Accepted;
     }
 }
