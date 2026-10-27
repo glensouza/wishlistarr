@@ -96,6 +96,32 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         return result;
     }
 
+    // Puts back a label the ledger already owns on the item's guid. It never creates a ledger row, so a label that was revoked in the meantime stays off.
+    public async Task<LabelWriteResult> RestoreAsync(string itemId, string label, CancellationToken ct = default)
+    {
+        bool owned = true;
+        LabelWriteResult result = await this.WriteAsync(
+            itemId,
+            async (item, token) =>
+            {
+                OwnedLabel? row = await this.FindOwnedAsync(item, label, token);
+                owned = row is not null;
+                return row is null || item.Labels.Contains(label, LabelComparer)
+                    ? null
+                    : [.. item.Labels, row.Label];
+            },
+            item => item.Labels.Contains(label, LabelComparer),
+            item => this.PointAtAsync(item, label),
+            (_, _) => Task.CompletedTask,
+            LabelWriteOutcome.Added,
+            LabelWriteOutcome.AlreadyPresent,
+            ct);
+
+        return result.Outcome == LabelWriteOutcome.AlreadyPresent && !owned
+            ? result with { Outcome = LabelWriteOutcome.NotOwned }
+            : result;
+    }
+
     public async Task<ProfileLabels?> FindProfileLabelsAsync(string itemId, int kidProfileId, CancellationToken ct = default)
     {
         MediaItemLabels? item = await server.GetLabelsAsync(itemId, ct);
@@ -226,6 +252,16 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 await db.SaveChangesAsync(CancellationToken.None);
             }
         };
+    }
+
+    private async Task<Func<Task>> PointAtAsync(MediaItemLabels item, string label)
+    {
+        string serverId = item.ServerId;
+        string guid = item.Guid;
+        await db.OwnedLabels
+            .Where(owned => owned.ServerId == serverId && owned.Guid == guid && owned.Label == label)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(owned => owned.RatingKey, item.Id), CancellationToken.None);
+        return () => Task.CompletedTask;
     }
 
     private async Task ForgetAsync(MediaItemLabels item, string label, CancellationToken ct)
