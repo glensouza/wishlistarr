@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -208,6 +214,87 @@ it('goes back to the picker with Not me', async () => {
   expect(
     await screen.findByRole('heading', { name: 'Who is watching?' }),
   ).toBeTruthy()
+})
+
+function place(
+  element: HTMLElement,
+  left: number,
+  top: number,
+  width = 160,
+  height = 48,
+) {
+  const rect = {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON() {
+      return rect
+    },
+  }
+  element.getBoundingClientRect = () => rect
+}
+
+it('moves between profiles with the arrow keys and signs in with Enter', async () => {
+  const user = userEvent.setup()
+  signInResponse = () => Response.json(profiles[1])
+  renderApp()
+  const ada = await screen.findByRole('button', { name: 'Sign in as Ada' })
+  const bo = screen.getByRole('button', { name: 'Sign in as Bo' })
+  place(ada, 0, 0)
+  place(bo, 220, 0)
+  ada.focus()
+  await user.keyboard('{ArrowRight}')
+  expect(document.activeElement).toBe(bo)
+  await user.keyboard('{Enter}')
+  expect(
+    await screen.findByRole('heading', { name: 'Welcome, Bo!' }),
+  ).toBeTruthy()
+  const signIn = calls.find((call) => call.path === '/api/v1/kid/signin')
+  expect(signIn?.body).toEqual({ profileId: 2 })
+})
+
+it('moves from the PIN heading to the keys with the arrow keys', async () => {
+  const user = userEvent.setup()
+  renderApp()
+  await user.click(
+    await screen.findByRole('button', { name: 'Sign in as Ada' }),
+  )
+  const heading = await screen.findByRole('heading', {
+    name: 'Hi Ada! Enter your PIN',
+  })
+  expect(heading.tabIndex).toBe(-1)
+  const key = (name: string) => screen.getByRole('button', { name })
+  place(heading, 16, 0, 248, 40)
+  const columns = [16, 104, 192]
+  const rows = [72, 152, 232, 312]
+  const grid = [
+    ['1', '2', '3'],
+    ['4', '5', '6'],
+    ['7', '8', '9'],
+    ['Delete last digit', '0', 'Go'],
+  ]
+  grid.forEach((labels, row) => {
+    labels.forEach((label, column) => {
+      place(key(label), columns[column], rows[row], 72, 64)
+    })
+  })
+  place(key('Not me'), 104, 400, 160, 48)
+  heading.focus()
+  fireEvent.keyDown(heading, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(key('2'))
+  fireEvent.keyDown(key('2'), { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(key('3'))
+  fireEvent.keyDown(key('3'), { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(key('2'))
+  fireEvent.keyDown(key('2'), { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(key('5'))
+  fireEvent.keyDown(key('5'), { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(key('2'))
 })
 
 it('signs out back to the picker', async () => {

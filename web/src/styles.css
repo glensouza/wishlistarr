@@ -32,9 +32,23 @@ a {
   color: var(--color-primary);
 }
 
-:focus-visible {
-  outline: 3px solid var(--color-focus);
-  outline-offset: 3px;
+/* Older TV browsers lack :focus-visible, so :focus always draws the ring and the next rule clears it for pointer focus. */
+:focus {
+  outline: 0.1875rem solid var(--color-focus);
+  outline-offset: 0.1875rem;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.kid-spatial-focus:focus {
+  outline: 0.1875rem solid var(--color-focus);
+  outline-offset: 0.1875rem;
+}
+
+.kid-spatial-focus {
+  scroll-margin: 1rem;
 }
 
 .visually-hidden {
@@ -859,4 +873,10 @@ fieldset label:has(input[type='checkbox']) {
 
 .history-profile {
   margin-top: var(--space-3);
+}
+
+@media (min-width: 1920px) {
+  html[data-kid-scale] {
+    font-size: clamp(1.25rem, 1.0416666667vw, 2.5rem);
+  }
 }

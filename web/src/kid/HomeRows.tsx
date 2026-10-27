@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useT } from '../i18n'
 import { getHome, requestTitle, type HomeItem, type HomeRow } from './kidApi'
 
@@ -36,50 +36,6 @@ export default function HomeRows() {
     return row.genreName ?? t('home.genreOther', { id: row.genreId ?? 0 })
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (
-      event.key !== 'ArrowLeft' &&
-      event.key !== 'ArrowRight' &&
-      event.key !== 'ArrowUp' &&
-      event.key !== 'ArrowDown'
-    ) {
-      return
-    }
-    const target = event.target
-    if (!(target instanceof HTMLElement) || target.closest('input, textarea')) {
-      return
-    }
-    const current = target.closest<HTMLElement>('.home-ask')
-    const row = target.closest<HTMLElement>('[data-home-row]')
-    const container = event.currentTarget
-    if (!current || !row) return
-    const rowsInOrder = [
-      ...container.querySelectorAll<HTMLElement>('[data-home-row]'),
-    ]
-    const inRow = [...row.querySelectorAll<HTMLElement>('.home-ask')]
-    const rowIndex = rowsInOrder.indexOf(row)
-    const indexInRow = inRow.indexOf(current)
-    let next: HTMLElement | null = null
-    if (event.key === 'ArrowRight') next = inRow[indexInRow + 1] ?? null
-    if (event.key === 'ArrowLeft') next = inRow[indexInRow - 1] ?? null
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      const destination =
-        rowsInOrder[rowIndex + (event.key === 'ArrowDown' ? 1 : -1)]
-      if (destination) {
-        const buttons = [
-          ...destination.querySelectorAll<HTMLElement>('.home-ask'),
-        ]
-        next = buttons[Math.min(indexInRow, buttons.length - 1)] ?? null
-      }
-    }
-    if (!next) return
-    event.preventDefault()
-    next.focus()
-    if (typeof next.scrollIntoView === 'function') {
-      next.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    }
-  }
-
   if (failed) {
     return (
       <div role="alert">
@@ -107,9 +63,9 @@ export default function HomeRows() {
   }
 
   return (
-    <div className="home-rows" onKeyDown={onKeyDown}>
+    <div className="home-rows">
       {rows.map((row) => (
-        <section key={row.id} className="home-row" data-home-row>
+        <section key={row.id} className="home-row">
           <h2>{rowTitle(row)}</h2>
           <ul className="home-strip">
             {row.items.map((item) => (

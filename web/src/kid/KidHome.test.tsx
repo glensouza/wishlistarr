@@ -57,6 +57,27 @@ const rows = [
 
 let homeStatus = 200
 let homeBody: unknown = { rows }
+let wishlistItems: {
+  id: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string | null
+  state: string
+  note: string | null
+  plex: { webUrl: string } | null
+}[] = []
+let historyPage:
+  | {
+      id: number
+      requestId: number
+      kind: 'movie' | 'show'
+      tmdbId: number
+      title: string
+      action: string
+      at: string
+      note: string | null
+    }[]
+  | null = null
 let requests: {
   path: string
   method: string
@@ -67,6 +88,8 @@ let requests: {
 beforeEach(() => {
   homeStatus = 200
   homeBody = { rows }
+  wishlistItems = []
+  historyPage = null
   requests = []
   vi.stubGlobal(
     'fetch',
@@ -88,7 +111,14 @@ beforeEach(() => {
         headers: new Headers(init?.headers),
       })
       if (path === '/api/v1/kid/wishlist') {
-        return Response.json({ remaining: null, resetsAt: null, items: [] })
+        return Response.json({
+          remaining: null,
+          resetsAt: null,
+          items: wishlistItems,
+        })
+      }
+      if (path.startsWith('/api/v1/kid/requests/history') && historyPage) {
+        return Response.json(historyPage)
       }
       if (path === '/api/v1/kid/home') {
         return Response.json(homeBody, { status: homeStatus })
@@ -114,6 +144,53 @@ function renderHome() {
       </KidSessionProvider>
     </MemoryRouter>,
   )
+}
+
+function place(
+  element: HTMLElement,
+  left: number,
+  top: number,
+  width = 160,
+  height = 48,
+) {
+  const rect = {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON() {
+      return rect
+    },
+  }
+  element.getBoundingClientRect = () => rect
+}
+
+function placeHomeCards() {
+  const rows = document.querySelectorAll('.home-row')
+  rows.forEach((row, rowIndex) => {
+    row.querySelectorAll<HTMLElement>('.home-ask').forEach((button, column) => {
+      place(button, column * 200, rowIndex * 240)
+    })
+  })
+}
+
+function placeHomeCardsStaggered() {
+  document.querySelectorAll('.home-row').forEach((row, rowIndex) => {
+    row.querySelectorAll<HTMLElement>('.home-ask').forEach((button, column) => {
+      const shorterCard = column % 2 === 1
+      place(
+        button,
+        column * 188 + rowIndex * 24,
+        rowIndex * 340 + (shorterCard ? 44 : 0),
+        136,
+        56,
+      )
+    })
+  })
 }
 
 it('shows allowed rows with lazy posters, a reserved frame and a library badge', async () => {
@@ -164,6 +241,8 @@ it('moves focus across a row and between rows with the arrow keys', async () => 
     await screen.findAllByRole('button', { name: 'Ask for Tiny Tale' })
   )[0]
   const second = screen.getAllByRole('button', { name: 'Ask for Bluey' })[0]
+  placeHomeCards()
+  expect(document.documentElement.getAttribute('data-kid-scale')).toBe('')
   first.focus()
   fireEvent.keyDown(first, { key: 'ArrowRight' })
   expect(document.activeElement).toBe(second)
@@ -174,6 +253,141 @@ it('moves focus across a row and between rows with the arrow keys', async () => 
   expect(document.activeElement).toBe(animationAsk)
   fireEvent.keyDown(animationAsk, { key: 'ArrowLeft' })
   expect(document.activeElement).toBe(animationAsk)
+})
+
+it('keeps up and down on the column when ask buttons sit at different heights', async () => {
+  homeBody = {
+    rows: [
+      {
+        id: 'popular',
+        genreId: null,
+        genreName: null,
+        items: [tiny, bluey],
+      },
+      {
+        id: 'genre:16',
+        genreId: 16,
+        genreName: 'Animation',
+        items: [tiny, bluey],
+      },
+    ],
+  }
+  renderHome()
+  const [topTiny, lowerTiny] = await screen.findAllByRole('button', {
+    name: 'Ask for Tiny Tale',
+  })
+  const [topBluey, lowerBluey] = screen.getAllByRole('button', {
+    name: 'Ask for Bluey',
+  })
+  placeHomeCardsStaggered()
+
+  topTiny.focus()
+  fireEvent.keyDown(topTiny, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(lowerTiny)
+  fireEvent.keyDown(lowerTiny, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(topTiny)
+  fireEvent.keyDown(topTiny, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(topBluey)
+  fireEvent.keyDown(topBluey, { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(topTiny)
+  topBluey.focus()
+  fireEvent.keyDown(topBluey, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(lowerBluey)
+  fireEvent.keyDown(lowerBluey, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(topBluey)
+  fireEvent.keyDown(topBluey, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(topBluey)
+  lowerTiny.focus()
+  fireEvent.keyDown(lowerTiny, { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(lowerTiny)
+})
+
+it('moves from the wishlist to the request tracker and on to sign out', async () => {
+  wishlistItems = [
+    {
+      id: 2,
+      kind: 'movie',
+      tmdbId: 700,
+      title: 'Ready Film',
+      state: 'ready',
+      note: null,
+      plex: {
+        webUrl:
+          'https://app.plex.tv/desktop/#!/server/machine/details?key=%2Flibrary%2Fmetadata%2F102',
+      },
+    },
+  ]
+  historyPage = Array.from({ length: 50 }, (_, index) => ({
+    id: index + 1,
+    requestId: 8,
+    kind: 'movie' as const,
+    tmdbId: 129,
+    title: `Title ${index + 1}`,
+    action: 'asked',
+    at: '2026-10-22T00:00:00Z',
+    note: null,
+  }))
+  renderHome()
+  const watch = await screen.findByRole('link', {
+    name: 'Watch Ready Film in Plex',
+  })
+  const more = await screen.findByRole('button', { name: 'Show more' })
+  const signOut = screen.getByRole('button', { name: 'Switch profile' })
+  place(watch, 24, 80, 260, 48)
+  place(more, 16, 320, 168, 56)
+  place(signOut, 16, 520, 188, 56)
+  watch.focus()
+  fireEvent.keyDown(watch, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(more)
+  fireEvent.keyDown(more, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(signOut)
+  fireEvent.keyDown(signOut, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(more)
+  fireEvent.keyDown(more, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(watch)
+})
+
+it('moves from the last title to sign out when that control is the nearest one below', async () => {
+  renderHome()
+  const last = (
+    await screen.findAllByRole('button', { name: 'Ask for Bluey' })
+  ).at(-1)
+  const signOut = screen.getByRole('button', { name: 'Switch profile' })
+  const search = screen.getByRole('searchbox')
+  if (!last) throw new Error('missing row button')
+  place(last, 0, 0)
+  place(search, 400, 0)
+  place(signOut, 0, 160)
+  last.focus()
+  fireEvent.keyDown(last, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(signOut)
+  fireEvent.keyDown(signOut, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(last)
+})
+
+it('keeps horizontal arrows inside the search field and leaves it vertically', async () => {
+  renderHome()
+  const search = await screen.findByRole('searchbox')
+  const signOut = screen.getByRole('button', { name: 'Switch profile' })
+  place(search, 0, 0, 280, 48)
+  place(signOut, 0, 160)
+  search.focus()
+  const right = new KeyboardEvent('keydown', {
+    key: 'ArrowRight',
+    bubbles: true,
+    cancelable: true,
+  })
+  search.dispatchEvent(right)
+  expect(right.defaultPrevented).toBe(false)
+  expect(document.activeElement).toBe(search)
+  const down = new KeyboardEvent('keydown', {
+    key: 'ArrowDown',
+    bubbles: true,
+    cancelable: true,
+  })
+  search.dispatchEvent(down)
+  expect(down.defaultPrevented).toBe(true)
+  expect(document.activeElement).toBe(signOut)
 })
 
 it('asks for a title from a home row', async () => {
