@@ -25,6 +25,8 @@ const waiting: ParentRequest = {
   denialReason: null,
   canRevoke: false,
   labelMayRemain: false,
+  canRetry: false,
+  dispatchFailure: null,
 }
 
 const second: ParentRequest = {
@@ -551,4 +553,67 @@ it('says when a revoked label belongs to another profile now', async () => {
     await screen.findByRole('button', { name: 'Remove Spirited Away' }),
   )
   expect(await screen.findByText(/now belongs to another profile/)).toBeTruthy()
+})
+
+it('explains a failed send and retries it only when it can be retried', async () => {
+  stuck = [
+    {
+      ...waiting,
+      id: 30,
+      state: 'failed',
+      title: 'Down backend',
+      canRetry: true,
+      dispatchFailure: 'unavailable',
+    },
+    {
+      ...waiting,
+      id: 31,
+      state: 'failed',
+      title: 'Not set up',
+      canRetry: true,
+      dispatchFailure: 'notConfigured',
+    },
+    { ...waiting, id: 32, state: 'failed', title: 'Label trouble' },
+  ]
+  render(<RequestsAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Show them (3)' }))
+
+  expect(await screen.findByText(/did not accept it/)).toBeTruthy()
+  expect(screen.getByText(/is not set up/)).toBeTruthy()
+  expect(
+    screen.queryByRole('button', { name: 'Try Label trouble again' }),
+  ).toBeNull()
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Try Down backend again' }),
+  )
+
+  expect(
+    await screen.findByText('Down backend is being sent again.'),
+  ).toBeTruthy()
+  expect(writes()).toHaveLength(1)
+  expect(writes()[0].path).toBe('/api/v1/requests/retry')
+  expect(writes()[0].body).toEqual({ ids: [30], reason: null })
+})
+
+it('says when a retry did not go through', async () => {
+  stuck = [
+    {
+      ...waiting,
+      id: 33,
+      state: 'failed',
+      title: 'Stubborn',
+      canRetry: true,
+      dispatchFailure: 'unavailable',
+    },
+  ]
+  failing = [33]
+  render(<RequestsAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Show them (1)' }))
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Try Stubborn again' }),
+  )
+
+  expect(
+    await screen.findByText('That title could not be sent again.'),
+  ).toBeTruthy()
 })

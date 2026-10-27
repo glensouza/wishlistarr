@@ -139,11 +139,6 @@ public sealed class SonarrBackend(ArrClient client, ArrConnectionStore store) : 
             throw new ArgumentException("Sonarr only handles shows.", nameof(request));
         }
 
-        if (request.Seasons.Count == 0)
-        {
-            throw new ArgumentException("At least one season is required.", nameof(request));
-        }
-
         JsonObject lookup = await this.LookupAsync(connection, request.TmdbId, ct);
         int tvdbId = ArrJson.Int(lookup["tvdbId"]) ?? 0;
         if (tvdbId <= 0)
@@ -151,35 +146,61 @@ public sealed class SonarrBackend(ArrClient client, ArrConnectionStore store) : 
             throw new ArrException("Sonarr has no TVDB id for that show, so it cannot be added.");
         }
 
-        if (SonarrMapper.MatchedSeasons(lookup, request.Seasons).Count == 0)
+        IReadOnlyList<int> seasons = request.Seasons.Count > 0 ? request.Seasons : SonarrMapper.AllSeasons(lookup);
+        if (SonarrMapper.MatchedSeasons(lookup, seasons).Count == 0)
         {
             throw new ArrException("Sonarr does not list any of the requested seasons.");
         }
 
-        JsonArray existing = await this.GetArrayAsync(connection, $"api/v3/series?tvdbId={Number(tvdbId)}", ct);
-        if (existing.FirstOrDefault() is JsonObject series && ArrJson.Int(series["id"]) is { } seriesId)
+        if (await this.FindSeriesAsync(connection, tvdbId, ct) is { } present)
         {
-            if (SonarrMapper.ApplyToExisting(series, tagIds, request.Seasons))
-            {
-                await this.SendAsync(connection, HttpMethod.Put, $"api/v3/series/{Number(seriesId)}", series, ct);
-            }
-
-            foreach (int season in SonarrMapper.MatchedSeasons(series, request.Seasons))
-            {
-                await this.SendAsync(
-                    connection,
-                    HttpMethod.Post,
-                    "api/v3/command",
-                    new JsonObject { ["name"] = "SeasonSearch", ["seriesId"] = seriesId, ["seasonNumber"] = season },
-                    ct);
-            }
-
-            return new FulfilmentResult(FulfilmentOutcome.Reused, seriesId);
+            return await this.ReuseAsync(connection, tagIds, seasons, present, ct);
         }
 
-        JsonObject body = SonarrMapper.ToAddBody(lookup, connection, tagIds, request.Seasons);
-        JsonNode? added = await this.SendAsync(connection, HttpMethod.Post, "api/v3/series", body, ct);
-        return new FulfilmentResult(FulfilmentOutcome.Added, ArrJson.Int(added?["id"]) ?? 0);
+        JsonObject body = SonarrMapper.ToAddBody(lookup, connection, tagIds, seasons);
+        try
+        {
+            JsonNode? added = await this.SendAsync(connection, HttpMethod.Post, "api/v3/series", body, ct);
+            return new FulfilmentResult(FulfilmentOutcome.Added, ArrJson.Int(added?["id"]) ?? 0);
+        }
+        catch (ArrAlreadyExistsException)
+        {
+            JsonObject raced = await this.FindSeriesAsync(connection, tvdbId, ct)
+                ?? throw new ArrException("Sonarr says the show already exists but did not list it.");
+            return await this.ReuseAsync(connection, tagIds, seasons, raced, ct);
+        }
+    }
+
+    private async Task<JsonObject?> FindSeriesAsync(ArrConnection connection, int tvdbId, CancellationToken ct)
+    {
+        JsonArray existing = await this.GetArrayAsync(connection, $"api/v3/series?tvdbId={Number(tvdbId)}", ct);
+        return existing.FirstOrDefault() is JsonObject series && ArrJson.Int(series["id"]) is not null ? series : null;
+    }
+
+    private async Task<FulfilmentResult> ReuseAsync(
+        ArrConnection connection,
+        IReadOnlyList<int> tagIds,
+        IReadOnlyList<int> seasons,
+        JsonObject series,
+        CancellationToken ct)
+    {
+        int seriesId = ArrJson.Int(series["id"])!.Value;
+        if (SonarrMapper.ApplyToExisting(series, tagIds, seasons))
+        {
+            await this.SendAsync(connection, HttpMethod.Put, $"api/v3/series/{Number(seriesId)}", series, ct);
+        }
+
+        foreach (int season in SonarrMapper.MatchedSeasons(series, seasons))
+        {
+            await this.SendAsync(
+                connection,
+                HttpMethod.Post,
+                "api/v3/command",
+                new JsonObject { ["name"] = "SeasonSearch", ["seriesId"] = seriesId, ["seasonNumber"] = season },
+                ct);
+        }
+
+        return new FulfilmentResult(FulfilmentOutcome.Reused, seriesId);
     }
 
     private async Task<JsonObject> LookupAsync(ArrConnection connection, int tmdbId, CancellationToken ct)
@@ -203,29 +224,49 @@ public sealed class RadarrBackend(ArrClient client, ArrConnectionStore store) : 
             throw new ArgumentException("Radarr only handles movies.", nameof(request));
         }
 
-        JsonArray existing = await this.GetArrayAsync(connection, $"api/v3/movie?tmdbId={Number(request.TmdbId)}", ct);
-        if (existing.FirstOrDefault() is JsonObject movie && ArrJson.Int(movie["id"]) is { } movieId)
+        if (await this.FindMovieAsync(connection, request.TmdbId, ct) is { } present)
         {
-            if (RadarrMapper.ApplyToExisting(movie, tagIds))
-            {
-                await this.SendAsync(connection, HttpMethod.Put, $"api/v3/movie/{Number(movieId)}", movie, ct);
-            }
-
-            if (!ArrJson.Bool(movie["hasFile"]))
-            {
-                await this.SendAsync(
-                    connection,
-                    HttpMethod.Post,
-                    "api/v3/command",
-                    new JsonObject { ["name"] = "MoviesSearch", ["movieIds"] = new JsonArray(movieId) },
-                    ct);
-            }
-
-            return new FulfilmentResult(FulfilmentOutcome.Reused, movieId);
+            return await this.ReuseAsync(connection, tagIds, present, ct);
         }
 
         JsonObject lookup = await this.GetObjectAsync(connection, $"api/v3/movie/lookup/tmdb?tmdbId={Number(request.TmdbId)}", ct);
-        JsonNode? added = await this.SendAsync(connection, HttpMethod.Post, "api/v3/movie", RadarrMapper.ToAddBody(lookup, connection, tagIds), ct);
-        return new FulfilmentResult(FulfilmentOutcome.Added, ArrJson.Int(added?["id"]) ?? 0);
+        try
+        {
+            JsonNode? added = await this.SendAsync(connection, HttpMethod.Post, "api/v3/movie", RadarrMapper.ToAddBody(lookup, connection, tagIds), ct);
+            return new FulfilmentResult(FulfilmentOutcome.Added, ArrJson.Int(added?["id"]) ?? 0);
+        }
+        catch (ArrAlreadyExistsException)
+        {
+            JsonObject raced = await this.FindMovieAsync(connection, request.TmdbId, ct)
+                ?? throw new ArrException("Radarr says the movie already exists but did not list it.");
+            return await this.ReuseAsync(connection, tagIds, raced, ct);
+        }
+    }
+
+    private async Task<JsonObject?> FindMovieAsync(ArrConnection connection, int tmdbId, CancellationToken ct)
+    {
+        JsonArray existing = await this.GetArrayAsync(connection, $"api/v3/movie?tmdbId={Number(tmdbId)}", ct);
+        return existing.FirstOrDefault() is JsonObject movie && ArrJson.Int(movie["id"]) is not null ? movie : null;
+    }
+
+    private async Task<FulfilmentResult> ReuseAsync(ArrConnection connection, IReadOnlyList<int> tagIds, JsonObject movie, CancellationToken ct)
+    {
+        int movieId = ArrJson.Int(movie["id"])!.Value;
+        if (RadarrMapper.ApplyToExisting(movie, tagIds))
+        {
+            await this.SendAsync(connection, HttpMethod.Put, $"api/v3/movie/{Number(movieId)}", movie, ct);
+        }
+
+        if (!ArrJson.Bool(movie["hasFile"]))
+        {
+            await this.SendAsync(
+                connection,
+                HttpMethod.Post,
+                "api/v3/command",
+                new JsonObject { ["name"] = "MoviesSearch", ["movieIds"] = new JsonArray(movieId) },
+                ct);
+        }
+
+        return new FulfilmentResult(FulfilmentOutcome.Reused, movieId);
     }
 }

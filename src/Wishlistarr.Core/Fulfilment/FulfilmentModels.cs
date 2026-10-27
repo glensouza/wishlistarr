@@ -74,3 +74,5 @@ public interface IArrBackend
 public class ArrException(string message) : Exception(message);
 
 public sealed class ArrNotConfiguredException(string message) : ArrException(message);
+
+public sealed class ArrAlreadyExistsException(string message) : ArrException(message);

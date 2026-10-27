@@ -9,6 +9,7 @@ import {
   maxBatch,
   pageSize,
   previewGrant,
+  retryRequests,
   revokeRequests,
   type DecisionItem,
   type DecisionStatus,
@@ -38,6 +39,14 @@ const statusKey: Record<Outcome, MessageKey> = {
   notProcessed: 'requests.result.notProcessed',
   unsent: 'requests.result.unsent',
   unknown: 'requests.result.unknown',
+}
+
+const failureKey: Record<
+  NonNullable<ParentRequest['dispatchFailure']>,
+  MessageKey
+> = {
+  notConfigured: 'requests.failure.notConfigured',
+  unavailable: 'requests.failure.unavailable',
 }
 
 type Failure = { id: number; title: string; status: Outcome }
@@ -277,6 +286,23 @@ export default function RequestsAdmin() {
       reload()
     } catch (failure) {
       setError(messageOf(failure, t('requests.revokeFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function retry(row: ParentRequest) {
+    if (busy) return
+    clearMessages()
+    setBusy(true)
+    try {
+      const body = await retryRequests([row.id])
+      const item = body.results.find((result) => result.id === row.id)
+      if (!item || unresolved(item)) setError(t('requests.retryFailed'))
+      else setNotice(t('requests.retryDone', { title: row.title }))
+      reload()
+    } catch (failure) {
+      setError(messageOf(failure, t('requests.retryFailed')))
     } finally {
       setBusy(false)
     }
@@ -529,6 +555,18 @@ export default function RequestsAdmin() {
                           : 'requests.stuckLabelCheck',
                       )}
                     </span>
+                  )}
+                  {row.dispatchFailure && (
+                    <span>{t(failureKey[row.dispatchFailure])}</span>
+                  )}
+                  {row.canRetry && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void retry(row)}
+                    >
+                      {t('requests.retryTitle', { title: row.title })}
+                    </button>
                   )}
                   {row.canRevoke && (
                     <button

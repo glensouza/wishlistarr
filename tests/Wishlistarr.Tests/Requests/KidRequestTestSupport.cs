@@ -44,6 +44,8 @@ public sealed class DecisionSaveGate : SaveChangesInterceptor
 
     public Func<Task>? GrantCreateGate { get; set; }
 
+    public Func<Task>? AvailableGate { get; set; }
+
     public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
         DbContextEventData eventData,
         InterceptionResult<int> result,
@@ -62,6 +64,12 @@ public sealed class DecisionSaveGate : SaveChangesInterceptor
         if (grantCreated && this.GrantCreateGate is not null)
         {
             await this.GrantCreateGate();
+        }
+
+        bool movedToAvailable = added.Any(item => item.FromState == RequestState.Approved && item.ToState == RequestState.Available);
+        if (movedToAvailable && this.AvailableGate is not null)
+        {
+            await this.AvailableGate();
         }
 
         return result;

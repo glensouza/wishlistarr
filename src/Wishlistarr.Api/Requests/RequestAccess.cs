@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
@@ -399,6 +400,8 @@ public sealed partial class RequestAccess(
             return new GrantItem(GrantStatus.Conflict, seen);
         }
 
+        // The approval and the move to available are saved together, so the dispatch job never sees the request while it is only approved and sends a title that is already in the library.
+        await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
         if (request.State == RequestState.Pending)
         {
             RequestResult approved = await requests.TransitionAsync(request.Id, RequestState.Approved, parent, GrantReason, ct, RequestState.Pending);
@@ -433,6 +436,8 @@ public sealed partial class RequestAccess(
         {
             return Settled(available, request);
         }
+
+        await transaction.CommitAsync(CancellationToken.None);
 
         RequestLabelResult labeled = await labeling.LabelLockedAsync(moved.Id, items, profile, system, GrantSource);
         return labeled.Result is { Request.State: RequestState.Labeled, Request: MediaRequest done }

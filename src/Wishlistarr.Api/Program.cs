@@ -8,6 +8,7 @@ using Scalar.AspNetCore;
 using Serilog;
 using Wishlistarr.Api;
 using Wishlistarr.Api.Backup;
+using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
@@ -85,12 +86,18 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddSingleton<RequestLocks>();
 builder.Services.AddScoped<LabelWriter>();
+builder.Services.AddScoped<FulfilmentMode>();
 builder.Services.AddScoped<MediaRequests>();
 builder.Services.AddOptions<ApprovalOptions>()
     .Bind(builder.Configuration.GetSection(ApprovalOptions.SectionName))
     .Validate(options => options.IsValid(), "The Approval configuration section is invalid.")
     .ValidateOnStart();
 builder.Services.AddScoped<RequestLabeling>();
+builder.Services.AddScoped<RequestDispatch>();
+builder.Services.AddBackgroundJob<RequestDispatchJob>(
+    RequestDispatchJob.JobName,
+    "Sends approved requests to Seerr, Sonarr or Radarr and picks up any that were interrupted.",
+    TimeSpan.FromMinutes(1));
 builder.Services.AddScoped<RequestApproval>();
 builder.Services.AddScoped<RequestAccess>();
 builder.Services.AddTmdbDataRetention();

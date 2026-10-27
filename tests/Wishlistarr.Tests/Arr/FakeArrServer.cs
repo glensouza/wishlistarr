@@ -40,6 +40,10 @@ public sealed class FakeArrServer : IAsyncDisposable
 
     public int? FailWith { get; set; }
 
+    public bool DropNextAddResponse { get; set; }
+
+    public bool HideNextLookup { get; set; }
+
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
 
     public IReadOnlyList<JsonObject> Library => [.. this.library];
@@ -120,6 +124,14 @@ public sealed class FakeArrServer : IAsyncDisposable
     };
 
     private static JsonObject Season(int number) => new() { ["seasonNumber"] = number, ["monitored"] = false };
+
+    private JsonArray ExistsFailure(string field) => new(new JsonObject
+    {
+        ["propertyName"] = field == "tvdbId" ? "TvdbId" : "TmdbId",
+        ["errorMessage"] = this.Service == ArrService.Sonarr ? "This series has already been added" : "This movie has already been added",
+        ["severity"] = "error",
+        ["errorCode"] = this.Service == ArrService.Sonarr ? "SeriesExistsValidator" : "MovieExistsValidator",
+    });
 
     private static Task WriteAsync(HttpContext context, JsonNode? body, int status = StatusCodes.Status200OK)
     {
@@ -206,15 +218,36 @@ public sealed class FakeArrServer : IAsyncDisposable
         {
             string field = this.Service == ArrService.Sonarr ? "tvdbId" : "tmdbId";
             string wanted = request.Query.GetValueOrDefault(field, string.Empty);
+            if (this.HideNextLookup)
+            {
+                this.HideNextLookup = false;
+                await WriteAsync(context, new JsonArray());
+                return;
+            }
+
             await WriteAsync(context, new JsonArray([.. this.library
                 .Where(item => item[field]!.ToString() == wanted)
                 .Select(item => (JsonNode)item.DeepClone())]));
         }
         else if (path == $"/api/v3/{resource}" && method == "POST")
         {
+            string field = this.Service == ArrService.Sonarr ? "tvdbId" : "tmdbId";
+            if (this.library.Any(item => item[field]!.ToString() == body![field]!.ToString()))
+            {
+                await WriteAsync(context, this.ExistsFailure(field), StatusCodes.Status400BadRequest);
+                return;
+            }
+
             JsonObject added = (JsonObject)body!.DeepClone().AsObject();
             added["id"] = this.nextId++;
             this.library.Add(added);
+            if (this.DropNextAddResponse)
+            {
+                this.DropNextAddResponse = false;
+                context.Abort();
+                return;
+            }
+
             await WriteAsync(context, added, StatusCodes.Status201Created);
         }
         else if (path.StartsWith($"/api/v3/{resource}/", StringComparison.Ordinal) && method == "PUT")

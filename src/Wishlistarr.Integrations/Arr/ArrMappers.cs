@@ -73,6 +73,13 @@ internal static class SonarrMapper
         return changed;
     }
 
+    public static IReadOnlyList<int> AllSeasons(JsonObject series) =>
+        [.. (series["seasons"] as JsonArray ?? [])
+            .Select(season => ArrJson.Int(season?["seasonNumber"]))
+            .OfType<int>()
+            .Where(number => number > 0)
+            .Order()];
+
     public static IReadOnlyList<int> MatchedSeasons(JsonObject series, IReadOnlyCollection<int> seasons) =>
         [.. (series["seasons"] as JsonArray ?? [])
             .Select(season => ArrJson.Int(season?["seasonNumber"]))

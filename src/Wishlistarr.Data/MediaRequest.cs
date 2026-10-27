@@ -1,3 +1,4 @@
+using Wishlistarr.Core.Fulfilment;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 
@@ -25,6 +26,12 @@ public sealed class MediaRequest
     public int RequestCount { get; set; }
 
     public bool CountsTowardAllowance { get; set; }
+
+    public FulfilmentBackend? Backend { get; set; }
+
+    public int? ExternalId { get; set; }
+
+    public DateTimeOffset? DispatchedAt { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 

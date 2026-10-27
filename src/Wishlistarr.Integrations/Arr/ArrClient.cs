@@ -35,6 +35,11 @@ public sealed class ArrClient(IHttpClientFactory httpClients)
             string text = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == HttpStatusCode.BadRequest && IsAlreadyAdded(text))
+                {
+                    throw new ArrAlreadyExistsException($"{name} already has that title.");
+                }
+
                 throw new ArrException(Describe(name, response.StatusCode, text));
             }
 
@@ -51,6 +56,19 @@ public sealed class ArrClient(IHttpClientFactory httpClients)
         catch (JsonException)
         {
             throw new ArrException($"{name} returned something unexpected. Check that the address points at {name}.");
+        }
+    }
+
+    private static bool IsAlreadyAdded(string body)
+    {
+        try
+        {
+            return JsonNode.Parse(body) is JsonArray items
+                && items.Any(item => item?["errorCode"]?.GetValue<string>() is "SeriesExistsValidator" or "MovieExistsValidator");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return false;
         }
     }
 

@@ -1,7 +1,9 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.System;
 using Wishlistarr.Core.Content;
+using Wishlistarr.Core.Fulfilment;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
 
@@ -19,7 +21,7 @@ public enum RequestOutcome
 
 public sealed record RequestResult(RequestOutcome Outcome, MediaRequest? Request = null, string? Error = null);
 
-public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
+public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, TimeProvider time)
 {
     public const int MaxTitleLength = 300;
     public const int MaxReasonLength = 500;
@@ -140,6 +142,7 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
         ValidateActor(actor);
         ValidateReason(reason);
 
+        FulfilmentBackend? backend = to == RequestState.Approved ? await mode.GetAsync(ct) : null;
         for (int attempt = 0; attempt < MaxAttempts; attempt++)
         {
             MediaRequest? request = await this.LoadFreshAsync(requestId, ct);
@@ -172,6 +175,16 @@ public sealed class MediaRequests(WishlistarrDbContext db, TimeProvider time)
             MediaRequestEvent item = NewEvent(request.State, to, actor, reason, now);
             item.MediaRequestId = request.Id;
             request.State = to;
+            if (to == RequestState.Approved)
+            {
+                request.Backend = backend;
+            }
+
+            if (to == RequestState.Fulfilling && item.FromState == RequestState.Failed)
+            {
+                request.DispatchedAt = null;
+            }
+
             request.StateChangedAt = now;
             request.Version++;
             db.MediaRequestEvents.Add(item);

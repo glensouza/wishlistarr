@@ -100,6 +100,8 @@ public sealed class FakeSeerrServer : IAsyncDisposable
 
     public Action? BeforeNextCreate { get; set; }
 
+    public bool DropNextCreateResponse { get; set; }
+
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
 
     public static async Task<FakeSeerrServer> StartAsync()
@@ -332,6 +334,13 @@ public sealed class FakeSeerrServer : IAsyncDisposable
         lock (this.gate)
         {
             reply = this.Route(request);
+        }
+
+        if (this.DropNextCreateResponse && request.Method == "POST" && request.Path.EndsWith("/api/v1/request", StringComparison.Ordinal))
+        {
+            this.DropNextCreateResponse = false;
+            context.Abort();
+            return;
         }
 
         context.Response.StatusCode = reply.Status;
