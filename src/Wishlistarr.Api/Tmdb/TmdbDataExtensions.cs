@@ -17,6 +17,7 @@ public static class TmdbDataExtensions
         services.AddScoped<RequestTitles>();
         services.AddScoped<ITmdbDataStore, LibraryTmdbDataStore>();
         services.AddScoped<ITmdbDataStore, RequestTmdbDataStore>();
+        services.AddScoped<ITmdbDataStore, ProfileTitleDataStore>();
         services.AddBackgroundJob<TmdbDataPurgeJob>(
             TmdbDataPurgeJob.JobName,
             "Refreshes stored TMDB data that is still in use and purges what is older than the retention.",

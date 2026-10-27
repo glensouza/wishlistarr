@@ -696,6 +696,33 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("ParentSessions");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.ProfileTitleRule", b =>
+                {
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Blocked")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT")
+                        .UseCollation("NOCASE");
+
+                    b.Property<DateTimeOffset?>("TitleFetchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("KidProfileId", "Kind", "TmdbId", "Blocked");
+
+                    b.ToTable("ProfileTitleRules");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.Setting", b =>
                 {
                     b.Property<string>("Key")
@@ -900,6 +927,15 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("ParentAccount");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.ProfileTitleRule", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidProfile", null)
+                        .WithMany("TitleRules")
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.KidDevice", b =>
                 {
                     b.Navigation("Profiles");
@@ -910,6 +946,8 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("PinAttempts");
 
                     b.Navigation("Sessions");
+
+                    b.Navigation("TitleRules");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.LibraryItem", b =>

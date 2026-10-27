@@ -1,4 +1,30 @@
 export const en = {
+  'controls.title': 'Content controls',
+  'controls.open': 'Manage content controls',
+  'controls.close': 'Close content controls',
+  'controls.profile': 'Kid profile',
+  'controls.choose': 'Choose a profile',
+  'controls.rules': 'Rules for {name}',
+  'controls.hint':
+    'Valid changes save automatically after you finish typing. Wait for Saved before changing profiles or closing this screen.',
+  'controls.empty':
+    'Leave an age limit or allowance empty for no limit. An empty language list allows every language.',
+  'controls.saving': 'Saving…',
+  'controls.saved': 'Saved',
+  'controls.unsaved': 'Changes have not been saved',
+  'controls.importing': 'Reading rules file…',
+  'controls.ready': 'No unsaved changes',
+  'controls.saveFailed':
+    'We could not save these rules. Your changes are still here. Try again.',
+  'controls.loadFailed': 'We could not load the profiles.',
+  'controls.retry': 'Try again',
+  'controls.discard': 'Discard unsaved changes',
+  'controls.invalid':
+    'Use whole ages from 0 to 21, an allowance from 0 to 1000, positive TMDB IDs (up to 40 genres and 100 keywords), and up to 50 two-letter language codes separated by commas. These changes have not been saved.',
+  'controls.export': 'Export rules as JSON',
+  'controls.import': 'Import rules from JSON',
+  'controls.importInvalid':
+    'This file was not imported. Choose a rules export with version 1, all nine rule fields and no extra fields, valid ages, allowance, rating ceilings, ID lists and two-letter languages. Files must be at most 1 MiB. No rules were changed.',
   'app.name': 'Wishlistarr',
   'app.skipToContent': 'Skip to content',
   'app.loading': 'Loading',
@@ -469,6 +495,65 @@ export const en = {
   'kidRequests.ready': 'Ready to watch',
   'kidRequests.historyRevoked': 'A parent removed this',
   'kidRequests.historyFailed': 'Something went wrong',
+  'controls.titles': 'Title controls',
+  'controls.titleSearch': 'Find a title',
+  'controls.search': 'Search titles',
+  'controls.movie': 'Movie',
+  'controls.show': 'Show',
+  'controls.preview': 'Policy preview',
+  'controls.decision.allowed': 'Allowed',
+  'controls.decision.blocked': 'Blocked',
+  'controls.decision.needsApproval': 'Needs approval',
+  'controls.block': 'Block title',
+  'controls.allow': 'Always allow title',
+  'controls.list': 'Title list',
+  'controls.blocked': 'Blocked titles',
+  'controls.allowed': 'Always-allowed titles',
+  'controls.filterTitles': 'Search this title list',
+  'controls.remove': 'Remove',
+  'controls.removeTitle': 'Remove {title}',
+  'controls.previous': 'Previous titles',
+  'controls.next': 'Next titles',
+  'controls.previewNote':
+    'This previews content rules. The real request may still wait for a parent because of auto-approval settings or allowances.',
+  'controls.duplicateTitle': 'This title is already on the list.',
+  'controls.notFound': 'The profile or title was not found.',
+  'controls.networkError':
+    'Could not connect. Check your connection and try again.',
+  'controls.serverError':
+    'The server could not complete the request. Try again.',
+  'controls.titleFailed': 'Title controls could not be updated. Try again.',
+  'controls.reason.explicitlyBlocked':
+    "This title is on the profile's blocked list.",
+  'controls.reason.explicitlyAllowed':
+    "This title is on the profile's always-allowed list.",
+  'controls.reason.aboveRatingLimit':
+    "The rating {rating} exceeds the profile's age limit.",
+  'controls.reason.unrated':
+    "This title has no recognized rating and needs a parent's approval.",
+  'controls.reason.blockedGenre': 'This title includes blocked genre {genre}.',
+  'controls.reason.blockedKeyword':
+    'This title includes blocked keyword {keyword}.',
+  'controls.reason.unknownGenres':
+    "Genre information is missing and needs a parent's approval.",
+  'controls.reason.languageNotAllowed':
+    "The original language is not on the profile's allowed language list.",
+  'controls.reason.previouslyRevoked':
+    'This title was previously revoked and needs a parent to review it again.',
+  'controls.reason.metadataUnavailable':
+    'Required title information could not be checked or is unsuitable. Try another title or try again later.',
+  'controls.reason.noRatingLimit':
+    "This title meets the profile's content rules.",
+  'controls.reason.withinRatingLimit':
+    "This title meets the profile's content rules.",
+  'controls.reason.noBlockedGenre':
+    "This title meets the profile's content rules.",
+  'controls.reason.noBlockedKeyword':
+    "This title meets the profile's content rules.",
+  'controls.reason.noLanguageLimit':
+    "This title meets the profile's content rules.",
+  'controls.reason.languageAllowed':
+    "This title meets the profile's content rules.",
 } as const
 
 export type MessageKey = keyof typeof en

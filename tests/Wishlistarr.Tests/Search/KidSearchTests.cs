@@ -22,7 +22,7 @@ public sealed class KidSearchTests
     private static KidRequestApiFactory CreateFactory(FakeLibraryIndex? index = null)
     {
         KidRequestApiFactory factory = new(index);
-        factory.Tmdb.SetBody("/3/search/multi", """
+        factory.Tmdb.SetCatalog("/3/search/multi", """
             {"page":1,"total_pages":3,"total_results":57,"results":[
               {"id":800,"media_type":"movie","title":"Tiny Tale","overview":"Gentle.","poster_path":"/tiny.jpg","release_date":"2019-05-01"},
               {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"},
@@ -88,10 +88,10 @@ public sealed class KidSearchTests
             """;
 
         using KidRequestApiFactory genres = CreateFactory();
-        genres.Tmdb.SetBody("/3/search/multi", Page);
+        genres.Tmdb.SetCatalog("/3/search/multi", Page);
         (HttpClient genreKid, _) = await genres.SignInKidAsync("Genres", movieAgeLimit: 16, blockedGenreIds: [16]);
         using KidRequestApiFactory languages = CreateFactory();
-        languages.Tmdb.SetBody("/3/search/multi", Page);
+        languages.Tmdb.SetCatalog("/3/search/multi", Page);
         (HttpClient languageKid, _) = await languages.SignInKidAsync("Languages", movieAgeLimit: 16, allowedOriginalLanguages: ["en"]);
 
         Assert.Equal([603], Ids(await GetAsync(genreKid, "matrix")));
@@ -102,7 +102,7 @@ public sealed class KidSearchTests
     public async Task A_title_with_no_genres_needs_a_parent_when_genres_are_blocked()
     {
         using KidRequestApiFactory factory = CreateFactory();
-        factory.Tmdb.SetBody("/3/search/multi", """
+        factory.Tmdb.SetCatalog("/3/search/multi", """
             {"page":1,"total_pages":1,"total_results":2,"results":[
               {"id":800,"media_type":"movie","title":"Tiny Tale","overview":"Gentle.","poster_path":"/tiny.jpg","release_date":"2019-05-01"},
               {"id":603,"media_type":"movie","title":"The Matrix","overview":"A hacker.","poster_path":"/matrix.jpg","release_date":"1999-03-31","genre_ids":[28]}]}
@@ -124,7 +124,7 @@ public sealed class KidSearchTests
     public async Task A_keyword_block_removes_movies_and_shows_whose_keywords_match()
     {
         using KidRequestApiFactory factory = CreateFactory();
-        factory.Tmdb.SetBody("/3/search/multi", """
+        factory.Tmdb.SetCatalog("/3/search/multi", """
             {"page":1,"total_pages":1,"total_results":3,"results":[
               {"id":800,"media_type":"movie","title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01","genre_ids":[16],"original_language":"en"},
               {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31","genre_ids":[28],"original_language":"en"},
@@ -148,7 +148,7 @@ public sealed class KidSearchTests
     public async Task A_failed_keyword_lookup_drops_only_that_title()
     {
         using KidRequestApiFactory factory = CreateFactory();
-        factory.Tmdb.SetBody("/3/search/multi", """
+        factory.Tmdb.SetCatalog("/3/search/multi", """
             {"page":1,"total_pages":1,"total_results":2,"results":[
               {"id":800,"media_type":"movie","title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01"},
               {"id":603,"media_type":"movie","title":"The Matrix","poster_path":"/matrix.jpg","release_date":"1999-03-31"}]}
@@ -233,7 +233,7 @@ public sealed class KidSearchTests
         KidSearch search = new(
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
-            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
@@ -253,7 +253,7 @@ public sealed class KidSearchTests
         KidSearch search = new(
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
-            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "many", 1);
 
@@ -273,7 +273,7 @@ public sealed class KidSearchTests
         KidSearch search = new(
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
-            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance));
+            new KidContentPipeline(tmdb, [], TimeProvider.System, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()));
 
         KidSearchResponse? response = await search.SearchAsync(profileId, "flaky", 1);
 
@@ -292,7 +292,7 @@ public sealed class KidSearchTests
         KidSearch search = new(
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
-            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance));
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()));
 
         Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
         using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
@@ -321,7 +321,7 @@ public sealed class KidSearchTests
         KidSearch search = new(
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
-            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance));
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()));
 
         Task<KidSearchResponse?> pending = search.SearchAsync(profileId, "slow", 1);
         using CancellationTokenSource guard = new(TimeSpan.FromSeconds(10));
@@ -369,7 +369,7 @@ public sealed class KidSearchTests
     public async Task Shows_are_filtered_by_the_profiles_tv_age_limit()
     {
         using KidRequestApiFactory factory = CreateFactory();
-        factory.Tmdb.SetBody("/3/search/multi", """
+        factory.Tmdb.SetCatalog("/3/search/multi", """
             {"page":1,"total_pages":1,"total_results":2,"results":[
               {"id":82728,"media_type":"tv","name":"Bluey","first_air_date":"2018-10-01"},
               {"id":810,"media_type":"tv","name":"Grown Up Show","first_air_date":"2015-01-01"}]}
@@ -665,7 +665,7 @@ public sealed class KidSearchTests
 
         public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => throw new NotSupportedException();
 
-        public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => Task.FromResult(new TmdbDetails(id, $"Movie {id}", null, null, null, null, null, null, null, null, null, null, null, 0));
 
         public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 

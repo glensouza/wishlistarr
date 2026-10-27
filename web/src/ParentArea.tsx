@@ -9,6 +9,7 @@ import BackupsAdmin from './BackupsAdmin'
 import HealthBanner from './HealthBanner'
 import KidDevicesAdmin from './KidDevicesAdmin'
 import KidProfilesAdmin from './KidProfilesAdmin'
+import ContentControls from './ContentControls'
 import LogViewer from './LogViewer'
 import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
@@ -53,6 +54,7 @@ export default function ParentArea() {
           </p>
           <RequestsAdmin />
           <KidProfilesAdmin />
+          <ContentControls />
           <KidDevicesAdmin />
           <TrailerSetting />
           <BackupsAdmin />
