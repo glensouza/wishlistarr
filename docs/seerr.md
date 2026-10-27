@@ -105,4 +105,4 @@ These are Seerr's and Jellyseerr's values. Overseerr has no blocklist and uses 6
 
 ## Errors
 
-Both request endpoints return `409` when the connection is not saved and `502` with a message when Seerr fails. When Seerr refuses a request with its own reason, such as a missing permission or an exceeded quota, that reason is included. Calls go only to the saved address and are not followed to another host. Dispatching approved Wishlistarr requests is not part of this change.
+Both request endpoints return `409` when the connection is not saved and `502` with a message when Seerr fails. When Seerr refuses a request with its own reason, such as a missing permission or an exceeded quota, that reason is included. Calls go only to the saved address and are not followed to another host. Approved requests are sent with the same submission; a retry attaches the request an earlier attempt made, including when Seerr answered `409` or `202` to a duplicate, so it never makes a second one. See [requests.md](requests.md#dispatching).

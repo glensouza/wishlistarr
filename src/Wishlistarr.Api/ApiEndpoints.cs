@@ -11,6 +11,7 @@ using Wishlistarr.Api.Titles;
 using Wishlistarr.Api.Tmdb;
 using Wishlistarr.Api.Updates;
 using Wishlistarr.Api.Webhooks;
+using Wishlistarr.Core.Fulfilment;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Arr;
 using Wishlistarr.Integrations.Seerr;
@@ -118,6 +119,13 @@ public static class ApiEndpoints
                     title: "The time zone is not recognized. Use an IANA name such as America/Chicago.");
             }
 
+            if (key == FulfilmentModes.SettingKey && !FulfilmentModes.TryParse(update.Value, out _))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "The fulfilment mode is seerr, arr or none.");
+            }
+
             if (key == TmdbRetention.SettingKey && !TmdbRetention.TryParse(update.Value, out _))
             {
                 return Results.Problem(
@@ -154,7 +162,7 @@ public static class ApiEndpoints
             return Results.NoContent();
         })
             .WithName("PutSetting")
-            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180; kids.youtube_trailers accepts true or false.")
+            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180; kids.youtube_trailers accepts true or false; fulfilment.mode accepts seerr, arr or none.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)

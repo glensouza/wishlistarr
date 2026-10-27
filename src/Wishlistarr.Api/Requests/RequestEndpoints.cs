@@ -65,6 +65,10 @@ public static class RequestEndpoints
                 db,
                 [.. rows.Where(request => request.State == RequestState.Failed).Select(request => request.Id)],
                 ct);
+            Dictionary<int, MediaRequestEvent> failures = await RequestViews.LastFailuresAsync(
+                db,
+                [.. rows.Where(request => request.State == RequestState.Failed).Select(request => request.Id)],
+                ct);
             List<ParentRequestResponse> body = [];
             foreach (ListedRequest item in listed)
             {
@@ -81,13 +85,15 @@ public static class RequestEndpoints
                     request.CreatedAt,
                     request.State == RequestState.Denied && reasons.TryGetValue(request.Id, out string? reason) ? reason : null,
                     revocable.Contains(request.Id),
-                    mayRemain.Contains(request.Id) || (request.State == RequestState.Available && revocable.Contains(request.Id))));
+                    mayRemain.Contains(request.Id) || (request.State == RequestState.Available && revocable.Contains(request.Id)),
+                    failures.TryGetValue(request.Id, out MediaRequestEvent? failure) && RequestDispatch.IsRetryable(failure),
+                    failure is not null && RequestDispatch.IsRetryable(failure) ? RequestDispatch.FailureCode(failure) : null));
             }
 
             return Results.Ok(new ParentRequestPage(body, total, take, skip, unfinished));
         })
             .WithName("ListRequests")
-            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text. canRevoke says whether a parent can revoke the request now, labelMayRemain whether a label may have been left in Plex, and unfinished counts the failed and stuck requests.")
+            .WithSummary("Lists requests in id order, one page at a time. An optional state query limits the list, limit (default 50, at most 200) and offset choose the page. Denial reasons are plain text. canRevoke says whether a parent can revoke the request now, labelMayRemain whether a label may have been left in Plex, canRetry whether a failed request can be sent again, dispatchFailure why sending it failed (notConfigured or unavailable), and unfinished counts the failed and stuck requests.")
             .Produces<ParentRequestPage>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
@@ -102,6 +108,13 @@ public static class RequestEndpoints
             DecideAsync(body, context, approval, approving: false, ct))
             .WithName("DenyRequests")
             .WithSummary("Denies pending requests. An optional reason is stored as plain text and shown only to that kid.")
+            .Produces<DecisionBodyResponse>()
+            .ProducesProblem(StatusCodes.Status400BadRequest);
+
+        requests.MapPost("/retry", (DecisionBody? body, HttpContext context, RequestDispatch dispatch, CancellationToken ct) =>
+            RetryAsync(body, context, dispatch, ct))
+            .WithName("RetryRequests")
+            .WithSummary("Sends failed requests to their download service again. A request keeps the service it was approved with. Retrying never adds a title that the service already has. Requests whose Plex label failed are not retried here and are revoked instead.")
             .Produces<DecisionBodyResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
@@ -134,6 +147,47 @@ public static class RequestEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest);
     }
 
+    private static IResult? ReadBatch(DecisionBody? body, string verb, out IReadOnlyList<int> ids, out string? reason)
+    {
+        ids = [];
+        reason = null;
+        if (body is not { Ids: { Count: > 0 } given })
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A list of request ids is required.");
+        }
+
+        if (given.Count > RequestApproval.MaxBatch)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: $"At most {RequestApproval.MaxBatch.ToString(CultureInfo.InvariantCulture)} requests can be {verb} at once.");
+        }
+
+        if (given.Any(id => id <= 0))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Request ids must be positive.");
+        }
+
+        if (!RequestViews.TryNormalizeNote(body.Reason, out reason, out string? error))
+        {
+            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: error);
+        }
+
+        ids = given;
+        return null;
+    }
+
+    private static async Task<IResult> RetryAsync(DecisionBody? body, HttpContext context, RequestDispatch dispatch, CancellationToken ct)
+    {
+        if (ReadBatch(body, "retried", out IReadOnlyList<int> ids, out string? reason) is IResult problem)
+        {
+            return problem;
+        }
+
+        IReadOnlyList<DecisionItem> results = await dispatch.RetryManyAsync(ids, RequestApproval.ParentFrom(context.User), reason, ct);
+        return Results.Ok(new DecisionBodyResponse(results));
+    }
+
     private static async Task<IResult> DecideAsync(
         DecisionBody? body,
         HttpContext context,
@@ -141,26 +195,9 @@ public static class RequestEndpoints
         bool approving,
         CancellationToken ct)
     {
-        if (body is not { Ids: { Count: > 0 } ids })
+        if (ReadBatch(body, "decided", out IReadOnlyList<int> ids, out string? reason) is IResult problem)
         {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A list of request ids is required.");
-        }
-
-        if (ids.Count > RequestApproval.MaxBatch)
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: $"At most {RequestApproval.MaxBatch.ToString(CultureInfo.InvariantCulture)} requests can be decided at once.");
-        }
-
-        if (ids.Any(id => id <= 0))
-        {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Request ids must be positive.");
-        }
-
-        if (!RequestViews.TryNormalizeNote(body.Reason, out string? reason, out string? error))
-        {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: error);
+            return problem;
         }
 
         RequestActor actor = RequestApproval.ParentFrom(context.User);
@@ -207,26 +244,9 @@ public static class RequestEndpoints
 
     private static async Task<IResult> RevokeAsync(DecisionBody? body, HttpContext context, RequestAccess access, CancellationToken ct)
     {
-        if (body is not { Ids: { Count: > 0 } ids })
+        if (ReadBatch(body, "revoked", out IReadOnlyList<int> ids, out string? reason) is IResult problem)
         {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "A list of request ids is required.");
-        }
-
-        if (ids.Count > RequestApproval.MaxBatch)
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: $"At most {RequestApproval.MaxBatch.ToString(CultureInfo.InvariantCulture)} requests can be revoked at once.");
-        }
-
-        if (ids.Any(id => id <= 0))
-        {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Request ids must be positive.");
-        }
-
-        if (!RequestViews.TryNormalizeNote(body.Reason, out string? reason, out string? error))
-        {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: error);
+            return problem;
         }
 
         IReadOnlyList<RevokeItem> results = await access.RevokeManyAsync(ids, RequestApproval.ParentFrom(context.User), reason, ct);
@@ -322,4 +342,6 @@ public sealed record ParentRequestResponse(
     DateTimeOffset CreatedAt,
     string? DenialReason,
     bool CanRevoke,
-    bool LabelMayRemain);
+    bool LabelMayRemain,
+    bool CanRetry,
+    string? DispatchFailure);

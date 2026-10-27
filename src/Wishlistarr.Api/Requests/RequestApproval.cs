@@ -27,6 +27,7 @@ public sealed partial class RequestApproval(
     MediaRequests requests,
     LibraryLookup library,
     RequestLabeling labeling,
+    RequestDispatch dispatch,
     IOptions<ApprovalOptions> options,
     TimeProvider time,
     ILogger<RequestApproval> logger)
@@ -62,8 +63,12 @@ public sealed partial class RequestApproval(
         CancellationToken ct = default) =>
         this.DecideManyAsync(ids, actor, reason, approving: false, ct);
 
-    public Task<DecisionItem> ApproveAsync(int requestId, RequestActor actor, string? reason = null, CancellationToken ct = default) =>
-        this.DecideOneAsync(requestId, actor, reason, approving: true, ct);
+    public async Task<DecisionItem> ApproveAsync(int requestId, RequestActor actor, string? reason = null, CancellationToken ct = default)
+    {
+        DecisionItem item = await this.DecideOneAsync(requestId, actor, reason, approving: true, ct);
+        await this.DispatchIfApprovedAsync([item]);
+        return item;
+    }
 
     private async Task<IReadOnlyList<DecisionItem>> DecideManyAsync(
         IReadOnlyList<int> ids,
@@ -81,8 +86,18 @@ public sealed partial class RequestApproval(
                 : await this.DecideOneAsync(id, actor, reason, approving, ct));
         }
 
+        if (approving)
+        {
+            await this.DispatchIfApprovedAsync(results);
+        }
+
         return results;
     }
+
+    private Task DispatchIfApprovedAsync(IReadOnlyList<DecisionItem> items) =>
+        items.Any(item => item.Status == DecisionStatus.Succeeded && item.State == RequestState.Approved)
+            ? dispatch.StartAsync()
+            : Task.CompletedTask;
 
     private async Task<DecisionItem> DecideOneAsync(int id, RequestActor actor, string? reason, bool approving, CancellationToken ct)
     {

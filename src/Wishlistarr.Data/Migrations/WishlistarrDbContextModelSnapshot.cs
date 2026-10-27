@@ -484,11 +484,21 @@ namespace Wishlistarr.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Backend")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("CountsTowardAllowance")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ExternalId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("KidProfileId")
                         .HasColumnType("INTEGER");

@@ -169,6 +169,7 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(request => request.Kind).HasConversion<string>().HasMaxLength(16);
             entity.Property(request => request.State).HasConversion<string>().HasMaxLength(16);
             entity.Property(request => request.Title).HasMaxLength(300);
+            entity.Property(request => request.Backend).HasConversion<string>().HasMaxLength(16);
             entity.Property(request => request.Version).IsConcurrencyToken();
             entity.HasIndex(request => new { request.KidProfileId, request.Kind, request.TmdbId })
                 .IsUnique()

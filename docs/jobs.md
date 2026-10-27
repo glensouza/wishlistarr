@@ -46,4 +46,6 @@ The `database-backup` job writes a consistent copy of the database and the data 
 
 The `tmdb-data-purge` job enforces the TMDB data retention described in [tmdb.md](tmdb.md).
 
+The `request-dispatch` job sends approved requests to Seerr, Sonarr or Radarr. It is started after an approval or a retry (run trigger `Request`) and also runs every minute to pick up anything that was interrupted. See [requests.md](requests.md#dispatching).
+
 The `update-check` job asks GitHub whether a newer release exists. It runs once a day. See [upgrading.md](upgrading.md). It is the only call Wishlistarr makes to GitHub by itself.

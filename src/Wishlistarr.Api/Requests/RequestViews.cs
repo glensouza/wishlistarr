@@ -83,19 +83,32 @@ public static class RequestViews
             return [];
         }
 
-        List<MediaRequestEvent> events = await db.MediaRequestEvents.AsNoTracking()
-            .Where(item => failedIds.Contains(item.MediaRequestId) && item.ToState == RequestState.Failed)
-            .OrderBy(item => item.Id)
-            .ToListAsync(ct);
-        Dictionary<int, string?> last = [];
-        foreach (MediaRequestEvent item in events)
+        return [.. (await LastFailuresAsync(db, failedIds, ct))
+            .Where(pair => pair.Value.Reason is RequestLabeling.TimeoutReason or RequestLabeling.WriteFailedReason)
+            .Select(pair => pair.Key)];
+    }
+
+    public static async Task<Dictionary<int, MediaRequestEvent>> LastFailuresAsync(
+        WishlistarrDbContext db,
+        IReadOnlyCollection<int> requestIds,
+        CancellationToken ct)
+    {
+        Dictionary<int, MediaRequestEvent> last = [];
+        if (requestIds.Count == 0)
         {
-            last[item.MediaRequestId] = item.Reason;
+            return last;
         }
 
-        return [.. last
-            .Where(pair => pair.Value is RequestLabeling.TimeoutReason or RequestLabeling.WriteFailedReason)
-            .Select(pair => pair.Key)];
+        List<MediaRequestEvent> events = await db.MediaRequestEvents.AsNoTracking()
+            .Where(item => requestIds.Contains(item.MediaRequestId) && item.ToState == RequestState.Failed)
+            .OrderBy(item => item.Id)
+            .ToListAsync(ct);
+        foreach (MediaRequestEvent item in events)
+        {
+            last[item.MediaRequestId] = item;
+        }
+
+        return last;
     }
 
     public static async Task<IReadOnlyList<KidHistoryEntry>> KidHistoryAsync(
