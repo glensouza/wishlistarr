@@ -14,7 +14,7 @@ public sealed class JobRunner(
     private readonly IReadOnlyDictionary<string, JobDefinition> definitions =
         registered.ToDictionary(definition => definition.Name, StringComparer.OrdinalIgnoreCase);
 
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, JobGate> gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<int, Task> running = new();
     private readonly CancellationTokenSource stopping = new();
 
@@ -23,9 +23,13 @@ public sealed class JobRunner(
     public JobDefinition? Find(string name) => this.definitions.GetValueOrDefault(name);
 
     public bool IsRunning(string name) =>
-        this.gates.TryGetValue(name, out SemaphoreSlim? gate) && gate.CurrentCount == 0;
+        this.gates.TryGetValue(name, out JobGate? gate) && gate.Semaphore.CurrentCount == 0;
 
-    public async Task<JobStartResult> StartAsync(string name, JobRunTrigger trigger, CancellationToken ct = default)
+    public async Task<JobStartResult> StartAsync(
+        string name,
+        JobRunTrigger trigger,
+        CancellationToken ct = default,
+        bool rerunIfRunning = false)
     {
         if (this.Find(name) is not { } definition)
         {
@@ -37,10 +41,21 @@ public sealed class JobRunner(
             return new JobStartResult(JobStartStatus.Stopping, null, Task.CompletedTask);
         }
 
-        SemaphoreSlim gate = this.gates.GetOrAdd(definition.Name, _ => new SemaphoreSlim(1, 1));
-        if (!await gate.WaitAsync(0, CancellationToken.None))
+        JobGate gate = this.gates.GetOrAdd(definition.Name, _ => new JobGate());
+        if (!await gate.Semaphore.WaitAsync(0, CancellationToken.None))
         {
-            return new JobStartResult(JobStartStatus.AlreadyRunning, null, Task.CompletedTask);
+            if (!rerunIfRunning)
+            {
+                return new JobStartResult(JobStartStatus.AlreadyRunning, null, Task.CompletedTask);
+            }
+
+            Volatile.Write(ref gate.PendingTrigger, (int)trigger + 1);
+            if (!await gate.Semaphore.WaitAsync(0, CancellationToken.None))
+            {
+                return new JobStartResult(JobStartStatus.AlreadyRunning, null, Task.CompletedTask);
+            }
+
+            Interlocked.Exchange(ref gate.PendingTrigger, 0);
         }
 
         try
@@ -57,7 +72,8 @@ public sealed class JobRunner(
                     }
                     finally
                     {
-                        gate.Release();
+                        gate.Semaphore.Release();
+                        await this.StartPendingRerunAsync(definition, gate);
                         this.running.TryRemove(runId, out _);
                         completion.SetResult();
                     }
@@ -67,15 +83,36 @@ public sealed class JobRunner(
         }
         catch
         {
-            gate.Release();
+            gate.Semaphore.Release();
             throw;
+        }
+    }
+
+    private async Task StartPendingRerunAsync(JobDefinition definition, JobGate gate)
+    {
+        int pending = Interlocked.Exchange(ref gate.PendingTrigger, 0);
+        if (pending == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await this.StartAsync(definition.Name, (JobRunTrigger)(pending - 1), rerunIfRunning: true);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Could not start the queued run of job {Job}.", definition.Name);
         }
     }
 
     public async Task StopAsync(CancellationToken ct = default)
     {
         await this.stopping.CancelAsync();
-        await Task.WhenAll(this.running.Values).WaitAsync(ct);
+        while (!this.running.IsEmpty)
+        {
+            await Task.WhenAll(this.running.Values).WaitAsync(ct);
+        }
     }
 
     public async Task RecoverInterruptedAsync(CancellationToken ct = default)
@@ -172,6 +209,13 @@ public sealed class JobRunner(
             logger.LogError(exception, "Could not record the result of job {Job}.", definition.Name);
         }
     }
+}
+
+internal sealed class JobGate
+{
+    public readonly SemaphoreSlim Semaphore = new(1, 1);
+
+    public int PendingTrigger;
 }
 
 public enum JobStartStatus

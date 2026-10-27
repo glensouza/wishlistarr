@@ -11,9 +11,22 @@ public sealed class ManualTime(DateTimeOffset start) : TimeProvider
 {
     private DateTimeOffset now = start;
 
+    public ManualResetEventSlim Reached { get; } = new(false);
+
+    public ManualResetEventSlim? Pause { get; set; }
+
     public void Advance(TimeSpan by) => this.now += by;
 
-    public override DateTimeOffset GetUtcNow() => this.now;
+    public override DateTimeOffset GetUtcNow()
+    {
+        if (this.Pause is { } pause)
+        {
+            this.Reached.Set();
+            pause.Wait();
+        }
+
+        return this.now;
+    }
 }
 
 public sealed class JobProbe

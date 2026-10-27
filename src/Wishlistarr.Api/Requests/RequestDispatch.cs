@@ -48,7 +48,7 @@ public sealed partial class RequestDispatch(
     {
         try
         {
-            await runner.StartAsync(RequestDispatchJob.JobName, JobRunTrigger.Request);
+            await runner.StartAsync(RequestDispatchJob.JobName, JobRunTrigger.Request, rerunIfRunning: true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
