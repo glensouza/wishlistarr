@@ -180,6 +180,11 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
                 request.Backend = backend;
             }
 
+            if (to == RequestState.Fulfilling && item.FromState == RequestState.Failed)
+            {
+                request.DispatchedAt = null;
+            }
+
             request.StateChangedAt = now;
             request.Version++;
             db.MediaRequestEvents.Add(item);

@@ -198,14 +198,14 @@ public sealed partial class RequestDispatch(
         // The title is with the backend before this is saved. If the process stops in between, the request is still approved and the next run finds the title there instead of adding it again.
         DateTimeOffset now = time.GetUtcNow();
         await db.MediaRequests
-            .Where(row => row.Id == id)
+            .Where(row => row.Id == id && (row.State == RequestState.Approved || row.State == RequestState.Fulfilling))
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(row => row.DispatchedAt, now)
                     .SetProperty(row => row.ExternalId, row => externalId ?? row.ExternalId)
                     .SetProperty(row => row.Version, row => row.Version + 1),
                 CancellationToken.None);
-        await requests.TransitionAsync(id, RequestState.Fulfilling, RequestActor.System(Component), ct: CancellationToken.None);
+        await requests.TransitionAsync(id, RequestState.Fulfilling, RequestActor.System(Component), ct: CancellationToken.None, expectedFrom: request.State);
     }
 
     private async Task<MediaRequest?> LoadDispatchableAsync(int id, CancellationToken ct) =>

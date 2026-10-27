@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Core.Content;
@@ -307,10 +309,13 @@ public sealed class RequestDispatchTests
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             MediaRequests requests = scope.ServiceProvider.GetRequiredService<MediaRequests>();
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
             RequestActor system = RequestActor.System("test");
+            await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync();
             await requests.TransitionAsync(labelFailure, RequestState.Approved, system);
             await requests.TransitionAsync(labelFailure, RequestState.Available, system);
             await requests.TransitionAsync(labelFailure, RequestState.Failed, system, RequestLabeling.WriteFailedReason);
+            await transaction.CommitAsync();
         }
 
         HttpResponseMessage empty = await parent.PostAsJsonAsync("/api/v1/requests/retry", new { ids = Array.Empty<int>() });
@@ -329,6 +334,94 @@ public sealed class RequestDispatchTests
         Assert.Equal("notFound", missing.GetProperty("status").GetString());
         Assert.False(listed.GetProperty("canRetry").GetBoolean());
         Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single(row => row.Id == labelFailure).State);
+    }
+
+    [Fact]
+    public async Task A_grant_is_never_sent_to_the_backend_between_its_approval_and_its_move_to_available()
+    {
+        using DispatchApiFactory factory = new();
+        factory.Index!.Add(MediaKind.Movie, DispatchApiFactory.MovieId, new MediaItem("101", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1999, MediaKind.Movie, "1", []));
+        await factory.LinkPlexAsync();
+        (_, int profile) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.ConfiguredParentAsync("arr");
+        factory.Saves.AvailableGate = async () =>
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<RequestDispatch>().DispatchPendingAsync(CancellationToken.None);
+        };
+
+        HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = profile, kind = "movie", tmdbId = DispatchApiFactory.MovieId });
+        factory.Saves.AvailableGate = null;
+        MediaRequest granted = Assert.Single(await factory.GetRequestsAsync());
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(RequestState.Labeled, granted.State);
+        Assert.Null(granted.DispatchedAt);
+        Assert.Equal(1, factory.LabelWrites);
+        Assert.Empty(factory.Radarr.Library);
+        Assert.Empty(factory.Radarr.Sent("POST", "/api/v3/movie"));
+    }
+
+    [Fact]
+    public async Task A_send_that_finishes_after_the_request_moved_on_records_nothing()
+    {
+        using DispatchApiFactory factory = new();
+        (_, int profile) = await factory.SignInKidAsync();
+        await factory.ConfiguredParentAsync("seerr");
+        int id = await factory.CreateRequestAsync(profile, MediaKind.Movie, DispatchApiFactory.MovieId);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<MediaRequests>()
+                .TransitionAsync(id, RequestState.Approved, RequestActor.Parent(null, "Parent"));
+        }
+
+        factory.Seerr.BeforeNextCreate = () =>
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            scope.ServiceProvider.GetRequiredService<MediaRequests>()
+                .TransitionAsync(id, RequestState.Available, RequestActor.System("test"))
+                .GetAwaiter().GetResult();
+        };
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<RequestDispatch>().DispatchPendingAsync(CancellationToken.None);
+        }
+
+        MediaRequest row = Assert.Single(await factory.GetRequestsAsync());
+
+        Assert.Single(factory.Seerr.Sent("POST", "/api/v1/request"));
+        Assert.Equal(RequestState.Available, row.State);
+        Assert.Null(row.DispatchedAt);
+        Assert.Null(row.ExternalId);
+    }
+
+    [Fact]
+    public async Task A_retried_request_that_was_already_sent_is_sent_again()
+    {
+        using DispatchApiFactory factory = new();
+        (_, int profile) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.ConfiguredParentAsync(null);
+        int id = await factory.CreateRequestAsync(profile, MediaKind.Movie, DispatchApiFactory.MovieId);
+        DateTimeOffset earlier = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            MediaRequests requests = scope.ServiceProvider.GetRequiredService<MediaRequests>();
+            RequestActor system = RequestActor.System("test");
+            await requests.TransitionAsync(id, RequestState.Approved, system);
+            await requests.TransitionAsync(id, RequestState.Fulfilling, system);
+            await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().MediaRequests
+                .Where(row => row.Id == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.DispatchedAt, earlier));
+            await requests.TransitionAsync(id, RequestState.Failed, system, "The download was removed.");
+        }
+
+        await factory.SetModeAsync(parent, "arr");
+        JsonElement retried = await factory.RetryAsync(parent, id);
+        MediaRequest sent = await factory.WaitForDispatchAsync(id);
+
+        Assert.Equal("succeeded", retried.GetProperty("status").GetString());
+        Assert.True(sent.DispatchedAt > earlier);
+        Assert.Single(factory.Radarr.Library);
     }
 
     [Fact]
