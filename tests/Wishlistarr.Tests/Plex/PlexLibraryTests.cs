@@ -28,6 +28,30 @@ public sealed class PlexLibraryTests
     }
 
     [Fact]
+    public async Task Items_are_found_by_their_plex_guid_in_every_movie_and_show_library()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync();
+        await harness.LinkAndSelectAsync();
+        harness.Server.ReAddItem("201", "2201");
+
+        IReadOnlyList<MediaItem> show = await harness.Media.FindByGuidAsync("plex://show/5d9c086c46115600200aa2fe");
+        IReadOnlyList<MediaItem> unknown = await harness.Media.FindByGuidAsync("plex://movie/000000000000000000000000");
+        int before = harness.Server.Requests.Count;
+        IReadOnlyList<MediaItem> legacy = await harness.Media.FindByGuidAsync("com.plexapp.agents.imdb://tt0133093?lang=en");
+
+        MediaItem found = Assert.Single(show);
+        Assert.Equal("2201", found.Id);
+        Assert.Equal(MediaKind.Show, found.Kind);
+        Assert.Equal("2", found.LibraryId);
+        Assert.Empty(unknown);
+        Assert.Empty(legacy);
+        Assert.Equal(before, harness.Server.Requests.Count);
+        Assert.All(
+            harness.Server.Requests.Where(request => request.Query.ContainsKey("guid")),
+            request => Assert.Matches("^/library/sections/[1-4]/all$", request.Path));
+    }
+
+    [Fact]
     public async Task Connection_test_reports_each_state()
     {
         await using PlexHarness harness = await PlexHarness.CreateAsync();

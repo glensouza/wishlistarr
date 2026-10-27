@@ -105,6 +105,34 @@ public sealed class LabelWriterTests
     }
 
     [Fact]
+    public async Task Restore_puts_back_only_a_label_the_ledger_owns_and_never_creates_a_row()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        await factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "grant"));
+        OwnedLabel before = Assert.Single(await factory.GetLedgerAsync());
+        factory.Fake.Item("101").SetLabels("Favorites");
+        factory.Clock.Advance(TimeSpan.FromHours(1));
+
+        LabelWriteResult restored = await factory.WithWriterAsync(writer => writer.RestoreAsync("101", "Ada"));
+        LabelWriteResult again = await factory.WithWriterAsync(writer => writer.RestoreAsync("101", "Ada"));
+        int puts = factory.Puts;
+        LabelWriteResult unowned = await factory.WithWriterAsync(writer => writer.RestoreAsync("102", "Ada"));
+
+        Assert.Equal(LabelWriteOutcome.Added, restored.Outcome);
+        Assert.Equal(LabelWriteOutcome.AlreadyPresent, again.Outcome);
+        Assert.Equal(LabelWriteOutcome.NotOwned, unowned.Outcome);
+        Assert.Equal(["Favorites", "Ada"], factory.Fake.Item("101").Labels);
+        Assert.Empty(factory.Fake.Item("102").Labels);
+        Assert.Equal(puts, factory.Puts);
+        OwnedLabel after = Assert.Single(await factory.GetLedgerAsync());
+        Assert.Equal(before.Id, after.Id);
+        Assert.Equal("grant", after.Source);
+        Assert.Equal(before.AppliedAt, after.AppliedAt);
+    }
+
+    [Fact]
     public async Task Writes_keep_existing_labels_lock_the_field_and_are_verified()
     {
         using LabelApiFactory factory = new();

@@ -44,6 +44,10 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<LibraryRefreshState> LibraryRefreshStates => this.Set<LibraryRefreshState>();
 
+    public DbSet<LabelGuardianReport> LabelGuardianReports => this.Set<LabelGuardianReport>();
+
+    public DbSet<LabelGuardianEntry> LabelGuardianEntries => this.Set<LabelGuardianEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Setting>(entity =>
@@ -155,7 +159,7 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(label => label.ServerId).HasMaxLength(100);
             entity.Property(label => label.Guid).HasMaxLength(256);
             entity.Property(label => label.RatingKey).HasMaxLength(20);
-            entity.Property(label => label.Label).HasMaxLength(64).UseCollation("NOCASE");
+            entity.Property(label => label.Label).HasMaxLength(64).UseCollation(LabelCollation.Name);
             entity.Property(label => label.Source).HasMaxLength(32);
             entity.HasIndex(label => new { label.ServerId, label.Guid, label.Label }).IsUnique();
             entity.HasOne(label => label.KidProfile)
@@ -262,6 +266,34 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
         {
             entity.Property(state => state.Id).ValueGeneratedNever();
             entity.Property(state => state.ServerId).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<LabelGuardianReport>(entity =>
+        {
+            entity.Property(report => report.ServerId).HasMaxLength(100);
+            entity.HasIndex(report => report.StartedAt);
+            entity.HasMany(report => report.Entries)
+                .WithOne(entry => entry.Report)
+                .HasForeignKey(entry => entry.ReportId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LabelGuardianEntry>(entity =>
+        {
+            entity.Property(entry => entry.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(entry => entry.Action).HasConversion<string>().HasMaxLength(16);
+            entity.Property(entry => entry.Label).HasMaxLength(64);
+            entity.Property(entry => entry.Guid).HasMaxLength(256);
+            entity.Property(entry => entry.RatingKey).HasMaxLength(20);
+            entity.Property(entry => entry.PreviousRatingKey).HasMaxLength(20);
+            entity.Property(entry => entry.PreviousGuid).HasMaxLength(256);
+            entity.Property(entry => entry.Title).HasMaxLength(LabelGuardianEntry.MaxTitleLength);
+            entity.Property(entry => entry.Detail).HasMaxLength(LabelGuardianEntry.MaxDetailLength);
+            entity.HasIndex(entry => new { entry.ReportId, entry.Id });
+            entity.HasOne<KidProfile>()
+                .WithMany()
+                .HasForeignKey(entry => entry.KidProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

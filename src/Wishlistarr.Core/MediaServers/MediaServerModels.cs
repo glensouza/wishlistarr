@@ -78,7 +78,8 @@ public sealed record MediaItemLabels(
     MediaKind Kind,
     string LibraryId,
     IReadOnlyList<string> Labels,
-    bool Locked);
+    bool Locked,
+    IReadOnlyList<ExternalId> ExternalIds);
 
 public enum MediaServerTestCode
 {

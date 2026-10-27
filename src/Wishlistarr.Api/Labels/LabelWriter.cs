@@ -25,7 +25,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
     public const int MaxAttempts = 3;
     public const int MaxSourceLength = 32;
 
-    private static readonly StringComparer LabelComparer = StringComparer.OrdinalIgnoreCase;
+    public static StringComparer LabelComparer { get; } = StringComparer.OrdinalIgnoreCase;
 
     public async Task<LabelWriteResult> AddAsync(string itemId, string label, int kidProfileId, string source, CancellationToken ct = default)
     {
@@ -94,6 +94,34 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         }
 
         return result;
+    }
+
+    // Puts back a label the ledger already owns on the item's guid. It never creates a ledger row, so a label that was revoked in the meantime stays off,
+    // and the owning profile is checked at the moment of writing, so a profile archived in the meantime does not get its label back.
+    public async Task<LabelWriteResult> RestoreAsync(string itemId, string label, CancellationToken ct = default)
+    {
+        bool owned = true;
+        LabelWriteResult result = await this.WriteAsync(
+            itemId,
+            async (item, token) =>
+            {
+                OwnedLabel? row = await this.FindOwnedAsync(item, label, token);
+                owned = row is not null
+                    && await db.KidProfiles.AnyAsync(profile => profile.Id == row.KidProfileId && profile.ArchivedAt == null, token);
+                return !owned || item.Labels.Contains(label, LabelComparer)
+                    ? null
+                    : [.. item.Labels, row!.Label];
+            },
+            item => item.Labels.Contains(label, LabelComparer),
+            item => this.PointAtAsync(item, label),
+            (_, _) => Task.CompletedTask,
+            LabelWriteOutcome.Added,
+            LabelWriteOutcome.AlreadyPresent,
+            ct);
+
+        return result.Outcome == LabelWriteOutcome.AlreadyPresent && !owned
+            ? result with { Outcome = LabelWriteOutcome.NotOwned }
+            : result;
     }
 
     public async Task<ProfileLabels?> FindProfileLabelsAsync(string itemId, int kidProfileId, CancellationToken ct = default)
@@ -226,6 +254,16 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 await db.SaveChangesAsync(CancellationToken.None);
             }
         };
+    }
+
+    private async Task<Func<Task>> PointAtAsync(MediaItemLabels item, string label)
+    {
+        string serverId = item.ServerId;
+        string guid = item.Guid;
+        await db.OwnedLabels
+            .Where(owned => owned.ServerId == serverId && owned.Guid == guid && owned.Label == label)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(owned => owned.RatingKey, item.Id), CancellationToken.None);
+        return () => Task.CompletedTask;
     }
 
     private async Task ForgetAsync(MediaItemLabels item, string label, CancellationToken ct)
