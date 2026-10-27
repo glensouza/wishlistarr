@@ -13,6 +13,30 @@ body {
   line-height: 1.5;
 }
 
+.content-controls {
+  margin-block: var(--space-5);
+}
+
+.content-controls fieldset {
+  min-width: 0;
+  margin-block: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.content-controls label {
+  display: block;
+  margin-block: var(--space-3);
+}
+
+.content-controls input:not([type='checkbox']),
+.content-controls select {
+  display: block;
+  width: 100%;
+  max-width: 32rem;
+  min-height: var(--tap-size);
+}
+
 h1,
 h2 {
   font-family: var(--font-display);
@@ -879,4 +903,13 @@ fieldset label:has(input[type='checkbox']) {
   html[data-kid-scale] {
     font-size: clamp(1.25rem, 1.0416666667vw, 2.5rem);
   }
+}
+
+.content-controls li {
+  overflow-wrap: anywhere;
+  margin-block: var(--space-2);
+}
+
+.content-controls button {
+  white-space: normal;
 }
