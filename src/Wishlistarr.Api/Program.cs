@@ -99,6 +99,7 @@ builder.Services.AddBackgroundJob<RequestDispatchJob>(
     "Sends approved requests to Seerr, Sonarr or Radarr and picks up any that were interrupted.",
     TimeSpan.FromMinutes(1));
 builder.Services.AddScoped<RequestApproval>();
+builder.Services.AddScoped<RequestQueue>();
 builder.Services.AddScoped<RequestAccess>();
 builder.Services.AddTmdbDataRetention();
 builder.Services.AddScoped<LibraryLookup>();

@@ -41,7 +41,7 @@ TMDB's video list supplies the trailer. A video is kept only when `site` is exac
 
 Trailers are off unless a parent has stored `kids.youtube_trailers` as `true`. A missing value, a blank value, or anything that is not `true` or `false` is off. `PUT /api/v1/settings/kids.youtube_trailers` accepts only `true` or `false` (trimmed, any case), stores the canonical `true` or `false`, and never stores it as a secret. Anything else is `400` (`YouTube trailers are either true or false.`). The parent screen has a checkbox for this, shown only while a parent is signed in. While the saved value is loading, the checkbox is not shown. If it cannot be loaded, the screen shows an error with a retry button and no checkbox, so a stored `true` is never overwritten by a default.
 
-When the setting is off, `trailerKey` is `null`, the videos endpoint is not called, the screen renders no trailer control, and no YouTube script is loaded.
+When the setting is off, `trailerKey` is `null`, the videos endpoint is not called, the screen renders no trailer control, and no YouTube script is loaded. The parent approval queue uses the same trailer choice and the same player. When the setting is off, the queue does not ask TMDB for videos and does not show a play button.
 
 When the setting is on, the screen still does not contact YouTube until the kid presses play. There is no iframe and no YouTube thumbnail before that click. Playback uses the [IFrame Player API](https://developers.google.com/youtube/iframe_api_reference):
 

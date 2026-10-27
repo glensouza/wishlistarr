@@ -913,3 +913,44 @@ fieldset label:has(input[type='checkbox']) {
 .content-controls button {
   white-space: normal;
 }
+
+.parent-home {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.quick-actions,
+.approval-queue,
+.approval-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.quick-actions a,
+.approval-actions button {
+  min-height: var(--tap-size);
+}
+
+.approval-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.approval-card .trailer-stage {
+  max-width: 100%;
+}
+
+.button-deny {
+  background: var(--color-surface);
+  color: var(--color-danger);
+  border: 2px solid var(--color-danger);
+}
+
+.button-deny:hover:not(:disabled) {
+  background: var(--color-surface);
+}

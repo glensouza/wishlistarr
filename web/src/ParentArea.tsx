@@ -16,6 +16,7 @@ import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
 import TrailerSetting from './TrailerSetting'
 import UpdateNotice from './UpdateNotice'
+import ParentHome from './ParentHome'
 import RequestHistoryPanel from './RequestHistoryPanel'
 
 export default function ParentArea() {
@@ -52,6 +53,7 @@ export default function ParentArea() {
           <p>
             <Link to="/about">{t('about.link')}</Link>
           </p>
+          <ParentHome />
           <RequestsAdmin />
           <KidProfilesAdmin />
           <ContentControls />

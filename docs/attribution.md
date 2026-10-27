@@ -22,7 +22,7 @@ Refer to the service as TMDB or The Movie Database.
 
 TMDB's watch provider data comes from JustWatch, and TMDB requires that the source is attributed as JustWatch (<https://developer.themoviedb.org/reference/movie-watch-providers>). `WatchProviders` is the component that renders provider names, and it always includes `WatchProviderCredit`, the text "Watch provider data from JustWatch". It is plain text so it is safe on kid screens. An empty list, or a list whose names are blank, renders nothing.
 
-The rule: any component that renders watch provider data must render `WatchProviders` (or `WatchProviderCredit`). A test in `web/src/about/WatchProviders.test.tsx` scans every `.tsx` file and fails if one mentions provider fields (watch providers, `provider_name`, `provider_id`, `display_priority`, `logo_path`, `flatrate`, JustWatch) without using one of those components. Provider data is not shown on any screen yet.
+The rule: any component that renders watch provider data must render `WatchProviders` (or `WatchProviderCredit`). A test in `web/src/about/WatchProviders.test.tsx` scans every `.tsx` file and fails if one mentions provider fields (watch providers, `provider_name`, `provider_id`, `display_priority`, `logo_path`, `flatrate`, JustWatch) without using one of those components. The parent approval queue is the screen that shows provider names, and it does so only through `WatchProviders`, so the credit is plain text and there is no link. The About page is the only place that credit is a link, to <https://www.justwatch.com/>. Kid screens do not show provider names.
 
 The About page shows the same credit with a link to <https://www.justwatch.com/>. Wishlistarr does not ship the JustWatch logo or streaming-service logos.
 

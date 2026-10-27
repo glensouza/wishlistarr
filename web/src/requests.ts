@@ -1,4 +1,5 @@
 import { request } from './api'
+import type { MessageKey } from './i18n'
 
 export type RequestState =
   | 'pending'
@@ -119,3 +120,52 @@ export const retryRequests = (ids: number[]) =>
     ids,
     reason: null,
   })
+
+export const decisionResultKey: Record<
+  DecisionStatus | 'unsent' | 'unknown',
+  MessageKey
+> = {
+  succeeded: 'requests.result.succeeded',
+  alreadyDecided: 'requests.result.alreadyDecided',
+  notFound: 'requests.result.notFound',
+  failed: 'requests.result.failed',
+  conflict: 'requests.result.conflict',
+  notProcessed: 'requests.result.notProcessed',
+  unsent: 'requests.result.unsent',
+  unknown: 'requests.result.unknown',
+}
+
+const decisionStatuses = new Set<string>([
+  'succeeded',
+  'alreadyDecided',
+  'notFound',
+  'failed',
+  'conflict',
+  'notProcessed',
+])
+
+export function readDecision(body: unknown, id: number): DecisionItem | null {
+  if (typeof body !== 'object' || body === null || !('results' in body)) {
+    return null
+  }
+  const results = (body as { results?: unknown }).results
+  if (!Array.isArray(results)) return null
+  const found = results.find(
+    (item) =>
+      typeof item === 'object' &&
+      item !== null &&
+      'id' in item &&
+      (item as { id?: unknown }).id === id,
+  )
+  if (typeof found !== 'object' || found === null || !('status' in found)) {
+    return null
+  }
+  const status = (found as { status?: unknown }).status
+  if (typeof status !== 'string' || !decisionStatuses.has(status)) return null
+  const state = 'state' in found ? (found as { state?: unknown }).state : null
+  return {
+    id,
+    status: status as DecisionStatus,
+    state: typeof state === 'string' ? (state as RequestState) : null,
+  }
+}

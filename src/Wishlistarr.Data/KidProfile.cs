@@ -1,5 +1,6 @@
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Kids;
+using Wishlistarr.Core.Requests;
 
 namespace Wishlistarr.Data;
 
@@ -53,6 +54,8 @@ public sealed class KidProfile
             Allowed = this.TitleRules.Where(row => !row.Blocked).Select(row => new TitleKey(row.Kind, row.TmdbId)).ToHashSet(),
         };
     }
+
+    public AutoApproveRule AutoApproval() => new(this.AutoApprove, this.AutoApproveMovieRating, this.AutoApproveTvRating);
 
     public int FailedPinCount { get; set; }
 

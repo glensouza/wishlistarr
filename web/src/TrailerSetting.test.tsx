@@ -68,6 +68,30 @@ it('turns trailers on only when the stored value is true', async () => {
   expect(((await checkbox()) as HTMLInputElement).checked).toBe(true)
 })
 
+it('keeps the trailer heading while the setting is loading', async () => {
+  let release: ((response: Response) => void) | undefined
+  settingsReply = () =>
+    new Promise<Response>((resolve) => {
+      release = resolve
+    })
+  render(<TrailerSetting />)
+
+  expect(screen.getByRole('heading', { name: 'YouTube trailers' }).id).toBe(
+    'trailers-heading',
+  )
+  expect(screen.getByRole('status').textContent).toBe('Loading')
+  expect(
+    screen.queryByRole('checkbox', { name: 'Let kids play YouTube trailers' }),
+  ).toBeNull()
+
+  release?.(Response.json([]))
+  expect(
+    ((await checkbox()) as HTMLInputElement)
+      .closest('section')
+      ?.querySelector('#trailers-heading'),
+  ).toBeTruthy()
+})
+
 it('does not show the checkbox as on while the setting is still loading', async () => {
   let release: ((response: Response) => void) | undefined
   settingsReply = () =>
