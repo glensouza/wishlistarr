@@ -58,6 +58,10 @@ function rememberedBox(
   return saved.rect
 }
 
+function isRadio(target: EventTarget | null) {
+  return target instanceof HTMLInputElement && target.type === 'radio'
+}
+
 function moveNearest(
   origin: Box,
   candidates: readonly HTMLElement[],
@@ -70,7 +74,10 @@ function moveNearest(
     direction,
   )
   const next = index === null ? null : (candidates[index] ?? null)
-  if (!next) return
+  if (!next) {
+    if (isRadio(event.target)) event.preventDefault()
+    return
+  }
   event.preventDefault()
   moveFocus(next)
 }

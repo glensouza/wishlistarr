@@ -297,7 +297,7 @@ it('moves between the season choices and ask with the arrow keys', async () => {
   })
   season.focus()
   season.dispatchEvent(edge)
-  expect(edge.defaultPrevented).toBe(false)
+  expect(edge.defaultPrevented).toBe(true)
   expect(document.activeElement).toBe(season)
 })
 
