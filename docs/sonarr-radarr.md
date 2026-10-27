@@ -32,4 +32,7 @@ Wishlistarr can fulfil approved requests by adding titles directly to Sonarr (TV
 - A new show is added with the chosen profile, root folder and tags, only the requested seasons monitored, and a search when it is added.
 - A new movie is added monitored with the chosen profile, root folder and tags, and a search when it is added.
 
-Wiring fulfilment into the request state machine is not part of this change.
+- An empty list of seasons means the whole show: every season except specials (season 0).
+- The title is looked up in the backend before it is added, and a retry finds it there. When the add is refused because the title is already in Sonarr or Radarr, which both answer `400` with the `SeriesExistsValidator` or `MovieExistsValidator` error code (the validators' message is "This series has already been added" or "This movie has already been added"), the backend lists the title again and treats it as reused, so two attempts never produce two titles.
+
+Approved requests are sent here when `fulfilment.mode` is `arr`. See [requests.md](requests.md#dispatching).

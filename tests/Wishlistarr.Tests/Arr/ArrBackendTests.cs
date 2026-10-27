@@ -171,13 +171,54 @@ public sealed class ArrBackendTests
     }
 
     [Fact]
-    public async Task Sonarr_rejects_a_request_without_seasons_or_for_the_wrong_kind()
+    public async Task Sonarr_rejects_a_request_for_the_wrong_kind()
     {
         await using ArrHarness harness = await ArrHarness.CreateAsync(ArrService.Sonarr);
 
-        await Assert.ThrowsAsync<ArgumentException>(() => harness.Backend.FulfilAsync(new FulfilmentRequest(MediaKind.Show, FakeArrServer.ShowTmdbId, [])));
         await Assert.ThrowsAsync<ArgumentException>(() => harness.Backend.FulfilAsync(new FulfilmentRequest(MediaKind.Movie, FakeArrServer.ShowTmdbId, [1])));
         Assert.Empty(harness.Server.Sent("POST", "/api/v3/series"));
+    }
+
+    [Fact]
+    public async Task Sonarr_monitors_every_season_but_specials_when_none_are_named()
+    {
+        await using ArrHarness harness = await ArrHarness.CreateAsync(ArrService.Sonarr);
+
+        FulfilmentResult result = await harness.Backend.FulfilAsync(new FulfilmentRequest(MediaKind.Show, FakeArrServer.ShowTmdbId, []));
+
+        Assert.Equal(FulfilmentOutcome.Added, result.Outcome);
+        JsonObject added = Assert.Single(harness.Server.Library);
+        Assert.Equal(
+            [(0, false), (1, true), (2, true), (3, true)],
+            added["seasons"]!.AsArray().Select(season => (season!["seasonNumber"]!.GetValue<int>(), season["monitored"]!.GetValue<bool>())));
+    }
+
+    [Fact]
+    public async Task Sonarr_reuses_a_show_that_the_backend_refuses_as_already_added()
+    {
+        await using ArrHarness harness = await ArrHarness.CreateAsync(ArrService.Sonarr);
+        JsonObject seeded = harness.Server.SeedSeries(monitored: false);
+        harness.Server.HideNextLookup = true;
+
+        FulfilmentResult result = await harness.Backend.FulfilAsync(new FulfilmentRequest(MediaKind.Show, FakeArrServer.ShowTmdbId, [1]));
+
+        Assert.Equal(FulfilmentOutcome.Reused, result.Outcome);
+        Assert.Equal(seeded["id"]!.GetValue<int>(), result.ArrId);
+        Assert.Single(harness.Server.Library);
+    }
+
+    [Fact]
+    public async Task Radarr_reuses_a_movie_that_the_backend_refuses_as_already_added()
+    {
+        await using ArrHarness harness = await ArrHarness.CreateAsync(ArrService.Radarr);
+        JsonObject seeded = harness.Server.SeedMovie(monitored: true, hasFile: true);
+        harness.Server.HideNextLookup = true;
+
+        FulfilmentResult result = await harness.Backend.FulfilAsync(new FulfilmentRequest(MediaKind.Movie, FakeArrServer.MovieTmdbId, []));
+
+        Assert.Equal(FulfilmentOutcome.Reused, result.Outcome);
+        Assert.Equal(seeded["id"]!.GetValue<int>(), result.ArrId);
+        Assert.Single(harness.Server.Library);
     }
 
     [Fact]
