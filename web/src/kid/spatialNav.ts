@@ -45,9 +45,8 @@ const horizontalCaret = new Set([
   'tel',
 ])
 
-const valueCaret = new Set([
+const stepped = new Set([
   'number',
-  'range',
   'date',
   'time',
   'datetime-local',
@@ -118,17 +117,57 @@ export function nearestIndex(
   return aligned ?? fallback
 }
 
+function caretAtEdge(control: HTMLTextAreaElement, key: string) {
+  const start = control.selectionStart
+  const end = control.selectionEnd
+  if (start === null || end === null || start !== end) return false
+  if (key === 'ArrowLeft') return start === 0
+  if (key === 'ArrowRight') return end === control.value.length
+  if (key === 'ArrowUp') return !control.value.slice(0, start).includes('\n')
+  if (key === 'ArrowDown') return !control.value.slice(end).includes('\n')
+  return false
+}
+
+function atLimit(input: HTMLInputElement, higher: boolean) {
+  const cap = higher ? input.max : input.min
+  if (cap === '' || input.value === '') return false
+  if (input.type === 'number') {
+    const value = input.valueAsNumber
+    const limit = Number(cap)
+    if (!Number.isFinite(value) || !Number.isFinite(limit)) return false
+    return higher ? value >= limit : value <= limit
+  }
+  return higher ? input.value >= cap : input.value <= cap
+}
+
 export function arrowMovesCaret(
   target: EventTarget | null,
   key: string,
 ): boolean {
   if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable || target instanceof HTMLTextAreaElement) {
-    return true
+  if (target.isContentEditable) return true
+  if (target instanceof HTMLTextAreaElement) return !caretAtEdge(target, key)
+  if (target instanceof HTMLSelectElement) {
+    if (key === 'ArrowUp') return target.selectedIndex > 0
+    if (key === 'ArrowDown') {
+      return target.selectedIndex < target.options.length - 1
+    }
+    return false
   }
-  if (target instanceof HTMLSelectElement) return true
   if (!(target instanceof HTMLInputElement)) return false
-  if (valueCaret.has(target.type)) return true
+  if (target.type === 'range') {
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return false
+    const value = target.valueAsNumber
+    const min = target.min === '' ? 0 : Number(target.min)
+    const max = target.max === '' ? 100 : Number(target.max)
+    if (!Number.isFinite(value)) return false
+    return key === 'ArrowLeft' ? value > min : value < max
+  }
+  if (stepped.has(target.type)) {
+    if (key === 'ArrowUp') return !atLimit(target, true)
+    if (key === 'ArrowDown') return !atLimit(target, false)
+    return false
+  }
   if (!horizontalCaret.has(target.type)) return false
   return key === 'ArrowLeft' || key === 'ArrowRight'
 }

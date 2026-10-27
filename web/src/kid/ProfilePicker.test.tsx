@@ -1,4 +1,10 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -250,6 +256,45 @@ it('moves between profiles with the arrow keys and signs in with Enter', async (
   ).toBeTruthy()
   const signIn = calls.find((call) => call.path === '/api/v1/kid/signin')
   expect(signIn?.body).toEqual({ profileId: 2 })
+})
+
+it('moves from the PIN heading to the keys with the arrow keys', async () => {
+  const user = userEvent.setup()
+  renderApp()
+  await user.click(
+    await screen.findByRole('button', { name: 'Sign in as Ada' }),
+  )
+  const heading = await screen.findByRole('heading', {
+    name: 'Hi Ada! Enter your PIN',
+  })
+  expect(heading.tabIndex).toBe(-1)
+  const key = (name: string) => screen.getByRole('button', { name })
+  place(heading, 16, 0, 248, 40)
+  const columns = [16, 104, 192]
+  const rows = [72, 152, 232, 312]
+  const grid = [
+    ['1', '2', '3'],
+    ['4', '5', '6'],
+    ['7', '8', '9'],
+    ['Delete last digit', '0', 'Go'],
+  ]
+  grid.forEach((labels, row) => {
+    labels.forEach((label, column) => {
+      place(key(label), columns[column], rows[row], 72, 64)
+    })
+  })
+  place(key('Not me'), 104, 400, 160, 48)
+  heading.focus()
+  fireEvent.keyDown(heading, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(key('2'))
+  fireEvent.keyDown(key('2'), { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(key('3'))
+  fireEvent.keyDown(key('3'), { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(key('2'))
+  fireEvent.keyDown(key('2'), { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(key('5'))
+  fireEvent.keyDown(key('5'), { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(key('2'))
 })
 
 it('signs out back to the picker', async () => {

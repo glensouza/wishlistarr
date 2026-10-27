@@ -76,12 +76,8 @@ function fontSizeAt(
 
 it('scales kid screens up from a 1080p base to a larger 4K base', () => {
   const rules = scaleRules(styles)
-  expect(rules.map((rule) => rule.minWidth)).toEqual(
-    expect.arrayContaining([1920, 3840]),
-  )
-  const hd = fontSizeAt(rules, 1920)
-  const uhd = fontSizeAt(rules, 3840)
-  expect(hd).toBeGreaterThan(initialFontPx)
-  expect(uhd).toBeGreaterThan(hd)
   expect(fontSizeAt(rules, 1280)).toBe(initialFontPx)
+  expect(fontSizeAt(rules, 1920)).toBeCloseTo(20, 4)
+  expect(fontSizeAt(rules, 2560)).toBeCloseTo(80 / 3, 4)
+  expect(fontSizeAt(rules, 3840)).toBeCloseTo(40, 4)
 })

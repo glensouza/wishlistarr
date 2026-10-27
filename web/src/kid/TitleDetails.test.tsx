@@ -228,6 +228,79 @@ it('moves between the back link and the trailer with the arrow keys', async () =
   expect(document.activeElement).toBe(back)
 })
 
+it('moves between the season choices and ask with the arrow keys', async () => {
+  payload = structuredClone(show)
+  renderAt('/title/show/82728')
+  const ask = await screen.findByRole('button', { name: 'Ask' })
+  const back = screen.getByRole('link', { name: 'Back' })
+  const specials = screen.getByRole('radio', {
+    name: 'Specials',
+  }) as HTMLInputElement
+  const season = screen.getByRole('radio', {
+    name: 'Season 1',
+  }) as HTMLInputElement
+  const puppy = screen.getByRole('radio', {
+    name: 'The puppy year',
+  }) as HTMLInputElement
+  place(back, 0, 0, 96, 40)
+  place(ask, 0, 120, 180, 56)
+  place(specials, 0, 240, 168, 44)
+  place(season, 188, 252, 168, 44)
+  place(puppy, 376, 236, 180, 44)
+
+  expect(season.checked).toBe(true)
+  expect(specials.checked).toBe(false)
+  ask.focus()
+  const down = new KeyboardEvent('keydown', {
+    key: 'ArrowDown',
+    bubbles: true,
+    cancelable: true,
+  })
+  ask.dispatchEvent(down)
+  expect(down.defaultPrevented).toBe(true)
+  expect(document.activeElement).toBe(specials)
+  expect(specials.checked).toBe(false)
+  expect(season.checked).toBe(true)
+
+  specials.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+  expect(document.activeElement).toBe(season)
+  expect(season.checked).toBe(true)
+  season.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'ArrowRight',
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+  expect(document.activeElement).toBe(puppy)
+  expect(puppy.checked).toBe(false)
+  puppy.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: 'Enter',
+      bubbles: true,
+      cancelable: true,
+    }),
+  )
+  expect(puppy.checked).toBe(true)
+  expect(season.checked).toBe(false)
+
+  const edge = new KeyboardEvent('keydown', {
+    key: 'ArrowDown',
+    bubbles: true,
+    cancelable: true,
+  })
+  season.focus()
+  season.dispatchEvent(edge)
+  expect(edge.defaultPrevented).toBe(false)
+  expect(document.activeElement).toBe(season)
+})
+
 it('shows the title and loads a trailer only after play is clicked', async () => {
   const user = userEvent.setup()
   const { container } = renderAt('/title/movie/800')

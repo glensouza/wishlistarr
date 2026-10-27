@@ -57,6 +57,27 @@ const rows = [
 
 let homeStatus = 200
 let homeBody: unknown = { rows }
+let wishlistItems: {
+  id: number
+  kind: 'movie' | 'show'
+  tmdbId: number
+  title: string | null
+  state: string
+  note: string | null
+  plex: { webUrl: string } | null
+}[] = []
+let historyPage:
+  | {
+      id: number
+      requestId: number
+      kind: 'movie' | 'show'
+      tmdbId: number
+      title: string
+      action: string
+      at: string
+      note: string | null
+    }[]
+  | null = null
 let requests: {
   path: string
   method: string
@@ -67,6 +88,8 @@ let requests: {
 beforeEach(() => {
   homeStatus = 200
   homeBody = { rows }
+  wishlistItems = []
+  historyPage = null
   requests = []
   vi.stubGlobal(
     'fetch',
@@ -88,7 +111,14 @@ beforeEach(() => {
         headers: new Headers(init?.headers),
       })
       if (path === '/api/v1/kid/wishlist') {
-        return Response.json({ remaining: null, resetsAt: null, items: [] })
+        return Response.json({
+          remaining: null,
+          resetsAt: null,
+          items: wishlistItems,
+        })
+      }
+      if (path.startsWith('/api/v1/kid/requests/history') && historyPage) {
+        return Response.json(historyPage)
       }
       if (path === '/api/v1/kid/home') {
         return Response.json(homeBody, { status: homeStatus })
@@ -270,6 +300,51 @@ it('keeps up and down on the column when ask buttons sit at different heights', 
   lowerTiny.focus()
   fireEvent.keyDown(lowerTiny, { key: 'ArrowLeft' })
   expect(document.activeElement).toBe(lowerTiny)
+})
+
+it('moves from the wishlist to the request tracker and on to sign out', async () => {
+  wishlistItems = [
+    {
+      id: 2,
+      kind: 'movie',
+      tmdbId: 700,
+      title: 'Ready Film',
+      state: 'ready',
+      note: null,
+      plex: {
+        webUrl:
+          'https://app.plex.tv/desktop/#!/server/machine/details?key=%2Flibrary%2Fmetadata%2F102',
+      },
+    },
+  ]
+  historyPage = Array.from({ length: 50 }, (_, index) => ({
+    id: index + 1,
+    requestId: 8,
+    kind: 'movie' as const,
+    tmdbId: 129,
+    title: `Title ${index + 1}`,
+    action: 'asked',
+    at: '2026-10-22T00:00:00Z',
+    note: null,
+  }))
+  renderHome()
+  const watch = await screen.findByRole('link', {
+    name: 'Watch Ready Film in Plex',
+  })
+  const more = await screen.findByRole('button', { name: 'Show more' })
+  const signOut = screen.getByRole('button', { name: 'Switch profile' })
+  place(watch, 24, 80, 260, 48)
+  place(more, 16, 320, 168, 56)
+  place(signOut, 16, 520, 188, 56)
+  watch.focus()
+  fireEvent.keyDown(watch, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(more)
+  fireEvent.keyDown(more, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(signOut)
+  fireEvent.keyDown(signOut, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(more)
+  fireEvent.keyDown(more, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(watch)
 })
 
 it('moves from the last title to sign out when that control is the nearest one below', async () => {

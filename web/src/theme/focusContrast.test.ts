@@ -107,7 +107,8 @@ it('gives the focus ring 3:1 contrast against the surfaces it is drawn on', () =
 })
 
 it('paints a keyboard ring and a remote ring from the focus token', () => {
-  const rings = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) =>
+  const painted = styles.replace(/\/\*[\s\S]*?\*\//g, '')
+  const rings = [...painted.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) =>
     match[2].includes('var(--color-focus)'),
   )
   const selectors = rings.flatMap((match) =>
@@ -122,6 +123,7 @@ it('paints a keyboard ring and a remote ring from the focus token', () => {
     expect(lengthPx(width), ring[1]).toBeGreaterThanOrEqual(2)
     const offset = /outline-offset:\s*([^;]+);/.exec(ring[2])
     expect(offset, ring[1]).toBeTruthy()
-    expect(lengthPx(offset?.[1] ?? ''), ring[1]).toBeGreaterThan(0)
+    const offsetPx = lengthPx(offset?.[1] ?? '')
+    expect(offsetPx, ring[1]).toBeGreaterThanOrEqual(lengthPx(width))
   }
 })
