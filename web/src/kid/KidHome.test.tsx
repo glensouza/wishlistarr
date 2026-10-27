@@ -148,6 +148,21 @@ function placeHomeCards() {
   })
 }
 
+function placeHomeCardsStaggered() {
+  document.querySelectorAll('.home-row').forEach((row, rowIndex) => {
+    row.querySelectorAll<HTMLElement>('.home-ask').forEach((button, column) => {
+      const shorterCard = column % 2 === 1
+      place(
+        button,
+        column * 188 + rowIndex * 24,
+        rowIndex * 340 + (shorterCard ? 44 : 0),
+        136,
+        56,
+      )
+    })
+  })
+}
+
 it('shows allowed rows with lazy posters, a reserved frame and a library badge', async () => {
   const { container } = renderHome()
 
@@ -208,6 +223,53 @@ it('moves focus across a row and between rows with the arrow keys', async () => 
   expect(document.activeElement).toBe(animationAsk)
   fireEvent.keyDown(animationAsk, { key: 'ArrowLeft' })
   expect(document.activeElement).toBe(animationAsk)
+})
+
+it('keeps up and down on the column when ask buttons sit at different heights', async () => {
+  homeBody = {
+    rows: [
+      {
+        id: 'popular',
+        genreId: null,
+        genreName: null,
+        items: [tiny, bluey],
+      },
+      {
+        id: 'genre:16',
+        genreId: 16,
+        genreName: 'Animation',
+        items: [tiny, bluey],
+      },
+    ],
+  }
+  renderHome()
+  const [topTiny, lowerTiny] = await screen.findAllByRole('button', {
+    name: 'Ask for Tiny Tale',
+  })
+  const [topBluey, lowerBluey] = screen.getAllByRole('button', {
+    name: 'Ask for Bluey',
+  })
+  placeHomeCardsStaggered()
+
+  topTiny.focus()
+  fireEvent.keyDown(topTiny, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(lowerTiny)
+  fireEvent.keyDown(lowerTiny, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(topTiny)
+  fireEvent.keyDown(topTiny, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(topBluey)
+  fireEvent.keyDown(topBluey, { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(topTiny)
+  topBluey.focus()
+  fireEvent.keyDown(topBluey, { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(lowerBluey)
+  fireEvent.keyDown(lowerBluey, { key: 'ArrowUp' })
+  expect(document.activeElement).toBe(topBluey)
+  fireEvent.keyDown(topBluey, { key: 'ArrowRight' })
+  expect(document.activeElement).toBe(topBluey)
+  lowerTiny.focus()
+  fireEvent.keyDown(lowerTiny, { key: 'ArrowLeft' })
+  expect(document.activeElement).toBe(lowerTiny)
 })
 
 it('moves from the last title to sign out when that control is the nearest one below', async () => {

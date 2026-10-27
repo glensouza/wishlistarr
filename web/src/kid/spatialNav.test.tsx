@@ -72,11 +72,18 @@ it('chooses the nearest box in the arrow direction', () => {
   expect(nearestIndex(below, boxes, 'up')).toBe(0)
 })
 
-it('prefers a nearer diagonal over a farther control on the same axis', () => {
-  const origin = box(0, 0, 40, 40)
-  const diagonal = box(48, 36, 40, 40)
-  const straight = box(0, 420, 40, 40)
-  expect(nearestIndex(origin, [straight, diagonal], 'down')).toBe(1)
+it('prefers a control in line over a nearer one off to the side', () => {
+  const origin = box(0, 0, 136, 56)
+  const beside = box(168, 64, 136, 56)
+  const below = box(12, 280, 136, 56)
+  expect(nearestIndex(origin, [beside, below], 'down')).toBe(1)
+})
+
+it('does not treat a control tucked under the current one as being to the side', () => {
+  const origin = box(40, 0, 160, 48)
+  const under = box(72, 140, 160, 48)
+  expect(nearestIndex(origin, [under], 'right')).toBeNull()
+  expect(nearestIndex(origin, [under], 'down')).toBe(0)
 })
 
 it('skips a target that has no area', () => {
@@ -84,6 +91,45 @@ it('skips a target that has no area', () => {
   const invisible = { left: 0, top: 80, right: 0, bottom: 120 }
   const real = box(0, 200, 40, 40)
   expect(nearestIndex(origin, [invisible, real], 'down')).toBe(1)
+})
+
+it('moves by row when buttons in a row sit at different heights', () => {
+  render(
+    <KidScreen>
+      <button type="button">Tiny</button>
+      <button type="button">Bluey</button>
+      <button type="button">Tiny again</button>
+      <button type="button">Bluey again</button>
+    </KidScreen>,
+  )
+  const topTiny = screen.getByRole('button', { name: 'Tiny' })
+  const topBluey = screen.getByRole('button', { name: 'Bluey' })
+  const lowerTiny = screen.getByRole('button', { name: 'Tiny again' })
+  const lowerBluey = screen.getByRole('button', { name: 'Bluey again' })
+  place(topTiny, 0, 0, 136, 56)
+  place(topBluey, 188, 44, 136, 56)
+  place(lowerTiny, 24, 340, 136, 56)
+  place(lowerBluey, 212, 384, 136, 56)
+
+  topTiny.focus()
+  press(topTiny, 'ArrowRight')
+  expect(document.activeElement).toBe(topBluey)
+  press(topBluey, 'ArrowLeft')
+  expect(document.activeElement).toBe(topTiny)
+  press(topTiny, 'ArrowDown')
+  expect(document.activeElement).toBe(lowerTiny)
+  press(lowerTiny, 'ArrowUp')
+  expect(document.activeElement).toBe(topTiny)
+  topBluey.focus()
+  press(topBluey, 'ArrowDown')
+  expect(document.activeElement).toBe(lowerBluey)
+  press(lowerBluey, 'ArrowUp')
+  expect(document.activeElement).toBe(topBluey)
+  press(topBluey, 'ArrowRight')
+  expect(document.activeElement).toBe(topBluey)
+  topTiny.focus()
+  press(topTiny, 'ArrowLeft')
+  expect(document.activeElement).toBe(topTiny)
 })
 
 it('moves to the spatially nearest control when that control comes later in the page', () => {

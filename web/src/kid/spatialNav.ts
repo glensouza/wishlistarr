@@ -10,7 +10,7 @@ export type Box = {
 
 export type Direction = 'left' | 'right' | 'up' | 'down'
 
-// Sub-pixel center drift must not count as up or down within a row.
+// One pixel of overlap is rounding, not a step into the next row or column.
 const directionSlop = 1
 
 const axis: Record<Direction, { horizontal: boolean; sign: 1 | -1 }> = {
@@ -59,32 +59,63 @@ export function directionOf(key: string): Direction | null {
   return directions[key] ?? null
 }
 
+function crossOverlap(origin: Box, box: Box, horizontal: boolean) {
+  if (horizontal) {
+    return origin.top < box.bottom && box.top < origin.bottom
+  }
+  return origin.left < box.right && box.left < origin.right
+}
+
 export function nearestIndex(
   origin: Box,
   boxes: readonly Box[],
   direction: Direction,
 ): number | null {
-  const originX = (origin.left + origin.right) / 2
-  const originY = (origin.top + origin.bottom) / 2
   const { horizontal, sign } = axis[direction]
-  let best: number | null = null
-  let bestScore = Number.POSITIVE_INFINITY
+  const originCross =
+    (horizontal ? origin.top + origin.bottom : origin.left + origin.right) / 2
+  let aligned: number | null = null
+  let alignedTravel = Number.POSITIVE_INFINITY
+  let alignedDrift = Number.POSITIVE_INFINITY
+  let fallback: number | null = null
+  let fallbackScore = Number.POSITIVE_INFINITY
 
   boxes.forEach((box, index) => {
     if (box.right - box.left <= 0 || box.bottom - box.top <= 0) return
-    const dx = (box.left + box.right) / 2 - originX
-    const dy = (box.top + box.bottom) / 2 - originY
-    const primary = (horizontal ? dx : dy) * sign
-    if (primary <= directionSlop) return
-    const secondary = horizontal ? dy : dx
-    const score = primary * primary + secondary * secondary
-    if (score < bestScore) {
-      bestScore = score
-      best = index
+    const primary = horizontal
+      ? sign === 1
+        ? box.left - origin.right
+        : origin.left - box.right
+      : sign === 1
+        ? box.top - origin.bottom
+        : origin.top - box.bottom
+    if (primary < -directionSlop) return
+
+    const travel = Math.max(primary, 0)
+    const boxCross =
+      (horizontal ? box.top + box.bottom : box.left + box.right) / 2
+    const secondary = boxCross - originCross
+    if (crossOverlap(origin, box, horizontal)) {
+      const drift = Math.abs(secondary)
+      if (
+        travel < alignedTravel ||
+        (travel === alignedTravel && drift < alignedDrift)
+      ) {
+        alignedTravel = travel
+        alignedDrift = drift
+        aligned = index
+      }
+      return
+    }
+
+    const score = travel * travel + secondary * secondary
+    if (score < fallbackScore) {
+      fallbackScore = score
+      fallback = index
     }
   })
 
-  return best
+  return aligned ?? fallback
 }
 
 export function arrowMovesCaret(
