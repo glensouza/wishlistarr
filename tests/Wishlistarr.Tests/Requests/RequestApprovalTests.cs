@@ -868,6 +868,8 @@ public sealed class RequestApprovalTests
         public Task<IReadOnlyList<MediaItem>> FindByExternalIdAsync(MediaKind kind, ExternalId id, CancellationToken ct = default) =>
             inner.FindByExternalIdAsync(kind, id, ct);
 
+        public Task<IReadOnlyList<MediaItem>> FindByGuidAsync(string guid, CancellationToken ct = default) => inner.FindByGuidAsync(guid, ct);
+
         public Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default) => inner.GetLabelsAsync(itemId, ct);
 
         public Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default) =>

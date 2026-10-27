@@ -30,6 +30,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
     private readonly ConcurrentQueue<RecordedRequest> requests = new();
     private readonly ConcurrentQueue<RecordedRequest> impostorRequests = new();
     private readonly ConcurrentDictionary<string, FakeItem> items = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> renamed = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> deleted = new(StringComparer.Ordinal);
     private readonly int[] closedPorts;
 
     private FakePlexServer(WebApplication app, Uri address, WebApplication impostor, Uri impostorAddress, int[] closedPorts)
@@ -106,6 +108,24 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     public FakeItem Item(string ratingKey) => this.items[ratingKey];
 
+    // Plex gives an item that is removed and added again a new rating key, and labels set on the old item are gone. A new guid stands for the title being matched to different metadata.
+    public FakeItem ReAddItem(string ratingKey, string newRatingKey, string? newGuid = null)
+    {
+        FakeItem old = this.items[ratingKey];
+        this.items.TryRemove(ratingKey, out _);
+        FakeItem added = new(newRatingKey, old.Type, newGuid ?? old.Guid, old.Title, old.Section);
+        this.items[newRatingKey] = added;
+        string original = this.renamed.FirstOrDefault(pair => pair.Value == ratingKey).Key ?? ratingKey;
+        this.renamed[original] = newRatingKey;
+        return added;
+    }
+
+    public void DeleteItem(string ratingKey)
+    {
+        this.items.TryRemove(ratingKey, out _);
+        this.deleted[ratingKey] = true;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await this.app.StopAsync();
@@ -160,10 +180,27 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         int size = int.TryParse(query["X-Plex-Container-Size"], CultureInfo.InvariantCulture, out int parsedSize) ? parsedSize : int.MaxValue;
         long? updatedSince = long.TryParse(query["updatedAt>>"], CultureInfo.InvariantCulture, out long parsedSince) ? parsedSince : null;
         string? labelKey = query["label"].ToString() is { Length: > 0 } requested ? requested : null;
+        string? guid = query["guid"].ToString() is { Length: > 0 } wanted ? wanted : null;
         JsonNode root = JsonNode.Parse(json)!;
         JsonObject container = root["MediaContainer"]!.AsObject();
         JsonArray items = container["Metadata"]!.AsArray();
+        foreach (JsonNode? item in items)
+        {
+            string key = item!["ratingKey"]!.GetValue<string>();
+            if (this.renamed.TryGetValue(key, out string? newKey))
+            {
+                item["ratingKey"] = newKey;
+                item["key"] = $"/library/metadata/{newKey}";
+                if (this.items.TryGetValue(newKey, out FakeItem? current))
+                {
+                    item["guid"] = current.Guid;
+                }
+            }
+        }
+
         List<JsonNode> matching = [.. items
+            .Where(item => !this.deleted.ContainsKey(item!["ratingKey"]!.GetValue<string>()))
+            .Where(item => guid is null || item!["guid"]?.GetValue<string>() == guid)
             .Where(item => updatedSince is null || (item!["updatedAt"]?.GetValue<long>() ?? 0) > updatedSince)
             .Where(item => labelKey is null || this.HasLabel(item!["ratingKey"]!.GetValue<string>(), labelKey))
             .Select(item => item!)];

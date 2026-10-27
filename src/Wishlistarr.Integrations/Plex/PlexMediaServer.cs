@@ -21,6 +21,8 @@ internal sealed partial class PlexMediaServer(
     private static readonly TimeSpan SelectionBackoffBase = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SelectionBackoffMax = TimeSpan.FromMinutes(1);
 
+    private const string PlexAgentGuidPrefix = "plex://";
+    private const int MaxGuidLength = 256;
     private const string NoConnectionMessage = "None of the Plex server's connections answered.";
 
     private readonly SemaphoreSlim identifierLock = new(1, 1);
@@ -227,6 +229,41 @@ internal sealed partial class PlexMediaServer(
             (server, token) => this.GetLookupAsync(server, kind, token),
             ct);
         return index.TryGetValue(id, out List<MediaItem>? items) ? items : [];
+    }
+
+    public async Task<IReadOnlyList<MediaItem>> FindByGuidAsync(string guid, CancellationToken ct = default)
+    {
+        if (!guid.StartsWith(PlexAgentGuidPrefix, StringComparison.Ordinal) || guid.Length > MaxGuidLength)
+        {
+            return [];
+        }
+
+        return await this.WithServerAsync<IReadOnlyList<MediaItem>>(
+            async (server, token) =>
+            {
+                int pageSize = Math.Max(1, options.Value.PageSize);
+                List<MediaItem> found = [];
+                PlexContainer sections = await servers.GetSectionsAsync(server, token);
+                foreach (PlexSection section in (sections.Directory ?? []).Where(section => section.Type is "movie" or "show" && IsValidKey(section.Key)))
+                {
+                    (MediaKind kind, int itemType) = section.Type == "movie" ? (MediaKind.Movie, 1) : (MediaKind.Show, 2);
+                    for (int start = 0; ; start += pageSize)
+                    {
+                        PlexContainer page = await servers.GetSectionItemsAsync(server, section.Key!, itemType, start, pageSize, token, guid: guid);
+                        IReadOnlyList<PlexMetadata> items = page.Metadata ?? [];
+                        found.AddRange(items
+                            .Where(item => IsValidKey(item.RatingKey) && item.Guid == guid)
+                            .Select(item => ToEntry(item, kind, section.Key!, false).Item));
+                        if (items.Count < pageSize || (page.TotalSize is int total && start + items.Count >= total))
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                return found;
+            },
+            ct);
     }
 
     public async Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default)
