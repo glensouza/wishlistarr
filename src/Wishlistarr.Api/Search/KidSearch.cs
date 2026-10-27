@@ -30,7 +30,7 @@ public sealed class KidSearch(
     public async Task<KidSearchResponse?> SearchAsync(int kidProfileId, string query, int page, CancellationToken ct = default)
     {
         KidProfile? profile = await db.KidProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
+            .FirstWithContentRulesAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
         if (profile is null)
         {
             return null;
@@ -39,14 +39,9 @@ public sealed class KidSearch(
         TmdbPage<TmdbSearchResult> found = await tmdb.SearchAsync(query, page: page, ct: ct);
         List<KidCandidate> candidates = [.. found.Results.Select(KidContentPipeline.ToCandidate).OfType<KidCandidate>().DistinctBy(item => item.Key)];
 
-        ContentPolicy policy = ContentPolicy.ForProfile(
-            profile.MovieAgeLimit,
-            profile.TvAgeLimit,
-            profile.BlockedGenreIds,
-            profile.BlockedKeywordIds,
-            profile.AllowedOriginalLanguages);
+        ContentPolicy policy = profile.ContentPolicy();
 
-        IReadOnlyList<KidMediaItem> results = await pipeline.FilterAsync(candidates, policy, allowedOnly: false, ct);
+        IReadOnlyList<KidMediaItem> results = await pipeline.FilterAsync(candidates, policy, profile.Id, allowedOnly: false, ct);
         return new KidSearchResponse(query, page, page < Math.Min(found.TotalPages, MaxPage), results);
     }
 }

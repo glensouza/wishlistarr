@@ -27,6 +27,7 @@ What is stored:
 | Data | Where | Kept |
 | --- | --- | --- |
 | The TMDB id found for a Plex item that only has a TVDB or IMDb id | `LibraryExternalIds`, rows with origin `TmdbLookup` | Until the retention is reached, then deleted. The item is looked up again by the next library refresh. |
+| The title text of a profile title rule | `ProfileTitleRules.Title` with `TitleFetchedAt` | Until retention is reached, then cleared while preserving the rule. Only names still present on active profiles are refreshed. Imported/client names have no fetched timestamp and expire on the next purge. |
 | The title text of a kid request | `MediaRequests.Title` with `TitleFetchedAt` | Until the retention is reached, then cleared. The request keeps its kind, TMDB id and status, and the title is fetched again from TMDB the next time it is needed. |
 
 Ids that Plex reports, request ids and states, and library titles (a kind plus a TMDB id, nothing else) are not TMDB metadata and are not subject to the retention. Posters and other images are proxied from TMDB per request and are never written to disk. Keyword ids read for a content decision are not written to the database either; they stay in the response cache. The in-memory response cache holds entries for at most 7 days and is emptied when stored TMDB data is cleared.

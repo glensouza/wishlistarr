@@ -59,3 +59,5 @@ A profile that is not assigned to the device is not subject to backoff, so repea
 ### Parent notifications
 
 After 5 consecutive failures on one device (`Kids:NotifyThreshold`) and when a profile locks on a device, Wishlistarr calls `IParentNotifier.NotifyAsync` with a `ParentNotification(Kind, Message)`; the kinds are `kid.pin.failures` and `kid.profile.locked`. The only implementation for now writes a warning to the log. Messages contain the profile name, the device name and counts, never a PIN. Add another `IParentNotifier` registration to deliver them elsewhere.
+
+Content controls also provide title lists, preview, and atomic JSON import/export. See [parent content controls](content-policy.md#parent-content-controls) for the API routes and validation.

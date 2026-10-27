@@ -10,6 +10,8 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<ParentSession> ParentSessions => this.Set<ParentSession>();
 
+    public DbSet<ProfileTitleRule> ProfileTitleRules => this.Set<ProfileTitleRule>();
+
     public DbSet<KidProfile> KidProfiles => this.Set<KidProfile>();
 
     public DbSet<KidSession> KidSessions => this.Set<KidSession>();
@@ -87,6 +89,15 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
                 .HasForeignKey(attempt => attempt.KidProfileId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<ProfileTitleRule>(entity =>
+        {
+            entity.Property(row => row.Kind).HasConversion<string>();
+            entity.HasKey(row => new { row.KidProfileId, row.Kind, row.TmdbId, row.Blocked });
+            entity.Property(row => row.Title).HasMaxLength(300).UseCollation("NOCASE");
+            entity.HasOne<KidProfile>().WithMany(profile => profile.TitleRules).HasForeignKey(row => row.KidProfileId).OnDelete(DeleteBehavior.Cascade);
+        });
+
 
         modelBuilder.Entity<KidSession>(entity =>
         {

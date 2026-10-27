@@ -29,7 +29,6 @@ public sealed record KidAllowanceSnapshot(int? Remaining, DateTimeOffset? Resets
 public sealed partial class KidRequestFlow(
     WishlistarrDbContext db,
     MediaRequests requests,
-    RequestTitles titles,
     ITmdbClient tmdb,
     LibraryLookup library,
     RequestLabeling labeling,
@@ -66,50 +65,24 @@ public sealed partial class KidRequestFlow(
     public async Task<KidRequestResult> SubmitAsync(int kidProfileId, TitleKey title, CancellationToken ct = default)
     {
         KidProfile? profile = await db.KidProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
+            .FirstWithContentRulesAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
         if (profile is null)
         {
             return new KidRequestResult(KidRequestOutcome.ProfileNotFound);
         }
 
-        TmdbMediaType type = title.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-        if (await titles.FetchAsync(title.Kind, title.TmdbId, ct) is not (string name, TmdbDetails details))
+        PolicyEvaluation? evaluation = await this.EvaluateAsync(profile, title, ct);
+        if (evaluation is null)
         {
             return new KidRequestResult(KidRequestOutcome.TitleNotFound);
         }
 
-        TmdbCertification? certification = await tmdb.GetCertificationAsync(type, title.TmdbId, [RatingScale.UsRegion], ct);
-        IReadOnlyList<int>? keywordIds = null;
-        if (profile.BlockedKeywordIds.Count > 0)
-        {
-            try
-            {
-                keywordIds = [.. (await tmdb.GetKeywordsAsync(type, title.TmdbId, ct)).Select(keyword => keyword.Id)];
-            }
-            catch (Exception ex) when (ex is not TmdbNotConfiguredException
-                && !ct.IsCancellationRequested
-                && ex is TmdbException or HttpRequestException or TaskCanceledException)
-            {
-                this.LogKeywordLookupFailed(ex, title.Kind, title.TmdbId);
-                return new KidRequestResult(KidRequestOutcome.NotAllowed);
-            }
-        }
-
-        ContentTitle content = new(
-            title,
-            certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
-            details.Genres is null ? null : [.. details.Genres.Select(genre => genre.Id)],
-            keywordIds,
-            details.OriginalLanguage);
-        ContentPolicy policy = ContentPolicy.ForProfile(
-            profile.MovieAgeLimit,
-            profile.TvAgeLimit,
-            profile.BlockedGenreIds,
-            profile.BlockedKeywordIds,
-            profile.AllowedOriginalLanguages);
-        ContentDecision decision = ContentPolicyEngine.Default.Evaluate(content, policy);
+        string name = evaluation.Name;
+        ContentTitle content = evaluation.Content;
+        ContentPolicy policy = evaluation.Policy;
+        ContentDecision decision = evaluation.Decision;
         bool revokedBefore = await this.WasRevokedAsync(profile.Id, title, ct);
-        if (decision.Outcome == ContentOutcome.Blocked && !revokedBefore)
+        if (decision.Outcome == ContentOutcome.Blocked)
         {
             this.LogBlocked(profile.Id, title.Kind, title.TmdbId, decision.Reason.Code);
             return new KidRequestResult(KidRequestOutcome.NotAllowed);
@@ -201,6 +174,9 @@ public sealed partial class KidRequestFlow(
         return new KidRequestResult(KidRequestOutcome.Created, await requests.GetAsync(request.Id, ct) ?? request);
     }
 
+    public async Task<PolicyEvaluation?> EvaluateAsync(KidProfile profile, TitleKey title, CancellationToken ct) =>
+        await Kids.KidPolicyEvaluator.EvaluateAsync(tmdb, title, profile.ContentPolicy(), await this.WasRevokedAsync(profile.Id, title, ct), ct);
+
     private async Task<(IReadOnlyList<MediaItem> Items, bool Known)> FindInLibraryAsync(TitleKey title, CancellationToken ct)
     {
         try
@@ -253,9 +229,8 @@ public sealed partial class KidRequestFlow(
     [LoggerMessage(Level = LogLevel.Information, Message = "Request by profile {ProfileId} for {Kind} {TmdbId} was blocked by content policy ({Reason})")]
     private partial void LogBlocked(int profileId, MediaKind kind, int tmdbId, ContentReasonCode reason);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword lookup failed for {Kind} {TmdbId}; the request was refused")]
-    private partial void LogKeywordLookupFailed(Exception ex, MediaKind kind, int tmdbId);
-
     [LoggerMessage(Level = LogLevel.Warning, Message = "Library lookup for {Kind} {TmdbId} failed; treating it as not in the library")]
     private partial void LogLookupFailed(Exception ex, MediaKind kind, int tmdbId);
 }
+
+public sealed record PolicyEvaluation(string Name, ContentTitle Content, ContentPolicy Policy, ContentDecision Decision, TmdbDetails? Details = null);

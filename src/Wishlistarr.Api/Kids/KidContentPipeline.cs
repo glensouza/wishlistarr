@@ -1,8 +1,11 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
+using Wishlistarr.Core.Requests;
+using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Kids;
@@ -36,7 +39,8 @@ public sealed partial class KidContentPipeline(
     ITmdbClient tmdb,
     IEnumerable<ILibraryIndex> indexes,
     TimeProvider time,
-    ILogger<KidContentPipeline> logger)
+    ILogger<KidContentPipeline> logger,
+    WishlistarrDbContext db)
 {
     public const int MaxParallelLookups = 8;
     public const string PosterSize = "w342";
@@ -105,84 +109,38 @@ public sealed partial class KidContentPipeline(
     public async Task<IReadOnlyList<KidMediaItem>> FilterAsync(
         IReadOnlyList<KidCandidate> candidates,
         ContentPolicy policy,
+        int profileId,
         bool allowedOnly,
         CancellationToken ct = default)
     {
-        bool keywords = policy.BlockedKeywordIds.Count > 0;
-        ConcurrentDictionary<TitleKey, KnownTitle> known = await this.LookUpAsync(candidates, keywords, ct);
-
-        List<KidMediaItem> results = [];
-        foreach (KidCandidate candidate in candidates)
-        {
-            if (!known.TryGetValue(candidate.Key, out KnownTitle? title))
-            {
-                continue;
-            }
-
-            ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
-                new ContentTitle(candidate.Key, title.Certifications, candidate.GenreIds, title.KeywordIds, candidate.OriginalLanguage),
-                policy);
-
-            if (allowedOnly)
-            {
-                if (decision.Outcome == ContentOutcome.Allowed)
-                {
-                    results.Add(await this.ToItemAsync(candidate, needsParent: false, ct));
-                }
-            }
-            else
-            {
-                if (decision.Outcome != ContentOutcome.Blocked)
-                {
-                    results.Add(await this.ToItemAsync(candidate, decision.Outcome == ContentOutcome.NeedsApproval, ct));
-                }
-            }
-        }
-
-        return results;
-    }
-
-    private async Task<ConcurrentDictionary<TitleKey, KnownTitle>> LookUpAsync(
-        IReadOnlyList<KidCandidate> candidates,
-        bool keywords,
-        CancellationToken ct)
-    {
-        ConcurrentDictionary<TitleKey, KnownTitle> known = [];
+        HashSet<TitleKey> revoked = [.. (await db.MediaRequests.AsNoTracking()
+            .Where(row => row.KidProfileId == profileId && row.State == RequestState.Revoked)
+            .Select(row => new { row.Kind, row.TmdbId }).ToListAsync(ct))
+            .Select(row => new TitleKey(row.Kind, row.TmdbId))];
+        ConcurrentDictionary<TitleKey, ContentDecision> decisions = [];
         using CancellationTokenSource deadline = new(LookupBudget, time);
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
         try
         {
-            await Parallel.ForEachAsync(
-                candidates,
+            await Parallel.ForEachAsync(candidates,
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelLookups, CancellationToken = budget.Token },
                 async (candidate, token) =>
                 {
-                    try
-                    {
-                        TmdbMediaType type = candidate.Key.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-                        TmdbCertification? certification = await tmdb.GetCertificationAsync(type, candidate.Key.TmdbId, [RatingScale.UsRegion], token);
-                        IReadOnlyList<int>? keywordIds = null;
-                        if (keywords)
-                        {
-                            keywordIds = [.. (await tmdb.GetKeywordsAsync(type, candidate.Key.TmdbId, token)).Select(item => item.Id)];
-                        }
-
-                        known[candidate.Key] = new KnownTitle(
-                            certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
-                            keywordIds);
-                    }
-                    catch (Exception ex) when (ex is TmdbException or HttpRequestException || (ex is TaskCanceledException && !token.IsCancellationRequested))
-                    {
-                        this.LogLookupFailed(ex, candidate.Key.Kind, candidate.Key.TmdbId);
-                    }
+                    if (await KidPolicyEvaluator.EvaluateAsync(tmdb, candidate.Key, policy, revoked.Contains(candidate.Key), token) is { } evaluation)
+                        decisions[candidate.Key] = evaluation.Decision;
                 });
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             this.LogBudgetExceeded(LookupBudget.TotalSeconds);
         }
-
-        return known;
+        List<KidMediaItem> results = [];
+        foreach (KidCandidate candidate in candidates)
+        {
+            if (decisions.TryGetValue(candidate.Key, out ContentDecision? decision) && KidPolicyEvaluator.Visible(decision, allowedOnly))
+                results.Add(await this.ToItemAsync(candidate, decision.Outcome == ContentOutcome.NeedsApproval, ct));
+        }
+        return results;
     }
 
     private async Task<KidMediaItem> ToItemAsync(KidCandidate candidate, bool needsParent, CancellationToken ct) =>
@@ -210,11 +168,7 @@ public sealed partial class KidContentPipeline(
         return null;
     }
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Certification or keyword lookup failed for {Kind} {TmdbId}")]
-    private partial void LogLookupFailed(Exception exception, MediaKind kind, int tmdbId);
-
     [LoggerMessage(Level = LogLevel.Warning, Message = "Certification and keyword lookups did not finish within {Seconds} s; unresolved titles were left out")]
     private partial void LogBudgetExceeded(double seconds);
 
-    private sealed record KnownTitle(IReadOnlyList<RegionCertification> Certifications, IReadOnlyList<int>? KeywordIds);
 }

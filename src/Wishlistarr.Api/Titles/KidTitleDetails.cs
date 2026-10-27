@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Api.Kids;
+using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Core.Content;
@@ -59,85 +60,32 @@ public sealed partial class KidTitleDetails(
     public async Task<KidTitleResult> GetAsync(int kidProfileId, MediaKind kind, int tmdbId, CancellationToken ct = default)
     {
         KidProfile? profile = await db.KidProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
+            .FirstWithContentRulesAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
         if (profile is null)
         {
             return new KidTitleResult(KidTitleOutcome.ProfileNotFound);
         }
 
         TmdbMediaType type = kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
-        TmdbDetails details;
-        try
-        {
-            details = await tmdb.GetDetailsAsync(type, tmdbId, ct: ct);
-        }
-        catch (TmdbException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            return new KidTitleResult(KidTitleOutcome.NotFound);
-        }
-
-        string title = (kind == MediaKind.Movie ? details.Title : details.Name)?.Trim() ?? string.Empty;
-        if (title.Length == 0 || details.Adult)
-        {
-            if (details.Adult)
-            {
-                this.LogAdult(kind, tmdbId);
-            }
-
-            return new KidTitleResult(KidTitleOutcome.NotFound);
-        }
-
         TitleKey key = new(kind, tmdbId);
-        TmdbCertification? certification;
-        try
-        {
-            certification = await tmdb.GetCertificationAsync(type, tmdbId, [RatingScale.UsRegion], ct);
-        }
-        catch (Exception ex) when (LookupFailed(ex, ct))
-        {
-            this.LogCertificationFailed(ex, kind, tmdbId);
-            return new KidTitleResult(KidTitleOutcome.NotFound);
-        }
-
-        ContentPolicy policy = ContentPolicy.ForProfile(
-            profile.MovieAgeLimit,
-            profile.TvAgeLimit,
-            profile.BlockedGenreIds,
-            profile.BlockedKeywordIds,
-            profile.AllowedOriginalLanguages);
-        IReadOnlyList<int>? keywordIds = null;
-        if (policy.BlockedKeywordIds.Count > 0)
-        {
-            try
-            {
-                keywordIds = [.. (await tmdb.GetKeywordsAsync(type, tmdbId, ct)).Select(item => item.Id)];
-            }
-            catch (Exception ex) when (LookupFailed(ex, ct))
-            {
-                this.LogKeywordFailed(ex, kind, tmdbId);
-                return new KidTitleResult(KidTitleOutcome.NotFound);
-            }
-        }
-
-        ContentDecision decision = ContentPolicyEngine.Default.Evaluate(
-            new ContentTitle(
-                key,
-                certification is null ? [] : [new RegionCertification(certification.Region, certification.Rating)],
-                details.Genres is null ? null : [.. details.Genres.Select(genre => genre.Id)],
-                keywordIds,
-                details.OriginalLanguage),
-            policy);
+        ContentPolicy policy = profile.ContentPolicy();
+        bool revoked = await db.MediaRequests.AnyAsync(row => row.KidProfileId == profile.Id && row.Kind == kind && row.TmdbId == tmdbId && row.State == RequestState.Revoked, ct);
+        PolicyEvaluation? evaluation = await KidPolicyEvaluator.EvaluateAsync(tmdb, key, policy, revoked, ct);
+        if (evaluation is null) return new KidTitleResult(KidTitleOutcome.NotFound);
+        ContentDecision decision = evaluation.Decision;
         if (decision.Outcome == ContentOutcome.Blocked)
         {
             this.LogHidden(kind, tmdbId, profile.Id, decision.Reason.Code);
             return new KidTitleResult(KidTitleOutcome.NotFound);
         }
 
+        TmdbDetails details = evaluation.Details!;
+        string title = evaluation.Name;
         bool masked = decision.Outcome == ContentOutcome.NeedsApproval;
         bool trailers = !masked && YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
         IReadOnlyList<KidCastMember> cast = masked ? [] : await this.CastAsync(type, tmdbId, kind, ct);
         string? trailer = trailers ? await this.TrailerAsync(type, tmdbId, kind, ct) : null;
-        string? rating = certification?.Rating?.Trim();
+        string? rating = evaluation.Content.Certifications.FirstOrDefault()?.Rating?.Trim();
         if (string.IsNullOrEmpty(rating))
         {
             rating = null;
@@ -340,15 +288,6 @@ public sealed partial class KidTitleDetails(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Title {Kind} {TmdbId} was not shown to profile {ProfileId} ({Reason})")]
     private partial void LogHidden(MediaKind kind, int tmdbId, int profileId, ContentReasonCode reason);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Adult title {Kind} {TmdbId} was not shown")]
-    private partial void LogAdult(MediaKind kind, int tmdbId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Certification lookup failed for {Kind} {TmdbId}; the title was not shown")]
-    private partial void LogCertificationFailed(Exception exception, MediaKind kind, int tmdbId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword lookup failed for {Kind} {TmdbId}; the title was not shown")]
-    private partial void LogKeywordFailed(Exception exception, MediaKind kind, int tmdbId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Credits lookup failed for {Kind} {TmdbId}; cast was left out")]
     private partial void LogCreditsFailed(Exception exception, MediaKind kind, int tmdbId);

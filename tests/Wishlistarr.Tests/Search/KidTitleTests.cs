@@ -494,8 +494,8 @@ public sealed class KidTitleTests
         HttpResponseMessage failed = await kid.GetAsync(MoviePath);
         HttpResponseMessage missingKey = await other.GetAsync(MoviePath);
 
-        Assert.Equal(HttpStatusCode.BadGateway, failed.StatusCode);
-        Assert.Contains("That page isn't working right now.", await failed.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.NotFound, failed.StatusCode);
+        Assert.Contains("We couldn't find that one.", await failed.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.ServiceUnavailable, missingKey.StatusCode);
         Assert.DoesNotContain("api_key", await missingKey.Content.ReadAsStringAsync());
     }

@@ -92,3 +92,27 @@ Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids a
 Auto-approve is not a content rule and it cannot turn a `Blocked` decision into an allowed one. It only decides whether a request that the policy left pending, or an allowed title that still has to be downloaded, can skip a parent. The profile stores a switch and an optional rating ceiling for movies and for TV. See [requests](requests.md#auto-approve) for the endpoints and the allowance.
 
 A ceiling compares the title's rating level, the same level `RatingRule` would report, with the ceiling for that kind. A title at or below the ceiling qualifies. An unrated title has no level, so it never qualifies, and the switch does not approve it either: unrated titles always wait for a parent, in or out of the library. The switch approves only titles the policy allows and that have a known rating. A ceiling, when set, always applies, with the switch on or off: with the switch on, a title above the ceiling for its kind is not approved. The switch on with no ceiling approves any such title. A missing genre list does not qualify either when the profile blocks genres, even when the switch is on, a rating is known, or the combined decision names another reason such as `Unrated`. A missing list is not evidence that no blocked genre is present. A lookup that fails is treated the same way and the request stays pending.
+
+## Parent content controls
+
+The parent area provides automatic saving of profile rules, title search, per-profile blocked and always-allowed lists, and a policy preview. Title list changes take effect on the next policy evaluation in requests, search, details and home. They do not remove existing Plex labels. Explicit blocks also prevent requesting a previously revoked title. An always-allowed entry overrides rating, genre, keyword and language restrictions; a block for the same key still wins.
+
+All routes below use the existing parent authorization and mutation antiforgery protection. Kid sessions cannot access them. The base is `/api/v1/kid-profiles`.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/title-search?q=matrix&page=1` | TMDB title search for parents; query length 2-100, page 1-10. |
+| GET | `/{id}/titles?blocked=true&q=matrix&limit=50&offset=0` | Server-side case-insensitive substring search; returns `{total, items}`. Omit blocked to list both lists. Limit 1-200; offset nonnegative. |
+| POST | `/{id}/titles` | Add `{kind, tmdbId, title, blocked}`. Kind is `movie` or `show`, id positive, display title 1-300 characters. Duplicate entries return 409. |
+| DELETE | `/{id}/titles/{kind}/{tmdbId}?blocked=true` | Remove an entry from the chosen list. |
+| POST | `/{id}/preview` | Evaluate `{kind, tmdbId}` through the shared kid policy evaluator. Returns `decision`, `reasonCode` and a plain-language `reason`. No request, Plex write or label change occurs. |
+| GET | `/{id}/content-rules` | Export a versioned document containing all content rules and both title lists. |
+| PUT | `/{id}/content-rules` | Validate and atomically replace all content rules and title entries. |
+
+The JSON document has exactly three fields: `version: 1`, `rules` and `titles`. Rules must contain all nine fields: `movieAgeLimit`, `tvAgeLimit`, `weeklyAllowance`, `autoApprove`, `autoApproveMovieRating`, `autoApproveTvRating`, `blockedGenreIds`, `blockedKeywordIds`, `allowedOriginalLanguages`. Titles is an array of `{kind, tmdbId, title, blocked}` entries; `blocked: false` denotes always allowed. Empty lists must be included. Partial files, invalid fields and duplicate title keys within a list are rejected before any changes are applied. Other profile settings, the PIN and home rows are preserved. Each profile supports up to 1000 title entries and import files up to 1 MiB. A failed TMDB keyword lookup denies the request and preview with `MetadataUnavailable` rather than assuming an empty keyword list.
+
+Display names follow the existing TMDB retention and clear-data workflow. Purging metadata clears names while preserving title keys and policy entries; lists and exports use a kind/id fallback until names are refreshed. Previously revoked titles that would otherwise be blocked by a general rule can be requested for parent review, and preview reports `NeedsApproval` with `PreviouslyRevoked` for that shared exception. Explicit title blocks always deny them.
+
+Search, details, home, request submission and preview use the same evaluator and TMDB detail, certification and (when needed) keyword lookups. Adult titles and failed required lookups are blocked, including always-allowed titles. Explicit lists skip keyword lookup; always-allowed titles still require details and certification lookup to succeed. Previously revoked titles blocked by ordinary rules appear masked in search and details and can be requested for parent review; home includes only Allowed titles. Metadata failures and adult titles never receive the revocation exception.
+
+Client-supplied display names have no fetched timestamp, so import cannot extend their retention. Kind/id placeholders are never stored as names. Cleared names are not downloaded by the daily refresh; only names still present on active profiles are refreshed.

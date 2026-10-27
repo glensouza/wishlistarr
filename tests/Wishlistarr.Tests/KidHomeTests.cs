@@ -41,8 +41,8 @@ public sealed class KidHomeTests
     private static KidRequestApiFactory PolicyFactory(FakeLibraryIndex? index = null)
     {
         KidRequestApiFactory factory = new(index);
-        factory.Tmdb.SetBody("/3/discover/movie", PolicyMovies);
-        factory.Tmdb.SetBody("/3/discover/tv", PolicyShows);
+        factory.Tmdb.SetCatalog("/3/discover/movie", PolicyMovies);
+        factory.Tmdb.SetCatalog("/3/discover/tv", PolicyShows);
         SetMovie(factory, 800, "G");
         SetMovie(factory, 801, "R");
         SetMovie(factory, 804, "G");
@@ -127,13 +127,13 @@ public sealed class KidHomeTests
     public async Task A_keyword_block_and_a_failed_lookup_remove_the_title()
     {
         using KidRequestApiFactory factory = PolicyFactory();
-        factory.Tmdb.SetBody("/3/discover/movie", """
+        factory.Tmdb.SetCatalog("/3/discover/movie", """
             {"page":1,"results":[
               {"id":800,"title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01","genre_ids":[16],"original_language":"en"},
               {"id":805,"title":"Keyword Monster","overview":"Has a monster.","poster_path":"/monster.jpg","release_date":"2020-02-02","genre_ids":[35],"original_language":"en"}
             ],"total_pages":1,"total_results":2}
             """);
-        factory.Tmdb.SetBody("/3/discover/tv", """{"page":1,"results":[],"total_pages":1,"total_results":0}""");
+        factory.Tmdb.SetCatalog("/3/discover/tv", """{"page":1,"results":[],"total_pages":1,"total_results":0}""");
         SetMovie(factory, 805, "G");
         factory.Tmdb.SetBody("/3/movie/800/keywords", """{"id":800,"keywords":[]}""");
         factory.Tmdb.SetBody("/3/movie/805/keywords", """{"id":805,"keywords":[{"id":99,"name":"monster"}]}""");
@@ -151,13 +151,13 @@ public sealed class KidHomeTests
     public async Task A_language_allow_list_removes_other_languages()
     {
         using KidRequestApiFactory factory = PolicyFactory();
-        factory.Tmdb.SetBody("/3/discover/movie", """
+        factory.Tmdb.SetCatalog("/3/discover/movie", """
             {"page":1,"results":[
               {"id":800,"title":"Tiny Tale","poster_path":"/tiny.jpg","release_date":"2019-05-01","genre_ids":[16],"original_language":"en"},
               {"id":804,"title":"Quiet Japanese","release_date":"2018-04-01","genre_ids":[16],"original_language":"ja"}
             ],"total_pages":1,"total_results":2}
             """);
-        factory.Tmdb.SetBody("/3/discover/tv", """{"page":1,"results":[],"total_pages":1,"total_results":0}""");
+        factory.Tmdb.SetCatalog("/3/discover/tv", """{"page":1,"results":[],"total_pages":1,"total_results":0}""");
         (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 6, allowedOriginalLanguages: ["en"]);
 
         string text = await (await kid.GetAsync(HomePath)).Content.ReadAsStringAsync();
@@ -371,8 +371,8 @@ public sealed class KidHomeTests
     public async Task All_certification_lookups_failing_answers_ok_with_no_rows()
     {
         using KidRequestApiFactory factory = new();
-        factory.Tmdb.SetBody("/3/discover/movie", PolicyMovies);
-        factory.Tmdb.SetBody("/3/discover/tv", """{"page":1,"results":[{"id":810,"name":"Grown Up Show","first_air_date":"2019-01-01","genre_ids":[18],"original_language":"en"}],"total_pages":1,"total_results":1}""");
+        factory.Tmdb.SetCatalog("/3/discover/movie", PolicyMovies);
+        factory.Tmdb.SetCatalog("/3/discover/tv", """{"page":1,"results":[{"id":810,"name":"Grown Up Show","first_air_date":"2019-01-01","genre_ids":[18],"original_language":"en"}],"total_pages":1,"total_results":1}""");
         (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 6, tvAgeLimit: 7, homeRows: ["popular"]);
 
         HttpResponseMessage response = await kid.GetAsync(HomePath);
@@ -673,7 +673,7 @@ public sealed class KidHomeTests
         new(
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
-            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance),
+            new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()),
             index is null ? [] : [index],
             time,
             NullLogger<KidHome>.Instance);
@@ -750,7 +750,7 @@ public sealed class KidHomeTests
                 throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
             }
 
-            return Task.FromResult(new TmdbDetails(id, $"Shelf {id}", null, null, null, null, null, "2024-01-01", null, null, null, null, null, 0));
+            return Task.FromResult(new TmdbDetails(id, $"Shelf {id}", $"Shelf {id}", null, null, null, null, "2024-01-01", null, null, null, null, null, 0));
         }
 
         public Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) =>

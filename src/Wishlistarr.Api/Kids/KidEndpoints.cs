@@ -6,8 +6,8 @@ using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Titles;
-using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.Content;
+using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
@@ -257,6 +257,7 @@ public static class KidEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        profiles.MapContentControls();
         profiles.MapRequestHistory();
     }
 

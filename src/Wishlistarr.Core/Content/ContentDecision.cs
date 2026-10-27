@@ -23,6 +23,8 @@ public enum ContentReasonCode
     NoLanguageLimit,
     LanguageAllowed,
     LanguageNotAllowed,
+    PreviouslyRevoked,
+    MetadataUnavailable,
 }
 
 public sealed record ContentReason(

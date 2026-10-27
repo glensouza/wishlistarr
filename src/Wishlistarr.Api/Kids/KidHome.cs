@@ -46,21 +46,16 @@ public sealed partial class KidHome(
     public async Task<HomeLoad> LoadAsync(int profileId, CancellationToken ct = default)
     {
         KidProfile? profile = await db.KidProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Id == profileId && row.ArchivedAt == null, ct);
+            .FirstWithContentRulesAsync(row => row.Id == profileId && row.ArchivedAt == null, ct);
         if (profile is null)
         {
             return HomeLoad.Missing();
         }
 
-        ContentPolicy policy = ContentPolicy.ForProfile(
-            profile.MovieAgeLimit,
-            profile.TvAgeLimit,
-            profile.BlockedGenreIds,
-            profile.BlockedKeywordIds,
-            profile.AllowedOriginalLanguages);
+        ContentPolicy policy = profile.ContentPolicy();
         IReadOnlyList<HomeSlot> slots = Expand(profile.HomeRows, policy.BlockedGenreIds);
         TmdbTally tally = new();
-        Gathered gathered = await this.GatherAsync(slots, MovieCertificationCeiling(profile.MovieAgeLimit), tally, ct);
+        Gathered gathered = await this.GatherAsync(slots, policy.Allowed.Count > 0 ? null : MovieCertificationCeiling(profile.MovieAgeLimit), tally, ct);
         if (tally.FailedClosed)
         {
             return HomeLoad.Unavailable();
@@ -89,7 +84,7 @@ public sealed partial class KidHome(
 
         IReadOnlyList<KidMediaItem> allowed = pending.Count == 0
             ? []
-            : await pipeline.FilterAsync(pending, policy, allowedOnly: true, ct);
+            : await pipeline.FilterAsync(pending, policy, profile.Id, allowedOnly: true, ct);
         Dictionary<TitleKey, KidMediaItem> byKey = allowed.ToDictionary(item => new TitleKey(item.Kind, item.TmdbId));
         List<KidHomeRow> rows = [];
         foreach (RowDraft draft in drafts)
