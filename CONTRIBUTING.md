@@ -48,6 +48,54 @@ C# style is defined in `.editorconfig` and enforced by the build; see [Code styl
 - Follow the patterns of the surrounding code before introducing new ones.
 - Add or update tests for the behavior you change.
 
+## Conventions
+
+These are the patterns the existing code follows. When in doubt, copy the nearest example.
+
+### Project layout
+
+- `src/Wishlistarr.Core` holds pure logic with no I/O, such as the content policy engine.
+- `src/Wishlistarr.Data` holds the EF Core model and migrations.
+- `src/Wishlistarr.Integrations` holds one client per outside service (Plex, TMDB, Seerr, Sonarr and Radarr).
+- `src/Wishlistarr.Api` holds the endpoints and the services behind them, grouped by area.
+- `tests/Wishlistarr.Tests` mirrors those areas in folders. `web/src` holds the React app, with kid screens in `web/src/kid`.
+
+### API
+
+- Endpoints live in `Map...` extension methods for their area. Give each one `WithName`, `WithSummary` and `Produces`.
+- Return errors with `Results.Problem` and a plain-language title.
+- Parent endpoints go in the parent group (`RequireParent`), and kid endpoints in the kid groups. Never put a parent action where a kid session can reach it. `AuthorizationBoundaryTests` walks every route, so a new route must be covered by it.
+- A decision that kids see and one that parents preview must come from the same code path, so the two can never disagree.
+
+### Outside services
+
+- Put the client in `Wishlistarr.Integrations`, and write down how the service behaves in `docs/`.
+- Test fakes must follow what the real service does (status codes, error shapes, public versus authenticated endpoints), taken from its documentation or source. A fake written only to agree with the code proves nothing.
+
+### Database
+
+- Follow [docs/migrations.md](docs/migrations.md).
+- Store enums as strings (`HasConversion<string>()`), like the existing columns.
+- Load related rows explicitly where they are needed instead of loading them on every query.
+- TMDB data is kept for at most 6 months; see [docs/tmdb.md](docs/tmdb.md) before storing any new TMDB field.
+
+### Frontend
+
+- Every user-visible string comes from the catalog in `web/src/i18n/en.ts`. A test fails when code uses a key that is not in the catalog.
+- Call the API through the helpers in `web/src/api.ts`.
+- Controls need labels and roles, work with the keyboard, and fit a phone screen. Kid screens must also work with arrow keys and Enter.
+- Show specific, plain-language error messages instead of one generic failure message.
+
+### Tests
+
+- API tests use the shared test host in `tests/Wishlistarr.Tests` and its fakes. Use `ManualTimeProvider` for anything that depends on time.
+- Write tests that fail if the behavior is removed. Assert the result a user would see, not the internal calls.
+- Cover failure paths (an outside service being down, invalid input, the wrong kind of session) as well as the happy path.
+
+### Docs
+
+Update the matching page in `docs/` when you change behavior that it describes.
+
 ## Releases
 
 Maintainers cut releases by tagging `main`; see [docs/releasing.md](docs/releasing.md).
