@@ -422,7 +422,7 @@ it('links quick actions to the sections on the parent page', async () => {
     { text: 'Logs', href: '#logs-heading' },
     { text: 'Trailer setting', href: '#trailers-heading' },
   ])
-  await screen.findByRole('heading', { name: 'YouTube trailers' })
+  await screen.findByRole('heading', { name: 'Trailers' })
   for (const link of links) {
     expect(document.getElementById(link.href!.slice(1))).toBeTruthy()
   }

@@ -4,18 +4,18 @@ A signed-in kid opens one movie or show from search at `/title/{kind}/{tmdbId}`.
 
 The state of an open request is shown on the request button: `available` means the title is on the server but not yet labeled for this kid, and reads "Almost ready". "Ready to watch" is only the library badge.
 
-The screen shows the backdrop, poster, synopsis, cast, age rating, runtime, an availability badge and a request button. Shows also list seasons. Images come from the kid image proxy described in [Kid search](kid-search.md). That proxy serves `w185`, `w342` and `w1280` for any allowed TMDB file name, not only files linked from allowed titles; see [Kid search](kid-search.md) for why that is acceptable. A path that is not an allowed file name is left out of the response, so the screen never receives a remote image URL. When artwork is missing, or the image fails to load, the screen shows a plain block.
+The screen shows the backdrop, poster, synopsis, cast, age rating, runtime, an availability badge and a request button. Shows also list seasons. TMDB images come from the kid image proxy described in [Kid search](kid-search.md). That proxy serves `w185`, `w342` and `w1280` for any allowed TMDB file name, not only files linked from allowed titles; see [Kid search](kid-search.md) for why that is acceptable. Optional backgrounds and logos come from [fanart.tv](fanart.md) through its own proxy. The screen never receives a remote image URL. When artwork is missing, or the image fails to load, the screen shows a plain block.
 
 ## Response
 
-`{ kind, tmdbId, title, year, overview, posterUrl, backdropUrl, runtimeMinutes, rating, availability, needsParent, trailerKey, cast, seasons, request }`.
+`{ kind, tmdbId, title, year, overview, posterUrl, backdropUrl, logoUrl, runtimeMinutes, rating, availability, needsParent, trailerKey, trailerUrl, cast, seasons, request }`.
 
 - `runtimeMinutes` is the movie runtime, or the first positive episode runtime of a show. Zero or missing becomes `null`.
 - `rating` is the US certification, or `null` when TMDB has none.
 - `cast` is at most 12 people: `name`, `character` and `profileUrl`. A blank name is skipped.
 - `seasons` is empty for a movie. For a show it is every season TMDB returned, including season 0, ordered by season number. A negative season number is dropped, and a repeated number is kept once. Each season has `number`, `name`, `overview`, `posterUrl`, `episodeCount` and `year`. A blank name is `null` (the screen says "Specials" for season 0 and "Season N" otherwise). A negative episode count is stored as 0.
 - `request` is the open request for this profile and title, `{ state, requestCount }`, or `null` when there is none. A denied request is not open: it is left out so the kid can ask again. The kid cannot move a request to another state from this screen. Asking uses [`POST /api/v1/kid/requests`](requests.md#asking-for-a-title) with `{ kind, tmdbId }` only.
-- `availability` is `inLibrary` or `notInLibrary` when a library index can answer, and `null` when there is no index or it has not synced yet. This screen does not ask Plex. Search uses the same rule; requesting a title still uses the library lookup in [Requests](requests.md#library-lookup), which can fall back to a live Plex query.
+- `availability` is `inLibrary` or `notInLibrary` when a library index can answer, and `null` when there is no index or it has not synced yet. Search uses the same rule; requesting a title still uses the library lookup in [Requests](requests.md#library-lookup), which can fall back to a live Plex query. When Plex trailers are enabled and the index finds the title, the screen asks Plex for its extras.
 
 Overviews are trimmed and capped at 2000 characters.
 
@@ -26,7 +26,7 @@ The title is checked with the same content policy, US certification and keyword 
 Fail closed:
 
 - A blocked title, an adult title, a title with no name, a title TMDB does not have, a certification lookup that fails, or a keyword lookup that fails when the profile blocks keywords, all answer `404` with `We couldn't find that one.` That is the same answer as an id that does not exist. The body does not include the title, the rating, the reason or any artwork, and credits and videos are not requested. The reason code is written to the log.
-- A title that needs approval is returned so the kid can ask, but masked: `overview`, `posterUrl`, `backdropUrl` and `trailerKey` are `null`, `cast` is empty and `needsParent` is `true`. Season numbers, episode counts and years stay; season names, overviews and posters are `null`. Credits and videos are not requested.
+- A title that needs approval is returned so the kid can ask, but masked: `overview`, `posterUrl`, `backdropUrl`, `logoUrl`, `trailerKey` and `trailerUrl` are `null`, `cast` is empty and `needsParent` is `true`. Season numbers, episode counts and years stay; season names, overviews and posters are `null`. Credits and videos are not requested.
 - An allowed title is returned in full. If the credits or the video list cannot be read, the title is still returned with an empty cast or `trailerKey: null`.
 
 A missing or archived profile answers `403`. TMDB answering anything other than a clean miss on the details call answers `502` (`That page isn't working right now.`). No API key answers `503` with the same kid-safe title. Cancelling the request is not turned into either of those.
@@ -39,9 +39,11 @@ The kid can select a season. The screen says that access is for the whole show, 
 
 TMDB's video list supplies the trailer. A video is kept only when `site` is exactly `YouTube`, `type` is exactly `Trailer`, and `key` matches `^[A-Za-z0-9_-]{11}$` (the id shape the IFrame Player API embeds). The first official trailer wins; otherwise the first trailer. Vimeo, clips, teasers and any other key are ignored. The response contains the key and no YouTube URL.
 
-Trailers are off unless a parent has stored `kids.youtube_trailers` as `true`. A missing value, a blank value, or anything that is not `true` or `false` is off. `PUT /api/v1/settings/kids.youtube_trailers` accepts only `true` or `false` (trimmed, any case), stores the canonical `true` or `false`, and never stores it as a secret. Anything else is `400` (`YouTube trailers are either true or false.`). The parent screen has a checkbox for this, shown only while a parent is signed in. While the saved value is loading, the checkbox is not shown. If it cannot be loaded, the screen shows an error with a retry button and no checkbox, so a stored `true` is never overwritten by a default.
+YouTube trailers are off unless a parent has stored `kids.youtube_trailers` as `true`. A missing value, a blank value, or anything that is not `true` or `false` is off. `PUT /api/v1/settings/kids.youtube_trailers` accepts only `true` or `false` (trimmed, any case), stores the canonical `true` or `false`, and never stores it as a secret. Anything else is `400` (`YouTube trailers are either true or false.`). The parent screen has a checkbox for this, shown only while a parent is signed in. While the saved value is loading, the checkbox is not shown. If it cannot be loaded, the screen shows an error with a retry button and no checkbox, so a stored `true` is never overwritten by a default.
 
-When the setting is off, `trailerKey` is `null`, the videos endpoint is not called, the screen renders no trailer control, and no YouTube script is loaded. The parent approval queue uses the same trailer choice and the same player. When the setting is off, the queue does not ask TMDB for videos and does not show a play button.
+When the YouTube setting is off, `trailerKey` is `null`, the videos endpoint is not called and no YouTube script is loaded. The parent approval queue shows YouTube trailers when enabled and selected; it does not show Plex trailers.
+
+The parent can choose `none`, `plex`, `youtube`, `plex,youtube`, or `youtube,plex` in `kids.trailer_sources`. The first available source wins; YouTube also requires the checkbox. Without this setting, the existing YouTube-only behavior is preserved. A Plex source is used only when the index finds the title and Plex reports an extra with subtype `trailer` and an MP4/H.264 part with AAC or no audio. Local library parts and Plex's IVA service paths are supported; other formats and paths fall through to the next source. The video is fetched only when Play is pressed, through a kid-only local endpoint that rechecks the title's policy and source setting and forwards a single byte range to Plex without exposing the server token. It does not transcode. Closing, Escape, ending or a playback error closes the video and returns focus to Play.
 
 When the setting is on, the screen still does not contact YouTube until the kid presses play. There is no iframe and no YouTube thumbnail before that click. Playback uses the [IFrame Player API](https://developers.google.com/youtube/iframe_api_reference):
 

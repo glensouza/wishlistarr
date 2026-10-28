@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Requests;
@@ -11,6 +14,7 @@ using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Fanart;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Titles;
@@ -43,13 +47,17 @@ public sealed record KidTitleResponse(
     string? TrailerKey,
     IReadOnlyList<KidCastMember> Cast,
     IReadOnlyList<KidSeason> Seasons,
-    KidTitleRequest? Request);
+    KidTitleRequest? Request,
+    string? LogoUrl,
+    string? TrailerUrl);
 
 public sealed record KidTitleResult(KidTitleOutcome Outcome, KidTitleResponse? Title = null);
 
 public sealed partial class KidTitleDetails(
     WishlistarrDbContext db,
     ITmdbClient tmdb,
+    FanartClient fanart,
+    IMediaServerTrailers plexTrailers,
     IEnumerable<ILibraryIndex> indexes,
     SettingsStore settings,
     ILogger<KidTitleDetails> logger)
@@ -68,9 +76,7 @@ public sealed partial class KidTitleDetails(
 
         TmdbMediaType type = kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
         TitleKey key = new(kind, tmdbId);
-        ContentPolicy policy = profile.ContentPolicy();
-        bool revoked = await db.MediaRequests.AnyAsync(row => row.KidProfileId == profile.Id && row.Kind == kind && row.TmdbId == tmdbId && row.State == RequestState.Revoked, ct);
-        PolicyEvaluation? evaluation = await KidPolicyEvaluator.EvaluateAsync(tmdb, key, policy, revoked, ct);
+        PolicyEvaluation? evaluation = await this.EvaluateAsync(profile, kind, tmdbId, ct);
         if (evaluation is null) return new KidTitleResult(KidTitleOutcome.NotFound);
         ContentDecision decision = evaluation.Decision;
         if (decision.Outcome == ContentOutcome.Blocked)
@@ -82,9 +88,9 @@ public sealed partial class KidTitleDetails(
         TmdbDetails details = evaluation.Details!;
         string title = evaluation.Name;
         bool masked = decision.Outcome == ContentOutcome.NeedsApproval;
-        bool trailers = !masked && YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
+        FanartArtwork? artwork = masked ? null : await this.FanartAsync(kind, tmdbId, ct);
         IReadOnlyList<KidCastMember> cast = masked ? [] : await this.CastAsync(type, tmdbId, kind, ct);
-        string? trailer = trailers ? await this.TrailerAsync(type, tmdbId, kind, ct) : null;
+        (string? trailer, string? trailerUrl, _) = masked ? (null, null, null) : await this.SelectTrailerSourceAsync(type, tmdbId, kind, ct);
         string? rating = evaluation.Content.Certifications.FirstOrDefault()?.Rating?.Trim();
         if (string.IsNullOrEmpty(rating))
         {
@@ -107,7 +113,7 @@ public sealed partial class KidTitleDetails(
                 Year(kind == MediaKind.Movie ? details.ReleaseDate : details.FirstAirDate),
                 masked ? null : Synopsis(details.Overview),
                 masked ? null : ImageUrl(KidContentPipeline.PosterSize, details.PosterPath),
-                masked ? null : ImageUrl(KidSearch.BackdropSize, details.BackdropPath),
+                masked ? null : FanartUrl(artwork?.Background, "full") ?? ImageUrl(KidSearch.BackdropSize, details.BackdropPath),
                 Runtime(kind, details),
                 rating,
                 await this.AvailabilityAsync(key, ct),
@@ -115,8 +121,93 @@ public sealed partial class KidTitleDetails(
                 trailer,
                 cast,
                 Seasons(details, masked),
-                open is null ? null : new KidTitleRequest(open.State, open.RequestCount)));
+                open is null ? null : new KidTitleRequest(open.State, open.RequestCount),
+                FanartUrl(artwork?.Logo, "bigpreview"),
+                trailerUrl));
     }
+
+    private async Task<PolicyEvaluation?> EvaluateAsync(KidProfile profile, MediaKind kind, int tmdbId, CancellationToken ct)
+    {
+        bool revoked = await db.MediaRequests.AnyAsync(row => row.KidProfileId == profile.Id && row.Kind == kind && row.TmdbId == tmdbId && row.State == RequestState.Revoked, ct);
+        return await KidPolicyEvaluator.EvaluateAsync(tmdb, new TitleKey(kind, tmdbId), profile.ContentPolicy(), revoked, ct);
+    }
+
+    private async Task<(string? Key, string? Url, string? PlexItem)> SelectTrailerSourceAsync(TmdbMediaType type, int tmdbId, MediaKind kind, CancellationToken ct)
+    {
+        string? configured = await settings.GetAsync(TrailerSources.SettingKey, ct);
+        string[] sources = configured is null ? ["youtube"] : TrailerSources.TryParse(configured, out string[] parsed) ? parsed : [];
+        bool youtubeEnabled = YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
+        foreach (string source in sources)
+        {
+            if (source == "youtube" && youtubeEnabled)
+            {
+                string? key = await this.TrailerAsync(type, tmdbId, kind, ct);
+                if (key is not null) return (key, null, null);
+            }
+            else if (source == "plex" && await this.PlexTrailerItemAsync(kind, tmdbId, ct) is string item)
+            {
+                return (null, $"/api/v1/kid/titles/{(kind == MediaKind.Movie ? "movie" : "show")}/{tmdbId}/trailer", item);
+            }
+        }
+
+        return (null, null, null);
+    }
+
+    public async Task<HttpResponseMessage?> OpenPlexTrailerAsync(int profileId, MediaKind kind, int tmdbId, string? range, CancellationToken ct)
+    {
+        KidProfile? profile = await db.KidProfiles.AsNoTracking()
+            .FirstWithContentRulesAsync(row => row.Id == profileId && row.ArchivedAt == null, ct);
+        if (profile is null) return null;
+        PolicyEvaluation? evaluation = await this.EvaluateAsync(profile, kind, tmdbId, ct);
+        if (evaluation?.Decision.Outcome != ContentOutcome.Allowed) return null;
+        TmdbMediaType type = kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
+        (_, _, string? item) = await this.SelectTrailerSourceAsync(type, tmdbId, kind, ct);
+        return item is null ? null : await plexTrailers.OpenTrailerAsync(item, range, ct);
+    }
+
+    private async Task<string?> PlexTrailerItemAsync(MediaKind kind, int tmdbId, CancellationToken ct)
+    {
+        try
+        {
+            ExternalId id = new(ExternalIdSource.Tmdb, tmdbId.ToString(CultureInfo.InvariantCulture));
+            foreach (ILibraryIndex index in indexes)
+            {
+                IReadOnlyList<MediaItem>? items = await index.FindAsync(kind, id, ct);
+                if (items is null) continue;
+                foreach (MediaItem item in items.Where(item => item.Kind == kind))
+                {
+                    if (await plexTrailers.HasTrailerAsync(item.Id, ct)) return item.Id;
+                }
+                return null;
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is MediaServerException or HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private async Task<FanartArtwork?> FanartAsync(MediaKind kind, int tmdbId, CancellationToken ct)
+    {
+        string? apiKey = await settings.GetAsync(FanartClient.ApiKeySetting, ct);
+        string? clientKey = await settings.GetAsync(FanartClient.ClientKeySetting, ct);
+        if (string.IsNullOrWhiteSpace(apiKey) && string.IsNullOrWhiteSpace(clientKey)) return null;
+        try
+        {
+            int? id = kind == MediaKind.Movie ? tmdbId : await tmdb.GetTvdbIdAsync(tmdbId, ct);
+            return id is > 0 ? await fanart.GetArtworkAsync(kind == MediaKind.Movie, id.Value, apiKey, clientKey, ct) : null;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or TmdbException or JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FanartUrl(string? url, string size) => FanartClient.IsAllowedUrl(url)
+        ? $"/api/v1/kid/images/fanart/{size}/{WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(url!))}"
+        : null;
 
     private async Task<IReadOnlyList<KidCastMember>> CastAsync(TmdbMediaType type, int tmdbId, MediaKind kind, CancellationToken ct)
     {

@@ -133,6 +133,8 @@ export type TitleDetails = {
   overview: string | null
   posterUrl: string | null
   backdropUrl: string | null
+  logoUrl?: string | null
+  trailerUrl?: string | null
   runtimeMinutes: number | null
   rating: string | null
   availability: SearchItem['availability']

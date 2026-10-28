@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Tests.Tmdb;
@@ -54,6 +55,72 @@ public sealed class TmdbImageProxyTests
         Assert.Equal("image/png", image.ContentType);
         Assert.Equal(FakeTmdbServer.ImageBytes, image.Bytes);
         Assert.Equal("/t/p/w500/poster.jpg", Assert.Single(harness.Server.Requests).Path);
+    }
+
+    [Fact]
+    public async Task Cached_images_are_reused_per_size_and_cleared_with_tmdb_data()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+
+        await harness.Images.FetchAsync("w500", "poster.jpg");
+        await harness.Images.FetchAsync("w500", "poster.jpg");
+        await harness.Images.FetchAsync("w342", "poster.jpg");
+        Assert.Equal(2, harness.Server.Requests.Count);
+
+        harness.Cache.Clear();
+        await harness.Images.FetchAsync("w500", "poster.jpg");
+        Assert.Equal(3, harness.Server.Requests.Count);
+    }
+
+    [Fact]
+    public async Task Cache_evicts_least_recently_used_images_to_stay_within_its_byte_limit()
+    {
+        await using TmdbHarness harness = await TmdbHarness.CreateAsync();
+        TmdbImageContent image = new(new byte[20 * 1024 * 1024], "image/png");
+        harness.Cache.TryGetImage("one", out _, out long generation);
+        harness.Cache.SetImage("one", image, generation);
+        harness.Cache.SetImage("two", image, generation);
+        Assert.True(harness.Cache.TryGetImage("one", out _, out _));
+
+        harness.Cache.SetImage("three", image, generation);
+
+        Assert.False(harness.Cache.TryGetImage("two", out _, out _));
+        Assert.True(harness.Cache.TryGetImage("one", out _, out _));
+        Assert.True(harness.Cache.TryGetImage("three", out _, out _));
+    }
+
+    [Fact]
+    public void Cached_images_expire_even_when_accessed()
+    {
+        ManualTimeProvider time = new();
+        using TmdbCache cache = new(Options.Create(new TmdbOptions()), time);
+        cache.TryGetImage("one", out _, out long generation);
+        cache.SetImage("one", new TmdbImageContent([1], "image/png"), generation);
+        time.Advance(TimeSpan.FromDays(6));
+        Assert.True(cache.TryGetImage("one", out _, out _));
+        time.Advance(TimeSpan.FromDays(1));
+        Assert.False(cache.TryGetImage("one", out _, out _));
+    }
+
+    [Fact]
+    public void Clearing_prevents_an_in_flight_image_from_repopulating_the_cache()
+    {
+        using TmdbCache cache = new(Options.Create(new TmdbOptions()), TimeProvider.System);
+        cache.TryGetImage("one", out _, out long generation);
+        cache.Clear();
+        cache.SetImage("one", new TmdbImageContent([1], "image/png"), generation);
+        Assert.False(cache.TryGetImage("one", out _, out _));
+    }
+
+    [Fact]
+    public void Many_small_images_are_also_bounded()
+    {
+        using TmdbCache cache = new(Options.Create(new TmdbOptions()), TimeProvider.System);
+        cache.TryGetImage("0", out _, out long generation);
+        TmdbImageContent image = new([1], "image/png");
+        for (int i = 0; i <= 2000; i++) cache.SetImage(i.ToString(System.Globalization.CultureInfo.InvariantCulture), image, generation);
+        Assert.False(cache.TryGetImage("0", out _, out _));
+        Assert.True(cache.TryGetImage("2000", out _, out _));
     }
 
     [Fact]

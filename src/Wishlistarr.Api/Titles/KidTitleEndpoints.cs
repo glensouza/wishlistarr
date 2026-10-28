@@ -1,5 +1,8 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
+using System.Text.Json;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Tmdb;
 
@@ -49,6 +52,42 @@ public static class KidTitleEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status502BadGateway)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        kid.MapGet("/titles/{kind}/{tmdbId:int}/trailer", async (string kind, int tmdbId, HttpContext context, KidTitleDetails titles, CancellationToken ct) =>
+        {
+            if (!TryKind(kind, out MediaKind mediaKind) || tmdbId <= 0) return Results.BadRequest();
+            if (!int.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), NumberStyles.None, CultureInfo.InvariantCulture, out int profileId)) return Results.Forbid();
+            string? range = context.Request.Headers.Range.FirstOrDefault();
+            if (range is not null && (!RangeHeaderValue.TryParse(range, out RangeHeaderValue? parsedRange) || parsedRange.Unit != "bytes" || parsedRange.Ranges.Count != 1)) return Results.BadRequest();
+            try
+            {
+                using HttpResponseMessage? response = await titles.OpenPlexTrailerAsync(profileId, mediaKind, tmdbId, range, ct);
+                if (response is null) return Results.NotFound();
+                if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable) return Results.StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+                if (response.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.PartialContent))
+                    return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The trailer could not be played.");
+                context.Response.StatusCode = (int)response.StatusCode;
+                context.Response.ContentType = "video/mp4";
+                context.Response.Headers.CacheControl = "private, no-store";
+                context.Response.Headers.XContentTypeOptions = "nosniff";
+                context.Response.Headers.AcceptRanges = "bytes";
+                if (response.Content.Headers.ContentLength is long length) context.Response.ContentLength = length;
+                if (response.Content.Headers.ContentRange is not null) context.Response.Headers.ContentRange = response.Content.Headers.ContentRange.ToString();
+                await response.Content.CopyToAsync(context.Response.Body, ct);
+                return Results.Empty;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException or MediaServerException or TmdbException or JsonException)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The trailer could not be played.");
+            }
+        })
+            .WithTags("Kid")
+            .WithName("GetKidPlexTrailer")
+            .WithSummary("Streams a trailer for an allowed title from its Plex library extras.")
+            .Produces(StatusCodes.Status200OK, contentType: "video/mp4")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
     }
 
     private static bool TryKind(string? value, out MediaKind kind)

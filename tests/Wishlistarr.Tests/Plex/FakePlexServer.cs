@@ -80,6 +80,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     public string? ServerTokenOverride { get; set; }
 
+    public string? ExtrasJson { get; set; }
+
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
 
     public IReadOnlyList<RecordedRequest> ImpostorRequests => [.. this.impostorRequests];
@@ -301,6 +303,28 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         if (request.Token != (this.ServerTokenOverride ?? ServerToken))
         {
             await WriteAsync(context, "<html><head><title>Unauthorized</title></head><body><h1>401 Unauthorized</h1></body></html>", "text/html", StatusCodes.Status401Unauthorized);
+            return;
+        }
+
+        if (this.ExtrasJson is not null && path == "/library/metadata/101/extras" && request.Method == HttpMethods.Get)
+        {
+            await WriteAsync(context, this.ExtrasJson);
+            return;
+        }
+
+        if (this.ExtrasJson is not null && path is "/library/parts/1010/file.mp4" or "/services/iva/assets/4900/video.mp4" && request.Method == HttpMethods.Get)
+        {
+            context.Response.ContentType = "video/mp4";
+            if (context.Request.Headers.Range == "bytes=1-2")
+            {
+                context.Response.StatusCode = StatusCodes.Status206PartialContent;
+                context.Response.Headers.ContentRange = "bytes 1-2/3";
+                await context.Response.Body.WriteAsync(new byte[] { 2, 3 });
+            }
+            else
+            {
+                await context.Response.Body.WriteAsync(new byte[] { 1, 2, 3 });
+            }
             return;
         }
 

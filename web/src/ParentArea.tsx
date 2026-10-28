@@ -15,6 +15,7 @@ import RequestsAdmin from './RequestsAdmin'
 import PairDevice from './PairDevice'
 import ParentSignIn from './ParentSignIn'
 import TrailerSetting from './TrailerSetting'
+import FanartSetting from './FanartSetting'
 import UpdateNotice from './UpdateNotice'
 import ParentHome from './ParentHome'
 import RequestHistoryPanel from './RequestHistoryPanel'
@@ -60,6 +61,7 @@ export default function ParentArea() {
           <ContentControls />
           <KidDevicesAdmin />
           <TrailerSetting />
+          <FanartSetting />
           <NotificationSettings />
           <BackupsAdmin />
           <RequestHistoryPanel />

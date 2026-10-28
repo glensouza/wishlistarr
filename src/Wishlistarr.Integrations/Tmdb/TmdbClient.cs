@@ -60,6 +60,9 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
     public Task<TmdbImages> GetImagesAsync(TmdbMediaType type, int id, string imageLanguages = "en,null", CancellationToken ct = default) =>
         this.GetAsync<TmdbImages>($"{Segment(type)}/{id}/images", [("include_image_language", imageLanguages)], DetailLifetime, ct);
 
+    public async Task<int?> GetTvdbIdAsync(int id, CancellationToken ct = default) =>
+        (await this.GetAsync<ExternalIdsResponse>($"tv/{id}/external_ids", [], DetailLifetime, ct)).TvdbId;
+
     public Task<TmdbPage<TmdbSearchResult>> DiscoverAsync(TmdbMediaType type, TmdbDiscoverQuery query, string language = "en-US", CancellationToken ct = default)
     {
         List<(string, string)> parameters = [("language", language), ("page", Number(query.Page))];
@@ -244,6 +247,8 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
 
         return await response.Content.ReadFromJsonAsync<T>(ct) ?? throw new TmdbException("TMDB returned an empty response.");
     }
+
+    private sealed record ExternalIdsResponse([property: JsonPropertyName("tvdb_id")] int? TvdbId);
 
     private sealed record GenresResponse(
         [property: JsonPropertyName("genres")] IReadOnlyList<TmdbGenre>? Genres);

@@ -1,0 +1,7 @@
+# fanart.tv
+
+Artwork from [fanart.tv](https://fanart.tv/) is optional. A parent can save a fanart.tv project API key with `PUT /api/v1/settings/fanart.api_key`, a personal key with `PUT /api/v1/settings/fanart.client_key`, or both. The project key is sent as `api_key` and the personal key as `client_key`; fanart.tv permits either one on its own. Both keys are always encrypted and never returned by the settings API. Without either key, Wishlistarr does not call fanart.tv and uses TMDB artwork. The About page credits fanart.tv.
+
+For an allowed title, Wishlistarr asks fanart.tv for a background and a logo. Movies use the TMDB ID; shows use the TVDB ID returned by TMDB's external IDs endpoint. If a lookup fails or an image is absent, the title still loads and its TMDB backdrop is used. Artwork is not requested for blocked or masked titles.
+
+The returned asset URL is accepted only from `assets.fanart.tv`, over HTTPS. Kid browsers receive a local proxy path; the proxy does not follow redirects, checks the image type and limits each response to 10 MB. As with the TMDB proxy, a signed-in kid who already knows a valid public asset path can request it even when that path was not returned for an allowed title. Full-size, 200px preview and 400px big preview variants use fanart.tv's CDN paths. The shared in-memory image cache has a 50 MB and 2000-entry limit and removes expired images. See [TMDB](tmdb.md#stored-tmdb-data-and-retention) for cache details.

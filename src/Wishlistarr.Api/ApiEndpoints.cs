@@ -16,6 +16,7 @@ using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core.Fulfilment;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Arr;
+using Wishlistarr.Integrations.Fanart;
 using Wishlistarr.Integrations.Seerr;
 using Wishlistarr.Integrations.Tmdb;
 
@@ -150,6 +151,17 @@ public static class ApiEndpoints
                 return Results.NoContent();
             }
 
+            if (key == TrailerSources.SettingKey)
+            {
+                if (!TrailerSources.TryParse(update.Value, out string[] sources))
+                {
+                    return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Trailer sources must be plex, youtube, or none, without duplicates.");
+                }
+
+                await store.SetAsync(key, sources.Length == 0 ? "none" : string.Join(',', sources), false, ct);
+                return Results.NoContent();
+            }
+
             if (key == TmdbOptions.ApiKeySetting && string.IsNullOrWhiteSpace(update.Value))
             {
                 await store.DeleteAsync(key, ct);
@@ -162,7 +174,19 @@ public static class ApiEndpoints
                 return purge.Completed ? Results.NoContent() : Results.Accepted();
             }
 
-            await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);
+            bool fanartKey = key is FanartClient.ApiKeySetting or FanartClient.ClientKeySetting;
+            if (fanartKey && string.IsNullOrWhiteSpace(update.Value))
+            {
+                await store.DeleteAsync(key, ct);
+                return Results.NoContent();
+            }
+
+            if (fanartKey && (update.Value.Length > 256 || update.Value.Any(char.IsWhiteSpace)))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "The fanart.tv key must be at most 256 characters and contain no spaces.");
+            }
+
+            await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting || fanartKey, ct);
             return Results.NoContent();
         })
             .WithName("PutSetting")

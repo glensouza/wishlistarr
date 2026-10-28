@@ -86,7 +86,21 @@ internal sealed record PlexMetadata(
 
     [JsonPropertyName("Field")]
     public IReadOnlyList<PlexField>? Fields { get; init; }
+
+    [JsonPropertyName("subtype")]
+    public string? Subtype { get; init; }
+
+    [JsonPropertyName("Media")]
+    public IReadOnlyList<PlexVideoMedia>? Media { get; init; }
 }
+
+internal sealed record PlexVideoMedia(
+    [property: JsonPropertyName("container")] string? Container,
+    [property: JsonPropertyName("videoCodec")] string? VideoCodec,
+    [property: JsonPropertyName("audioCodec")] string? AudioCodec,
+    [property: JsonPropertyName("Part")] IReadOnlyList<PlexVideoPart>? Parts);
+
+internal sealed record PlexVideoPart([property: JsonPropertyName("key")] string? Key);
 
 internal sealed record PlexGuidEntry(
     [property: JsonPropertyName("id")] string? Id);

@@ -27,6 +27,11 @@ public sealed class RecordingTimeProvider : TimeProvider
 
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
+        if (period != Timeout.InfiniteTimeSpan)
+        {
+            return TimeProvider.System.CreateTimer(callback, state, dueTime, period);
+        }
+
         lock (this.delays)
         {
             this.delays.Add(dueTime);

@@ -5,6 +5,7 @@ import { useT, type MessageKey } from '../i18n'
 import Artwork from './Artwork'
 import { useKidSession } from './KidSession'
 import Trailer from './Trailer'
+import PlexTrailer from './PlexTrailer'
 import { useKidSpatialNav } from './useKidSpatialNav'
 import {
   getTitle,
@@ -163,11 +164,18 @@ function TitleScreen() {
         {title.title}
         {title.year ? ` (${title.year})` : ''}
       </h1>
-      <Trailer
-        key={`${title.kind}-${title.tmdbId}-${title.trailerKey ?? ''}`}
-        videoId={title.trailerKey}
-        backdropUrl={title.backdropUrl}
-      />
+      {title.logoUrl && (
+        <img src={title.logoUrl} alt="" className="title-logo" />
+      )}
+      {title.trailerUrl ? (
+        <PlexTrailer url={title.trailerUrl} backdropUrl={title.backdropUrl} />
+      ) : (
+        <Trailer
+          key={`${title.kind}-${title.tmdbId}-${title.trailerKey ?? ''}`}
+          videoId={title.trailerKey}
+          backdropUrl={title.backdropUrl}
+        />
+      )}
       <div className="title-layout">
         <Artwork src={title.posterUrl} className="title-poster" />
         <div className="title-copy">

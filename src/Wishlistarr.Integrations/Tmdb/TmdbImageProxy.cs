@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace Wishlistarr.Integrations.Tmdb;
 
-public sealed partial class TmdbImageProxy(HttpClient http)
+public sealed partial class TmdbImageProxy(HttpClient http, TmdbCache cache)
 {
     public const int MaxBytes = 10 * 1024 * 1024;
 
@@ -23,6 +23,9 @@ public sealed partial class TmdbImageProxy(HttpClient http)
         {
             throw new ArgumentException("The image size or path is not allowed.");
         }
+
+        string cacheKey = $"{size}/{file}";
+        if (cache.TryGetImage(cacheKey, out TmdbImageContent? cached, out long generation)) return cached;
 
         using HttpResponseMessage response = await http.GetAsync(
             new Uri($"{size}/{file}", UriKind.Relative),
@@ -58,7 +61,9 @@ public sealed partial class TmdbImageProxy(HttpClient http)
             buffer.Write(chunk, 0, read);
         }
 
-        return new TmdbImageContent(buffer.ToArray(), contentType);
+        TmdbImageContent image = new(buffer.ToArray(), contentType);
+        cache.SetImage(cacheKey, image, generation);
+        return image;
     }
 
     [GeneratedRegex(@"^[A-Za-z0-9_-]{1,100}\.(jpg|jpeg|png)\z", RegexOptions.CultureInvariant)]
