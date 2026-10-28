@@ -694,6 +694,34 @@ export const en = {
   'notifications.testSent': 'Test notification sent.',
   'notifications.testFailed':
     'The test notification failed. Check the saved configuration and try again.',
+  'notifications.browserTitle': 'This browser',
+  'notifications.browserHint':
+    'Save this browser to get notifications here, even when Wishlistarr is closed.',
+  'notifications.browserEmpty': 'No browsers are saved yet.',
+  'notifications.browserItem': 'Saved browser {id}',
+  'notifications.browserSubscribe': 'Turn on notifications',
+  'notifications.browserRemove': 'Remove this browser',
+  'notifications.browserSaved': 'This browser will get notifications.',
+  'notifications.browserRemoved':
+    'This browser will no longer get notifications.',
+  'notifications.browserFailed':
+    'We could not update browser notifications. Try again.',
+  'webPush.unsupported': 'This browser cannot show notifications.',
+  'webPush.denied':
+    'Notifications are blocked for this browser. Allow them in the browser settings, then try again.',
+  'devicePush.prompt':
+    'This device can be told when something here is ready to watch.',
+  'devicePush.on': 'This device gets a notice when something is ready.',
+  'devicePush.subscribe': 'Turn on ready notices',
+  'devicePush.remove': 'Turn off ready notices',
+  'devicePush.saved': 'This device will get ready notices.',
+  'devicePush.removed': 'This device will no longer get ready notices.',
+  'devicePush.failed': 'We could not update ready notices. Try again.',
+  'readyNotice.heading': 'New to watch',
+  'readyNotice.generic': 'Something new is ready to watch.',
+  'readyNotice.item': '{title} is ready to watch.',
+  'readyNotice.dismiss': 'Got it',
+  'readyNotice.failed': 'That notice could not be dismissed. Try again.',
 } as const
 
 export type MessageKey = keyof typeof en

@@ -2,7 +2,9 @@ import { useRef } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useT } from '../i18n'
 import { useKidSession } from './KidSession'
+import DevicePush from './DevicePush'
 import HomeRows from './HomeRows'
+import ReadyNotice from './ReadyNotice'
 import KidHistory from './KidHistory'
 import Search from './Search'
 import { useKidSpatialNav } from './useKidSpatialNav'
@@ -26,6 +28,8 @@ export default function KidHome() {
     <section ref={rootRef} aria-labelledby="home-title">
       <h1 id="home-title">{t('home.welcome', { name: session.name })}</h1>
       <p>{t('home.intro')}</p>
+      <ReadyNotice />
+      <DevicePush />
       <HomeRows />
       <Wishlist />
       <KidHistory />

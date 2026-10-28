@@ -12,6 +12,12 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<NotificationApproval> NotificationApprovals => this.Set<NotificationApproval>();
 
+    public DbSet<WebPushSubscription> WebPushSubscriptions => this.Set<WebPushSubscription>();
+
+    public DbSet<WebPushDelivery> WebPushDeliveries => this.Set<WebPushDelivery>();
+
+    public DbSet<KidReadyNotice> KidReadyNotices => this.Set<KidReadyNotice>();
+
     public DbSet<ParentAccount> ParentAccounts => this.Set<ParentAccount>();
 
     public DbSet<ParentSession> ParentSessions => this.Set<ParentSession>();
@@ -81,6 +87,41 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.Property(row => row.ExpiresAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
             entity.HasIndex(row => new { row.ParentAccountId, row.MediaRequestId }).IsUnique();
             entity.HasOne<ParentAccount>().WithMany().HasForeignKey(row => row.ParentAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<MediaRequest>().WithMany().HasForeignKey(row => row.MediaRequestId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WebPushSubscription>(entity =>
+        {
+            entity.Property(row => row.Endpoint).HasMaxLength(2000);
+            entity.Property(row => row.P256dh).HasMaxLength(120);
+            entity.Property(row => row.Auth).HasMaxLength(64);
+            entity.Property(row => row.CreatedAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.HasIndex(row => row.Endpoint).IsUnique();
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_WebPushSubscription_Owner",
+                "(\"ParentAccountId\" IS NULL) <> (\"KidDeviceId\" IS NULL)"));
+            entity.HasOne<ParentAccount>().WithMany().HasForeignKey(row => row.ParentAccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<KidDevice>().WithMany().HasForeignKey(row => row.KidDeviceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<WebPushDelivery>(entity =>
+        {
+            entity.Property(row => row.Event).HasMaxLength(32);
+            entity.Property(row => row.Message).HasMaxLength(1000);
+            entity.Property(row => row.LastError).HasMaxLength(200);
+            entity.Property(row => row.CreatedAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.Property(row => row.NextAttemptAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.HasIndex(row => new { row.WebPushSubscriptionId, row.MediaRequestId, row.Event }).IsUnique();
+            entity.HasIndex(row => new { row.CompletedAt, row.Attempts, row.NextAttemptAt });
+            entity.HasOne(row => row.Subscription).WithMany().HasForeignKey(row => row.WebPushSubscriptionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<KidReadyNotice>(entity =>
+        {
+            entity.Property(row => row.CreatedAt).HasConversion(value => value.ToUnixTimeMilliseconds(), value => DateTimeOffset.FromUnixTimeMilliseconds(value));
+            entity.Property(row => row.DismissedAt).HasConversion<long?>(value => value == null ? null : value.Value.ToUnixTimeMilliseconds(), value => value == null ? null : DateTimeOffset.FromUnixTimeMilliseconds(value.Value));
+            entity.HasIndex(row => new { row.KidProfileId, row.MediaRequestId }).IsUnique();
+            entity.HasOne<KidProfile>().WithMany().HasForeignKey(row => row.KidProfileId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<MediaRequest>().WithMany().HasForeignKey(row => row.MediaRequestId).OnDelete(DeleteBehavior.Cascade);
         });
 

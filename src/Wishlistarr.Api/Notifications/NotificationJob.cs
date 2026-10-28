@@ -13,6 +13,7 @@ public sealed partial class NotificationJob(
     NotificationSender sender,
     NotificationLinks links,
     RequestTitles titles,
+    WebPushNotices webPush,
     TimeProvider time,
     ILogger<NotificationJob> logger) : IBackgroundJob
 {
@@ -86,6 +87,7 @@ public sealed partial class NotificationJob(
             await db.SaveChangesAsync(ct);
         }
 
+        await webPush.RunAsync(ct);
         DateTimeOffset expired = now - Retention;
         await db.NotificationDeliveries
             .Where(row => (row.CompletedAt != null || row.Attempts >= MaxAttempts) && row.CreatedAt < expired)
@@ -161,6 +163,7 @@ public sealed partial class NotificationJob(
 public sealed partial class QueuedParentNotifier(
     WishlistarrDbContext db,
     INotificationTrigger trigger,
+    WebPushNotices webPush,
     TimeProvider time,
     ILogger<QueuedParentNotifier> logger) : IParentNotifier
 {
@@ -179,6 +182,7 @@ public sealed partial class QueuedParentNotifier(
         }
 
         List<NotificationDelivery> queued = [];
+        int pushed = 0;
         try
         {
             List<NotificationSubscription> subscriptions = await db.NotificationSubscriptions.Where(row => row.Enabled).ToListAsync(ct);
@@ -197,6 +201,7 @@ public sealed partial class QueuedParentNotifier(
             }
 
             await db.SaveChangesAsync(ct);
+            pushed = await webPush.QueuePlainAsync(kind, notification.Message, ct);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -210,7 +215,7 @@ public sealed partial class QueuedParentNotifier(
             return;
         }
 
-        if (queued.Count > 0)
+        if (queued.Count > 0 || pushed > 0)
         {
             await trigger.StartAsync();
         }

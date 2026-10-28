@@ -83,12 +83,19 @@ builder.Services.AddWishlistarrSecurity(builder.Configuration);
 builder.Services.AddScoped<NotificationSettings>();
 builder.Services.AddScoped<NotificationLinks>();
 builder.Services.AddScoped<NotificationSender>();
+builder.Services.AddScoped<VapidKeys>();
+builder.Services.AddScoped<WebPushSender>();
+builder.Services.AddScoped<WebPushCatalog>();
+builder.Services.AddScoped<WebPushNotices>();
 builder.Services.AddScoped<INotificationTrigger, NotificationTrigger>();
 builder.Services.AddScoped<IParentNotifier, QueuedParentNotifier>();
 builder.Services.AddHttpClient(NotificationSender.ClientName)
     .RemoveAllLoggers()
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-builder.Services.AddBackgroundJob<NotificationJob>(NotificationJob.JobName, "Delivers parent notifications and retries failed deliveries.", TimeSpan.FromMinutes(1));
+builder.Services.AddHttpClient(WebPushSender.ClientName)
+    .RemoveAllLoggers()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddBackgroundJob<NotificationJob>(NotificationJob.JobName, "Delivers parent notifications, web push, and kid ready notices, and retries failed deliveries.", TimeSpan.FromMinutes(1));
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
 builder.Services.AddPlex<StoredAppSettings>();
@@ -138,6 +145,7 @@ using (IServiceScope scope = app.Services.CreateScope())
     WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
     await backups.BackupIfMigrationsPendingAsync(db);
     await db.Database.MigrateAsync();
+    await scope.ServiceProvider.GetRequiredService<WebPushNotices>().EnsureCursorAsync();
     await app.Services.GetRequiredService<ApiKeyService>()
         .EnsureAsync(scope.ServiceProvider.GetRequiredService<SettingsStore>());
     await scope.ServiceProvider.GetRequiredService<ParentAccounts>().LoadSetupStateAsync();

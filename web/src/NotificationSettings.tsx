@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, request } from './api'
 import { useT, type MessageKey } from './i18n'
+import WebPushSettings from './WebPushSettings'
 
 const providers = ['ntfy', 'discord', 'apprise', 'smtp'] as const
 const events = [
@@ -126,6 +127,7 @@ function Settings() {
   if (!configuration) return <p role="status">{t('app.loading')}</p>
   return (
     <>
+      <WebPushSettings />
       <BaseUrl initial={configuration.publicBaseUrl} />
       <div role="group" aria-label={t('notifications.providers')}>
         {providers.map((provider) => (
