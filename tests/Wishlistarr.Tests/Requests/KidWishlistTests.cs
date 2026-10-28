@@ -187,7 +187,9 @@ public sealed class KidWishlistTests
     {
         using KidRequestApiFactory factory = new();
         await factory.SetTimeZoneAsync("UTC");
-        factory.SetClock(new DateTimeOffset(2026, 10, 21, 15, 0, 0, TimeSpan.Zero));
+        // The kid session cookie expires seven days after this clock. The client drops a cookie that is already past on the machine clock.
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+        factory.SetClock(start);
         (HttpClient ada, int adaId) = await factory.SignInKidAsync(weeklyAllowance: 2);
         (HttpClient beau, int beauId) = await factory.SignInKidAsync("Beau", weeklyAllowance: 1);
         await AddRequestAsync(factory, adaId, 750, "Counts One");
@@ -203,8 +205,8 @@ public sealed class KidWishlistTests
         JsonElement beauUsed = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, beauUsed.GetProperty("remaining").GetInt32());
 
-        // Monday 26 October is the next allowance week and is still inside the seven-day kid session.
-        factory.SetClock(new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.Zero));
+        // The next Monday is a new allowance week and is still inside the seven-day kid session.
+        factory.SetClock(AllowanceWeek.NextStart(start, TimeZoneInfo.Utc).AddHours(15));
         JsonElement nextWeek = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, nextWeek.GetProperty("remaining").GetInt32());
         JsonElement beauNext = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();

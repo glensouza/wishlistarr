@@ -13,8 +13,10 @@ using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Tmdb;
+using Wishlistarr.Tests.Dtdd;
 using Wishlistarr.Tests.Plex;
 using Wishlistarr.Tests.Tmdb;
 
@@ -190,6 +192,7 @@ public class KidRequestApiFactory : AuthApiFactory
         this.Index = index;
         this.Plex = FakePlexServer.StartAsync().GetAwaiter().GetResult();
         this.Tmdb = FakeTmdbServer.StartAsync().GetAwaiter().GetResult();
+        this.Dtdd = FakeDtddServer.StartAsync().GetAwaiter().GetResult();
         this.Tmdb.SetBody("/3/movie/129", """{"id":129,"title":"Spirited Away","vote_average":8.5}""");
         this.Tmdb.SetBody("/3/movie/129/release_dates", """{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"","type":3}]}]}""");
         this.Tmdb.SetBody("/3/tv/82728", """{"id":82728,"name":"Bluey","vote_average":8.8}""");
@@ -208,6 +211,8 @@ public class KidRequestApiFactory : AuthApiFactory
     public FakePlexServer Plex { get; }
 
     public FakeTmdbServer Tmdb { get; }
+
+    public FakeDtddServer Dtdd { get; }
 
     public FixedKeyProvider TmdbKeys { get; } = new();
 
@@ -240,6 +245,8 @@ public class KidRequestApiFactory : AuthApiFactory
         int[]? blockedKeywordIds = null,
         string[]? allowedOriginalLanguages = null,
         string[]? homeRows = null,
+        string[]? blockedDescriptors = null,
+        string[]? blockedTopics = null,
         bool autoApprove = false,
         string? autoApproveMovieRating = null,
         string? autoApproveTvRating = null)
@@ -258,6 +265,8 @@ public class KidRequestApiFactory : AuthApiFactory
                 blockedKeywordIds,
                 allowedOriginalLanguages,
                 homeRows,
+                blockedDescriptors,
+                blockedTopics,
                 autoApprove,
                 autoApproveMovieRating,
                 autoApproveTvRating,
@@ -323,6 +332,7 @@ public class KidRequestApiFactory : AuthApiFactory
                 options.ApiBaseAddress = this.Tmdb.ApiBaseAddress;
                 options.ImageBaseAddress = this.Tmdb.ImageBaseAddress;
             });
+            services.Configure<DtddOptions>(options => options.ApiBaseAddress = this.Dtdd.ApiBaseAddress);
             services.RemoveAll<ITmdbApiKeyProvider>();
             services.AddSingleton<ITmdbApiKeyProvider>(this.TmdbKeys);
             services.AddDbContext<WishlistarrDbContext>(options => options.AddInterceptors(this.Saves));
@@ -342,6 +352,7 @@ public class KidRequestApiFactory : AuthApiFactory
         {
             this.Plex.DisposeAsync().AsTask().GetAwaiter().GetResult();
             this.Tmdb.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            this.Dtdd.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 }

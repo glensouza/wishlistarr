@@ -21,11 +21,11 @@ Overviews are trimmed and capped at 2000 characters.
 
 ## Content policy
 
-The title is checked with the same content policy, US certification and keyword rules as [search](kid-search.md#filtering) and [requests](requests.md#asking-for-a-title). Keywords are read only when the profile blocks keywords. A profile with no keyword blocks does not call that endpoint.
+The title is checked with the same content policy, US certification and keyword rules as [search](kid-search.md#filtering) and [requests](requests.md#asking-for-a-title). Keywords are read only when the profile blocks keywords. A profile with no keyword blocks does not call that endpoint. Descriptors come from the certification already loaded. DoesTheDogDie is called only when a key is saved and the profile blocks at least one topic, and an explicit allow or block skips that call. The response does not grow warning, attribution or parent-note fields.
 
 Fail closed:
 
-- A blocked title, an adult title, a title with no name, a title TMDB does not have, a certification lookup that fails, or a keyword lookup that fails when the profile blocks keywords, all answer `404` with `We couldn't find that one.` That is the same answer as an id that does not exist. The body does not include the title, the rating, the reason or any artwork, and credits and videos are not requested. The reason code is written to the log.
+- A blocked title, an adult title, a title with no name, a title TMDB does not have, a certification lookup that fails, a keyword lookup that fails when the profile blocks keywords, or a topic lookup that fails or was not loaded when the profile blocks topics, all answer `404` with `We couldn't find that one.` That is the same answer as an id that does not exist. The body does not include the title, the rating, the reason, a topic name, the attribution or any artwork, and credits and videos are not requested. The reason code is written to the log.
 - A title that needs approval is returned so the kid can ask, but masked: `overview`, `posterUrl`, `backdropUrl` and `trailerKey` are `null`, `cast` is empty and `needsParent` is `true`. Season numbers, episode counts and years stay; season names, overviews and posters are `null`. Credits and videos are not requested.
 - An allowed title is returned in full. If the credits or the video list cannot be read, the title is still returned with an empty cast or `trailerKey: null`.
 

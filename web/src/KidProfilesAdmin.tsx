@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { maxAdvisoryEntries, maxAdvisoryLength } from './contentRules'
 import {
   avatars,
   builtInHomeRows,
@@ -34,6 +35,8 @@ type FormState = {
   blockedGenres: string
   blockedKeywords: string
   allowedLanguages: string
+  blockedDescriptors: string
+  blockedTopics: string
   homeRows: HomeChoice[]
 }
 
@@ -81,6 +84,8 @@ const emptyForm = (defaults: string[]): FormState => ({
   blockedGenres: '',
   blockedKeywords: '',
   allowedLanguages: '',
+  blockedDescriptors: '',
+  blockedTopics: '',
   homeRows: homeChoices(defaults, defaults),
 })
 
@@ -101,6 +106,8 @@ function toForm(profile: KidProfile, defaults: string[]): FormState {
     blockedGenres: profile.blockedGenreIds.join(', '),
     blockedKeywords: profile.blockedKeywordIds.join(', '),
     allowedLanguages: profile.allowedOriginalLanguages.join(', '),
+    blockedDescriptors: profile.blockedDescriptors.join(', '),
+    blockedTopics: profile.blockedTopics.join(', '),
     homeRows: homeChoices(profile.homeRows, defaults),
   }
 }
@@ -127,10 +134,35 @@ function ceiling(value: string): RatingLevel | null {
   return ratingLevels.find((level) => level === value) ?? null
 }
 
+function parseAdvisories(value: string): string[] | null {
+  const tokens = parseTokens(value)
+  if (tokens.length > maxAdvisoryEntries) return null
+  for (const token of tokens) {
+    if (token.length > maxAdvisoryLength) return null
+    if (
+      Array.from(token).some(
+        (character) =>
+          character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      )
+    ) {
+      return null
+    }
+  }
+  return tokens
+}
+
 function toInput(form: FormState): KidProfileInput | null {
   const blockedGenreIds = parseIds(form.blockedGenres)
   const blockedKeywordIds = parseIds(form.blockedKeywords)
-  if (blockedGenreIds === null || blockedKeywordIds === null) return null
+  const blockedDescriptors = parseAdvisories(form.blockedDescriptors)
+  const blockedTopics = parseAdvisories(form.blockedTopics)
+  if (
+    blockedGenreIds === null ||
+    blockedKeywordIds === null ||
+    blockedDescriptors === null ||
+    blockedTopics === null
+  )
+    return null
   return {
     name: form.name,
     avatar: form.avatar,
@@ -147,6 +179,8 @@ function toInput(form: FormState): KidProfileInput | null {
     blockedGenreIds,
     blockedKeywordIds,
     allowedOriginalLanguages: parseTokens(form.allowedLanguages),
+    blockedDescriptors,
+    blockedTopics,
     homeRows: form.homeRows
       .filter((choice) => choice.enabled)
       .map((choice) => choice.id),
@@ -476,6 +510,22 @@ function ProfileForm({
           value={form.allowedLanguages}
           placeholder={t('admin.allowedLanguagesHint')}
           onChange={(event) => set('allowedLanguages', event.target.value)}
+        />
+      </label>
+      <label>
+        {t('admin.blockedDescriptors')}
+        <input
+          value={form.blockedDescriptors}
+          placeholder={t('admin.blockedDescriptorsHint')}
+          onChange={(event) => set('blockedDescriptors', event.target.value)}
+        />
+      </label>
+      <label>
+        {t('admin.blockedTopics')}
+        <input
+          value={form.blockedTopics}
+          placeholder={t('admin.blockedTopicsHint')}
+          onChange={(event) => set('blockedTopics', event.target.value)}
         />
       </label>
       <fieldset>

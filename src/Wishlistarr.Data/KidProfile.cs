@@ -36,6 +36,10 @@ public sealed class KidProfile
 
     public List<string> AllowedOriginalLanguages { get; set; } = [];
 
+    public List<string> BlockedDescriptors { get; set; } = [];
+
+    public List<string> BlockedTopics { get; set; } = [];
+
     public List<string> HomeRows { get; set; } = [.. HomeRowTypes.Defaults];
 
     public List<ProfileTitleRule> TitleRules { get; set; } = [];
@@ -48,7 +52,7 @@ public sealed class KidProfile
     {
         if (!this.contentRulesLoaded) throw new InvalidOperationException("Load the profile with FirstWithContentRulesAsync before building its content policy.");
         return Wishlistarr.Core.Content.ContentPolicy.ForProfile(
-        this.MovieAgeLimit, this.TvAgeLimit, this.BlockedGenreIds, this.BlockedKeywordIds, this.AllowedOriginalLanguages) with
+        this.MovieAgeLimit, this.TvAgeLimit, this.BlockedGenreIds, this.BlockedKeywordIds, this.AllowedOriginalLanguages, this.BlockedDescriptors, this.BlockedTopics) with
         {
             Blocked = this.TitleRules.Where(row => row.Blocked).Select(row => new TitleKey(row.Kind, row.TmdbId)).ToHashSet(),
             Allowed = this.TitleRules.Where(row => !row.Blocked).Select(row => new TitleKey(row.Kind, row.TmdbId)).ToHashSet(),

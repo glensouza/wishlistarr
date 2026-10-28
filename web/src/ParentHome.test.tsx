@@ -23,6 +23,8 @@ const reason = {
   genreName: null,
   keywordName: null,
   language: null,
+  descriptor: null,
+  topic: null,
 }
 
 const ada = {
@@ -41,6 +43,9 @@ const ada = {
   trailerKey: 'M7lc1UVf-VE',
   reason,
   gaps: [],
+  contentWarnings: null,
+  attribution: null,
+  parentNote: null,
 }
 
 const bea = {
@@ -98,7 +103,7 @@ function queuePath(path: string) {
 }
 
 function install(
-  handler: (path: string, method: string) => unknown,
+  handler: (path: string, method: string, body?: unknown) => unknown,
   approve?: (body: unknown) => Promise<Response> | Response,
 ) {
   const calls: Call[] = []
@@ -127,7 +132,7 @@ function install(
           })),
         })
       }
-      const payload = await handler(path, method)
+      const payload = await handler(path, method, body)
       if (payload instanceof Response) return payload
       if (payload === null) {
         return Response.json({ title: 'Missing' }, { status: 404 })
@@ -874,6 +879,144 @@ it('shows a keyword gap and still loads the card when another gap is unknown', a
   ).toBeTruthy()
   expect(screen.queryByRole('alert')).toBeNull()
   expect(screen.queryByText('posters')).toBeNull()
+})
+
+it('shows content warnings and the credit only when warnings are present', async () => {
+  homeData([
+    {
+      ...ada,
+      contentWarnings: ['a dog dies', 'jump scares'],
+      attribution: {
+        text: 'Powered by DoesTheDogDie.com',
+        url: 'https://www.doesthedogdie.com',
+      },
+    },
+    {
+      ...bea,
+      gaps: ['contentWarnings'],
+      contentWarnings: null,
+      attribution: {
+        text: 'Powered by DoesTheDogDie.com',
+        url: 'https://www.doesthedogdie.com',
+      },
+    },
+  ])
+  const { container } = render(<ParentHome />)
+  expect(
+    await screen.findByRole('list', { name: 'Content warnings' }),
+  ).toBeTruthy()
+  expect(screen.getByText('a dog dies')).toBeTruthy()
+  expect(screen.getByText('jump scares')).toBeTruthy()
+  expect(screen.getByText('Violence')).toBeTruthy()
+  const credit = screen.getByRole('link', {
+    name: 'Powered by DoesTheDogDie.com',
+  })
+  expect(credit.getAttribute('href')).toBe('https://www.doesthedogdie.com')
+  expect(
+    screen.getAllByRole('link', { name: 'Powered by DoesTheDogDie.com' }),
+  ).toHaveLength(1)
+  expect(
+    screen.getByText(
+      'Content warnings could not be loaded. You can still approve or deny this request.',
+    ),
+  ).toBeTruthy()
+  expect(
+    screen.getByRole('button', { name: 'Approve Spirited Away for Bea' }),
+  ).toBeTruthy()
+  expect(await axe(container)).toHaveNoViolations()
+})
+
+it('omits the warning block when none were loaded', async () => {
+  homeData([ada])
+  render(<ParentHome />)
+  expect(await screen.findByText('Violence')).toBeTruthy()
+  expect(screen.queryByRole('list', { name: 'Content warnings' })).toBeNull()
+  expect(
+    screen.queryByRole('link', { name: 'Powered by DoesTheDogDie.com' }),
+  ).toBeNull()
+  expect(screen.queryByText(/Content warnings could not be loaded/)).toBeNull()
+  expect(
+    screen
+      .getByLabelText('Parent note for The Matrix (Ada)')
+      .closest('.parent-note'),
+  ).toBeTruthy()
+})
+
+it('saves and clears the shared parent note without using it as a denial', async () => {
+  const user = userEvent.setup()
+  const second = {
+    ...ada,
+    id: 8,
+    kidProfileId: 11,
+    kidName: 'Bea',
+    parentNote: 'First note',
+  }
+  const calls = install((path, method, body) => {
+    if (queuePath(path))
+      return page([{ ...ada, parentNote: 'First note' }, second])
+    if (method === 'PUT' && path === '/api/v1/titles/movie/603/note') {
+      const note =
+        body &&
+        typeof body === 'object' &&
+        typeof (body as { note?: unknown }).note === 'string'
+          ? (body as { note: string }).note.trim()
+          : ''
+      return { kind: 'movie', tmdbId: 603, note: note === '' ? null : note }
+    }
+    if (path === '/api/v1/kid-profiles') return profiles
+    if (path.includes('/events')) return []
+    return []
+  })
+  render(<ParentHome />)
+  const adaNote = await screen.findByLabelText(
+    'Parent note for The Matrix (Ada)',
+  )
+  const beaNote = screen.getByLabelText('Parent note for The Matrix (Bea)')
+  expect((adaNote as HTMLTextAreaElement).value).toBe('First note')
+  expect((beaNote as HTMLTextAreaElement).value).toBe('First note')
+  await user.clear(adaNote)
+  await user.type(adaNote, 'Kept for later')
+  await user.click(
+    screen.getByRole('button', {
+      name: 'Save the parent note for The Matrix (Ada)',
+    }),
+  )
+  await waitFor(() =>
+    expect((beaNote as HTMLTextAreaElement).value).toBe('Kept for later'),
+  )
+  expect((adaNote as HTMLTextAreaElement).value).toBe('Kept for later')
+  expect(screen.getAllByText('Parent note saved.')).toHaveLength(2)
+  await user.click(
+    screen.getByRole('button', {
+      name: 'Clear the parent note for The Matrix (Bea)',
+    }),
+  )
+  await waitFor(() => expect((adaNote as HTMLTextAreaElement).value).toBe(''))
+  expect((beaNote as HTMLTextAreaElement).value).toBe('')
+  expect(screen.getAllByText('Parent note cleared.')).toHaveLength(2)
+  await user.type(screen.getByLabelText('Note for Ada'), 'Not tonight')
+  await user.click(
+    screen.getByRole('button', { name: 'Deny The Matrix for Ada' }),
+  )
+  await waitFor(() =>
+    expect(calls.some((call) => call.path.endsWith('/deny'))).toBe(true),
+  )
+  expect(calls.find((call) => call.path.endsWith('/deny'))?.body).toMatchObject(
+    { reason: 'Not tonight' },
+  )
+  expect(
+    calls
+      .filter((call) => call.method === 'PUT' && call.path.endsWith('/note'))
+      .map((call) => (call.body as { note: string }).note),
+  ).toEqual(['Kept for later', ''])
+})
+
+it('gives parent-note controls the phone tap size', () => {
+  const css = readFileSync(join(__dirname, 'styles.css'), 'utf8')
+  expect(css).toContain(`min-height: var(--tap-size);`)
+  expect(css).toMatch(
+    /\.approval-card \.parent-note textarea,\s*\.approval-card \.parent-note button \{\s*width: 100%;\s*min-height: var\(--tap-size\);/,
+  )
 })
 
 const bare = {

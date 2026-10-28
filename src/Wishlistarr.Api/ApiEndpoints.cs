@@ -16,6 +16,7 @@ using Wishlistarr.Api.Webhooks;
 using Wishlistarr.Core.Fulfilment;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Integrations.Arr;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Seerr;
 using Wishlistarr.Integrations.Tmdb;
 
@@ -36,7 +37,9 @@ public static class ApiEndpoints
         v1.MapParentKidProfiles();
         v1.MapParentKidDevices();
         v1.MapRequests();
+        v1.MapParentNotes();
         v1.MapTmdb();
+        v1.MapDtdd();
         v1.MapMediaServer();
         v1.MapArr();
         v1.MapSeerr();
@@ -61,7 +64,7 @@ public static class ApiEndpoints
             .WithSummary("Lists settings. Secret values are never returned.")
             .Produces<IReadOnlyList<SettingSummary>>();
 
-        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, TmdbPurgeRunner purger, CancellationToken ct) =>
+        settings.MapPut("/{key}", async (string key, SettingUpdate? update, SettingsStore store, TmdbPurgeRunner purger, DtddCache warnings, CancellationToken ct) =>
         {
             if (update?.Value is null)
             {
@@ -162,11 +165,26 @@ public static class ApiEndpoints
                 return purge.Completed ? Results.NoContent() : Results.Accepted();
             }
 
+            if (key == DtddOptions.ApiKeySetting)
+            {
+                if (string.IsNullOrWhiteSpace(update.Value))
+                {
+                    await store.DeleteAsync(key, ct);
+                }
+                else
+                {
+                    await store.SetAsync(key, update.Value, true, ct);
+                }
+
+                warnings.Clear();
+                return Results.NoContent();
+            }
+
             await store.SetAsync(key, update.Value, update.IsSecret || key == TmdbOptions.ApiKeySetting, ct);
             return Results.NoContent();
         })
             .WithName("PutSetting")
-            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data; tmdb.retention_days accepts 1 to 180; kids.youtube_trailers accepts true or false; fulfilment.mode accepts seerr, arr or none.")
+            .WithSummary("Creates or replaces a setting, encrypting it when flagged as secret. An empty tmdb.api_key removes the key and purges stored TMDB data. An empty dtdd.api_key removes the key and clears the in-memory DoesTheDogDie cache; dtdd.api_key is always encrypted. tmdb.retention_days accepts 1 to 180; kids.youtube_trailers accepts true or false; fulfilment.mode accepts seerr, arr or none.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)

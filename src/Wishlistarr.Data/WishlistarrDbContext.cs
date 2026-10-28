@@ -18,6 +18,8 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<ProfileTitleRule> ProfileTitleRules => this.Set<ProfileTitleRule>();
 
+    public DbSet<ParentNote> ParentNotes => this.Set<ParentNote>();
+
     public DbSet<KidProfile> KidProfiles => this.Set<KidProfile>();
 
     public DbSet<KidSession> KidSessions => this.Set<KidSession>();
@@ -134,6 +136,13 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
             entity.HasKey(row => new { row.KidProfileId, row.Kind, row.TmdbId, row.Blocked });
             entity.Property(row => row.Title).HasMaxLength(300).UseCollation("NOCASE");
             entity.HasOne<KidProfile>().WithMany(profile => profile.TitleRules).HasForeignKey(row => row.KidProfileId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ParentNote>(entity =>
+        {
+            entity.Property(row => row.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(row => row.Text).HasMaxLength(2000);
+            entity.HasIndex(row => new { row.Kind, row.TmdbId }).IsUnique();
         });
 
 

@@ -27,6 +27,7 @@ using Wishlistarr.Core;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Arr;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Seerr;
 using Wishlistarr.Integrations.Tmdb;
@@ -91,6 +92,7 @@ builder.Services.AddHttpClient(NotificationSender.ClientName)
 builder.Services.AddBackgroundJob<NotificationJob>(NotificationJob.JobName, "Delivers parent notifications and retries failed deliveries.", TimeSpan.FromMinutes(1));
 builder.Services.AddScoped<SettingsStore>();
 builder.Services.AddTmdb<SettingsTmdbApiKeyProvider>();
+builder.Services.AddDoesTheDogDie<SettingsDtddApiKeyProvider>();
 builder.Services.AddPlex<StoredAppSettings>();
 builder.Services.AddArr<StoredAppSettings>();
 builder.Services.AddSeerr<StoredAppSettings>();

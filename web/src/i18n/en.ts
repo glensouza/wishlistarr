@@ -8,7 +8,7 @@ export const en = {
   'controls.hint':
     'Valid changes save automatically after you finish typing. Wait for Saved before changing profiles or closing this screen.',
   'controls.empty':
-    'Leave an age limit or allowance empty for no limit. An empty language list allows every language.',
+    'Leave an age limit or allowance empty for no limit. An empty language list allows every language. An empty descriptor or topic list blocks nothing.',
   'controls.saving': 'Saving…',
   'controls.saved': 'Saved',
   'controls.unsaved': 'Changes have not been saved',
@@ -20,11 +20,11 @@ export const en = {
   'controls.retry': 'Try again',
   'controls.discard': 'Discard unsaved changes',
   'controls.invalid':
-    'Use whole ages from 0 to 21, an allowance from 0 to 1000, positive TMDB IDs (up to 40 genres and 100 keywords), and up to 50 two-letter language codes separated by commas. These changes have not been saved.',
+    'Use whole ages from 0 to 21, an allowance from 0 to 1000, positive TMDB IDs (up to 40 genres and 100 keywords), up to 50 descriptors and 50 topics of at most 100 characters, and up to 50 two-letter language codes separated by commas. These changes have not been saved.',
   'controls.export': 'Export rules as JSON',
   'controls.import': 'Import rules from JSON',
   'controls.importInvalid':
-    'This file was not imported. Choose a rules export with version 1, all nine rule fields and no extra fields, valid ages, allowance, rating ceilings, ID lists and two-letter languages. Files must be at most 1 MiB. No rules were changed.',
+    'This file was not imported. Choose a rules export with version 1, all eleven rule fields and no extra fields, valid ages, allowance, rating ceilings, ID lists, descriptor and topic lists, and two-letter languages. Files must be at most 1 MiB. No rules were changed.',
   'app.name': 'Wishlistarr',
   'app.skipToContent': 'Skip to content',
   'app.loading': 'Loading',
@@ -183,6 +183,11 @@ export const en = {
   'admin.blockedKeywordsHint': 'TMDB keyword ids, separated by commas',
   'admin.allowedLanguages': 'Allowed languages',
   'admin.allowedLanguagesHint': 'ISO 639-1 codes, such as en or ja',
+  'admin.blockedDescriptors': 'Blocked descriptors',
+  'admin.blockedDescriptorsHint':
+    'Certification descriptors, separated by commas',
+  'admin.blockedTopics': 'Blocked topics',
+  'admin.blockedTopicsHint': 'Topic names, separated by commas',
   'admin.homeRows': 'Home rows',
   'admin.homeRowsHint':
     'Choose which rows this profile sees at home, and the order they appear in.',
@@ -203,7 +208,7 @@ export const en = {
   'admin.homeOptionsFailed': 'The home row choices could not be loaded.',
   'admin.homeOptionsRetry': 'Try again',
   'admin.rulesInvalid':
-    'Genres and keywords must be TMDB ids separated by commas.',
+    'Genres and keywords must be TMDB ids separated by commas. Descriptors and topics are up to 50 entries, each 1 to 100 characters, with no control characters.',
   'admin.plexLabel': 'Plex label',
   'admin.autoApprove': 'Auto-approve requests',
   'admin.autoApproveHint':
@@ -562,6 +567,14 @@ export const en = {
     "This title meets the profile's content rules.",
   'controls.reason.languageAllowed':
     "This title meets the profile's content rules.",
+  'controls.reason.blockedDescriptor':
+    'This title includes the blocked descriptor {descriptor}.',
+  'controls.reason.blockedTopic':
+    'This title includes the blocked topic {topic}.',
+  'controls.reason.noBlockedDescriptor':
+    "This title meets the profile's content rules.",
+  'controls.reason.noBlockedTopic':
+    "This title meets the profile's content rules.",
 
   'queue.heading': 'Waiting for you',
   'queue.filter': 'Show requests for',
@@ -579,6 +592,20 @@ export const en = {
   'queue.ratingFailed': 'The age rating could not be loaded.',
   'queue.descriptors': 'Content descriptors',
   'queue.descriptorsNone': 'No content descriptors are listed.',
+  'queue.warnings': 'Content warnings',
+  'queue.warningsFailed':
+    'Content warnings could not be loaded. You can still approve or deny this request.',
+  'queue.warningCredit': 'Powered by DoesTheDogDie.com',
+  'queue.parentNote': 'Parent note for {title} ({name})',
+  'queue.parentNoteHint':
+    'Parents share this note for the title. The kid does not see it. Leave it empty and save to remove it.',
+  'queue.saveParentNote': 'Save the parent note for {title} ({name})',
+  'queue.clearParentNote': 'Clear the parent note for {title} ({name})',
+  'queue.noteSaved': 'Parent note saved.',
+  'queue.noteCleared': 'Parent note cleared.',
+  'queue.noteSaveFailed': 'The parent note could not be saved.',
+  'queue.noteTooLongAdvisory':
+    'That note is longer than 2000 characters. Shorten it, then save.',
   'queue.providersNone': 'Not listed on a streaming service.',
   'queue.providersFailed': 'Streaming availability could not be loaded.',
   'queue.trailerFailed': 'The trailer could not be loaded.',
@@ -635,6 +662,10 @@ export const en = {
   'queue.reasonLanguageMissing':
     'Its original language is not one this profile allows.',
   'queue.reasonBlocked': 'This title is on the block list for this profile.',
+  'queue.reasonDescriptor':
+    'It includes {name}, a content descriptor this profile blocks.',
+  'queue.reasonTopic':
+    'It includes {name}, a content warning this profile blocks.',
   'queue.reasonUnavailable':
     'Why this title needs approval could not be checked. You can still approve or deny it.',
   'queue.more':

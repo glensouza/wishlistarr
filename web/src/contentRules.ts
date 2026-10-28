@@ -1,5 +1,8 @@
 import { ratingLevels, type KidProfile } from './kidProfiles'
 
+export const maxAdvisoryEntries = 50
+export const maxAdvisoryLength = 100
+
 export const ruleKeys = [
   'movieAgeLimit',
   'tvAgeLimit',
@@ -10,6 +13,8 @@ export const ruleKeys = [
   'blockedGenreIds',
   'blockedKeywordIds',
   'allowedOriginalLanguages',
+  'blockedDescriptors',
+  'blockedTopics',
 ] as const
 
 export type ProfileRules = Pick<KidProfile, (typeof ruleKeys)[number]>
@@ -42,6 +47,19 @@ export function validRules(value: unknown): value is ProfileRules {
     )
   const rating = (item: unknown) =>
     item === null || ratingLevels.some((level) => level === item)
+  const advisories = (item: unknown) =>
+    Array.isArray(item) &&
+    item.length <= maxAdvisoryEntries &&
+    item.every(
+      (entry: unknown) =>
+        typeof entry === 'string' &&
+        entry.length >= 1 &&
+        entry.length <= maxAdvisoryLength &&
+        !Array.from(entry).some(
+          (character) =>
+            character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+        ),
+    )
   return (
     integer(rules.movieAgeLimit, 21) &&
     integer(rules.tvAgeLimit, 21) &&
@@ -55,7 +73,9 @@ export function validRules(value: unknown): value is ProfileRules {
     rules.allowedOriginalLanguages.length <= 50 &&
     rules.allowedOriginalLanguages.every(
       (code: unknown) => typeof code === 'string' && /^[a-z]{2}$/i.test(code),
-    )
+    ) &&
+    advisories(rules.blockedDescriptors) &&
+    advisories(rules.blockedTopics)
   )
 }
 

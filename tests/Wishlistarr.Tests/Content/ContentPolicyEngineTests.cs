@@ -473,12 +473,64 @@ public sealed class ContentPolicyEngineTests
         Assert.Equal(new ContentReason(ContentReasonCode.LanguageNotAllowed), Evaluate(unrecognized, restricted).Reason);
     }
 
+    [Fact]
+    public void Empty_advisory_configuration_keeps_the_decision_a_title_already_had()
+    {
+        ContentPolicy ceiling = new() { MaxMovieRating = RatingLevel.ParentalGuidance };
+        ContentPolicy emptyLists = ceiling with
+        {
+            BlockedDescriptors = ImmutableHashSet<string>.Empty,
+            BlockedTopics = ImmutableHashSet<string>.Empty,
+        };
+        ContentTitle advised = MovieTitle(rating: "PG-13", descriptors: ["Violence"], topics: ["a dog dies"]);
+        ContentDecision today = Evaluate(MovieTitle(rating: "PG-13"), ceiling);
+
+        Assert.Equal(ContentReasonCode.AboveRatingLimit, today.Reason.Code);
+        Assert.Equal(today, Evaluate(advised, ceiling));
+        Assert.Equal(today, Evaluate(advised, emptyLists));
+
+        ContentDecision within = Evaluate(MovieTitle(rating: "PG"), ceiling);
+        Assert.Equal(ContentReasonCode.WithinRatingLimit, within.Reason.Code);
+        Assert.Equal(within, Evaluate(MovieTitle(rating: "PG", descriptors: ["Violence"], topics: ["a dog dies"]), ceiling));
+        Assert.Equal(ContentReasonCode.NoBlockedDescriptor, new DescriptorBlockRule().Evaluate(advised, ceiling).Reason.Code);
+        Assert.Equal(ContentReasonCode.NoBlockedTopic, new TopicBlockRule().Evaluate(advised, ceiling).Reason.Code);
+    }
+
+    [Fact]
+    public void Descriptor_and_topic_blocks_fold_case_and_the_earlier_block_wins_a_tie()
+    {
+        ContentTitle title = MovieTitle(rating: "G", descriptors: [" Violence "], topics: ["Dogs"]);
+        ContentPolicy descriptors = new() { BlockedDescriptors = ImmutableHashSet.Create("violence") };
+        ContentPolicy topics = new() { BlockedTopics = ImmutableHashSet.Create(" dogs ") };
+        ContentPolicy both = new()
+        {
+            BlockedDescriptors = ImmutableHashSet.Create("VIOLENCE"),
+            BlockedTopics = ImmutableHashSet.Create("dogs"),
+        };
+        ContentPolicy ratingAndDescriptor = new()
+        {
+            MaxMovieRating = RatingLevel.ParentalGuidance,
+            BlockedDescriptors = ImmutableHashSet.Create("violence"),
+        };
+
+        ContentDecision descriptor = Evaluate(title, descriptors);
+        ContentDecision topic = Evaluate(title, topics);
+        Assert.Equal(ContentOutcome.Blocked, descriptor.Outcome);
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedDescriptor, Descriptor: "Violence"), descriptor.Reason);
+        Assert.Equal(descriptor.Reason, new DescriptorBlockRule().Evaluate(title, descriptors).Reason);
+        Assert.Equal(ContentOutcome.Blocked, topic.Outcome);
+        Assert.Equal(new ContentReason(ContentReasonCode.BlockedTopic, Topic: "Dogs"), topic.Reason);
+        Assert.Equal(topic.Reason, new TopicBlockRule().Evaluate(title, topics).Reason);
+        Assert.Equal(ContentReasonCode.BlockedDescriptor, Evaluate(title, both).Reason.Code);
+        Assert.Equal(ContentReasonCode.AboveRatingLimit, Evaluate(MovieTitle(rating: "PG-13", descriptors: ["Violence"]), ratingAndDescriptor).Reason.Code);
+    }
+
     private static ContentDecision Evaluate(ContentTitle title, ContentPolicy policy) => ContentPolicyEngine.Default.Evaluate(title, policy);
 
-    private static ContentTitle MovieTitle(string? rating = "G", int[]? genres = null, int[]? keywords = null, string? language = null)
+    private static ContentTitle MovieTitle(string? rating = "G", int[]? genres = null, int[]? keywords = null, string? language = null, string[]? descriptors = null, string[]? topics = null)
     {
         RegionCertification[] certifications = rating is null ? [] : [new RegionCertification("US", rating)];
-        return new ContentTitle(Movie, certifications, genres, keywords, language);
+        return new ContentTitle(Movie, certifications, genres, keywords, language, descriptors, topics);
     }
 
     private static ContentTitle Title(TitleKey key, params (string Region, string Rating)[] certifications) =>

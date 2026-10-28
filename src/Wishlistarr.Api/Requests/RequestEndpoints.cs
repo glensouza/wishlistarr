@@ -112,7 +112,7 @@ public static class RequestEndpoints
                 : Results.Ok(page);
         })
             .WithName("GetApprovalQueue")
-            .WithSummary("Lists pending requests for a parent, with the synopsis, US rating and descriptors, US streaming providers, trailer key and the current reason a parent has to decide. A kid session cannot call it. Title details that cannot be read are left out and named in gaps; the request can still be approved or denied. tmdbConfigured is false when no TMDB key is saved, and then no title details are read.")
+            .WithSummary("Lists pending requests for a parent, with the synopsis, US rating and descriptors, optional DoesTheDogDie topic names, the shared parent note, US streaming providers, trailer key and the current reason a parent has to decide. A kid session cannot call it. Title details that cannot be read are left out and named in gaps; the request can still be approved or denied. contentWarnings is null when no DoesTheDogDie key is saved. A contentWarnings gap means the key is saved but the lookup failed, and then no attribution is returned. tmdbConfigured is false when no TMDB key is saved, and then no TMDB title details are read.")
             .Produces<ApprovalQueuePage>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);

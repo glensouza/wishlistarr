@@ -20,11 +20,20 @@ const reasonCodes = [
   'languageNotAllowed',
   'explicitlyBlocked',
   'unavailable',
+  'blockedDescriptor',
+  'blockedTopic',
 ] as const
 
 export type QueueReasonCode = (typeof reasonCodes)[number]
 
-const gaps = ['synopsis', 'rating', 'providers', 'trailer', 'keywords'] as const
+const gaps = [
+  'synopsis',
+  'rating',
+  'providers',
+  'trailer',
+  'keywords',
+  'contentWarnings',
+] as const
 
 export type QueueGap = (typeof gaps)[number]
 
@@ -36,6 +45,13 @@ export type QueueReason = {
   genreName: string | null
   keywordName: string | null
   language: string | null
+  descriptor: string | null
+  topic: string | null
+}
+
+export type WarningCredit = {
+  text: string
+  url: string
 }
 
 export type QueueItem = {
@@ -54,6 +70,9 @@ export type QueueItem = {
   trailerKey: string | null
   reason: QueueReason
   gaps: QueueGap[]
+  contentWarnings: string[] | null
+  attribution: WarningCredit | null
+  parentNote: string | null
 }
 
 export type QueuePage = {
@@ -87,7 +106,25 @@ function isReason(value: unknown): value is QueueReason {
     isNullableString(value.maxLevel) &&
     isNullableString(value.genreName) &&
     isNullableString(value.keywordName) &&
-    isNullableString(value.language)
+    isNullableString(value.language) &&
+    isNullableString(value.descriptor) &&
+    isNullableString(value.topic)
+  )
+}
+
+function isWarnings(value: unknown): value is string[] | null {
+  return (
+    value === null ||
+    (Array.isArray(value) && value.every((item) => typeof item === 'string'))
+  )
+}
+
+function isCredit(value: unknown): value is WarningCredit | null {
+  if (value === null) return true
+  return (
+    isRecord(value) &&
+    typeof value.text === 'string' &&
+    typeof value.url === 'string'
   )
 }
 
@@ -126,7 +163,10 @@ function isItem(value: unknown): value is QueueItem {
     isNullableString(value.trailerKey) &&
     isReason(value.reason) &&
     Array.isArray(value.gaps) &&
-    value.gaps.every(isGap)
+    value.gaps.every(isGap) &&
+    isWarnings(value.contentWarnings) &&
+    isCredit(value.attribution) &&
+    isNullableString(value.parentNote)
   )
 }
 
@@ -201,6 +241,14 @@ export function reasonText(reason: QueueReason, t: Translate) {
         : t('queue.reasonLanguageMissing')
     case 'explicitlyBlocked':
       return t('queue.reasonBlocked')
+    case 'blockedDescriptor':
+      return reason.descriptor
+        ? t('queue.reasonDescriptor', { name: reason.descriptor })
+        : t('queue.reasonUnavailable')
+    case 'blockedTopic':
+      return reason.topic
+        ? t('queue.reasonTopic', { name: reason.topic })
+        : t('queue.reasonUnavailable')
     default:
       return t('queue.reasonUnavailable')
   }

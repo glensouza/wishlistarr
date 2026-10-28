@@ -9,6 +9,7 @@ using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Requests;
@@ -31,6 +32,7 @@ public sealed partial class KidRequestFlow(
     WishlistarrDbContext db,
     MediaRequests requests,
     ITmdbClient tmdb,
+    IDtddClient dtdd,
     LibraryLookup library,
     RequestLabeling labeling,
     RequestApproval approval,
@@ -171,7 +173,7 @@ public sealed partial class KidRequestFlow(
     }
 
     public async Task<PolicyEvaluation?> EvaluateAsync(KidProfile profile, TitleKey title, CancellationToken ct) =>
-        await Kids.KidPolicyEvaluator.EvaluateAsync(tmdb, title, profile.ContentPolicy(), await this.WasRevokedAsync(profile.Id, title, ct), ct);
+        await Kids.KidPolicyEvaluator.EvaluateAsync(tmdb, title, profile.ContentPolicy(), await this.WasRevokedAsync(profile.Id, title, ct), ct, dtdd: dtdd);
 
     private async Task<(IReadOnlyList<MediaItem> Items, bool Known)> FindInLibraryAsync(TitleKey title, CancellationToken ct)
     {
@@ -234,6 +236,7 @@ public enum PolicyLookup
     Details,
     Certification,
     Keywords,
+    Topics,
 }
 
 public sealed record PolicyEvaluation(
@@ -244,7 +247,8 @@ public sealed record PolicyEvaluation(
     TmdbDetails? Details = null,
     TmdbCertification? Certification = null,
     IReadOnlyList<TmdbKeyword>? Keywords = null,
-    PolicyLookup? FailedLookup = null)
+    PolicyLookup? FailedLookup = null,
+    IReadOnlyList<string>? Topics = null)
 {
     public RatingLevel? Level => new RatingRule().Evaluate(this.Content, this.Policy).Reason.Level;
 

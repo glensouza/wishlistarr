@@ -131,12 +131,22 @@ const listFields = [
     'admin.allowedLanguagesHint',
   ],
 ] as const
+const advisoryFields = [
+  [
+    'blockedDescriptors',
+    'admin.blockedDescriptors',
+    'admin.blockedDescriptorsHint',
+  ],
+  ['blockedTopics', 'admin.blockedTopics', 'admin.blockedTopicsHint'],
+] as const
 const ceilings = [
   ['autoApproveMovieRating', 'admin.movieCeiling'],
   ['autoApproveTvRating', 'admin.tvCeiling'],
 ] as const
 type Draft = Record<
-  (typeof numberFields)[number][0] | (typeof listFields)[number][0],
+  | (typeof numberFields)[number][0]
+  | (typeof listFields)[number][0]
+  | (typeof advisoryFields)[number][0],
   string
 > &
   Pick<
@@ -152,11 +162,15 @@ function toDraft(rules: ProfileRules): Draft {
     blockedGenreIds: rules.blockedGenreIds.join(', '),
     blockedKeywordIds: rules.blockedKeywordIds.join(', '),
     allowedOriginalLanguages: rules.allowedOriginalLanguages.join(', '),
+    blockedDescriptors: rules.blockedDescriptors.join(', '),
+    blockedTopics: rules.blockedTopics.join(', '),
   }
 }
 function parseDraft(draft: Draft): ProfileRules | null {
   const tokens = (value: string) =>
     value.trim() === '' ? [] : value.split(',').map((part) => part.trim())
+  const advisoryTokens = (value: string) =>
+    tokens(value).filter((part) => part !== '')
   const rules = {
     ...draft,
     movieAgeLimit:
@@ -169,6 +183,8 @@ function parseDraft(draft: Draft): ProfileRules | null {
     allowedOriginalLanguages: tokens(draft.allowedOriginalLanguages).map(
       (code) => code.toLowerCase(),
     ),
+    blockedDescriptors: advisoryTokens(draft.blockedDescriptors),
+    blockedTopics: advisoryTokens(draft.blockedTopics),
   }
   return validRules(rules) ? profileRules(rules) : null
 }
@@ -336,7 +352,7 @@ function RulesEditor({
           </label>
         ))}
         <p className="muted">{t('controls.empty')}</p>
-        {listFields.map(([key, label, hint]) => (
+        {[...listFields, ...advisoryFields].map(([key, label, hint]) => (
           <label key={key}>
             {t(label)}
             <input

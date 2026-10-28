@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ApiError, request } from './api'
+import { ApiError, maxParentNoteLength, request, saveParentNote } from './api'
 import {
   listQueue,
   QueueShapeError,
@@ -8,6 +8,7 @@ import {
   type QueueItem,
   type QueuePage,
 } from './approvalQueue'
+import { DogCredit } from './about/DogCredit'
 import { WatchProviders } from './about/WatchProviders'
 import { useT, type MessageKey } from './i18n'
 import Trailer, { isYoutubeId } from './kid/Trailer'
@@ -47,6 +48,10 @@ function isKid(value: unknown): value is Kid {
   if (typeof value !== 'object' || value === null) return false
   const profile = value as Record<string, unknown>
   return typeof profile.id === 'number' && typeof profile.name === 'string'
+}
+
+function noteKey(item: { kind: string; tmdbId: number }) {
+  return `${item.kind}:${item.tmdbId}`
 }
 
 function displayTitle(item: QueueItem, t: (key: MessageKey) => string) {
@@ -196,6 +201,11 @@ export default function ParentHome() {
   const [tmdbReady, setTmdbReady] = useState(true)
   const [notes, setNotes] = useState<Record<number, string>>({})
   const [noteErrors, setNoteErrors] = useState<Record<number, string>>({})
+  const [parentDrafts, setParentDrafts] = useState<Record<string, string>>({})
+  const [parentStatus, setParentStatus] = useState<
+    Record<string, { kind: 'status' | 'error'; text: string }>
+  >({})
+  const [parentBusy, setParentBusy] = useState<string[]>([])
   const [busy, setBusy] = useState<number[]>([])
   const [notice, setNotice] = useState<Notice | null>(null)
   const pendingFocus = useRef<string | null>(null)
@@ -331,6 +341,63 @@ export default function ParentHome() {
       if (known) setHeldKid(known)
     }
     showQueue({ kind: 'loading' })
+  }
+
+  async function saveSharedNote(item: QueueItem, clearing: boolean) {
+    const key = noteKey(item)
+    const raw = parentDrafts[key] ?? item.parentNote ?? ''
+    const text = clearing ? '' : raw.trim()
+    if (text.length > maxParentNoteLength) {
+      setParentStatus((current) => ({
+        ...current,
+        [key]: { kind: 'error', text: t('queue.noteTooLongAdvisory') },
+      }))
+      focusOn(`parent-note-error-${item.id}`)
+      return
+    }
+    setParentBusy((current) =>
+      current.includes(key) ? current : [...current, key],
+    )
+    setParentStatus((current) => {
+      if (!(key in current)) return current
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+    try {
+      const saved = await saveParentNote(item.kind, item.tmdbId, text)
+      const note = saved.note
+      setParentDrafts((current) => ({ ...current, [key]: note ?? '' }))
+      if (queueRef.current.kind === 'ready') {
+        const page = queueRef.current.page
+        showQueue({
+          kind: 'ready',
+          page: {
+            ...page,
+            items: page.items.map((row) =>
+              row.kind === item.kind && row.tmdbId === item.tmdbId
+                ? { ...row, parentNote: note }
+                : row,
+            ),
+          },
+        })
+      }
+      setParentStatus((current) => ({
+        ...current,
+        [key]: {
+          kind: 'status',
+          text: t(note ? 'queue.noteSaved' : 'queue.noteCleared'),
+        },
+      }))
+    } catch {
+      setParentStatus((current) => ({
+        ...current,
+        [key]: { kind: 'error', text: t('queue.noteSaveFailed') },
+      }))
+      focusOn(`parent-note-error-${item.id}`)
+    } finally {
+      setParentBusy((current) => current.filter((id) => id !== key))
+    }
   }
 
   async function decide(item: QueueItem, approving: boolean) {
@@ -490,21 +557,32 @@ export default function ParentHome() {
         )}
         {page !== null && rest === 'cards' && (
           <div className="approval-queue">
-            {page.items.map((item) => (
-              <QueueCard
-                key={item.id}
-                item={item}
-                tmdbConfigured={page.tmdbConfigured}
-                note={notes[item.id] ?? ''}
-                noteError={noteErrors[item.id] ?? null}
-                waiting={busy.includes(item.id)}
-                onNote={(value) =>
-                  setNotes((current) => ({ ...current, [item.id]: value }))
-                }
-                onApprove={() => void decide(item, true)}
-                onDeny={() => void decide(item, false)}
-              />
-            ))}
+            {page.items.map((item) => {
+              const key = noteKey(item)
+              return (
+                <QueueCard
+                  key={item.id}
+                  item={item}
+                  tmdbConfigured={page.tmdbConfigured}
+                  note={notes[item.id] ?? ''}
+                  noteError={noteErrors[item.id] ?? null}
+                  waiting={busy.includes(item.id)}
+                  parentNote={parentDrafts[key] ?? item.parentNote ?? ''}
+                  parentState={parentStatus[key] ?? null}
+                  parentWaiting={parentBusy.includes(key)}
+                  onNote={(value) =>
+                    setNotes((current) => ({ ...current, [item.id]: value }))
+                  }
+                  onParentNote={(value) =>
+                    setParentDrafts((current) => ({ ...current, [key]: value }))
+                  }
+                  onSaveParentNote={() => void saveSharedNote(item, false)}
+                  onClearParentNote={() => void saveSharedNote(item, true)}
+                  onApprove={() => void decide(item, true)}
+                  onDeny={() => void decide(item, false)}
+                />
+              )
+            })}
           </div>
         )}
       </section>
@@ -536,7 +614,13 @@ function QueueCard({
   note,
   noteError,
   waiting,
+  parentNote,
+  parentState,
+  parentWaiting,
   onNote,
+  onParentNote,
+  onSaveParentNote,
+  onClearParentNote,
   onApprove,
   onDeny,
 }: {
@@ -545,7 +629,13 @@ function QueueCard({
   note: string
   noteError: string | null
   waiting: boolean
+  parentNote: string
+  parentState: { kind: 'status' | 'error'; text: string } | null
+  parentWaiting: boolean
   onNote: (value: string) => void
+  onParentNote: (value: string) => void
+  onSaveParentNote: () => void
+  onClearParentNote: () => void
   onApprove: () => void
   onDeny: () => void
 }) {
@@ -603,6 +693,19 @@ function QueueCard({
         ) : (
           <p>{t('queue.descriptorsNone')}</p>
         ))}
+      {item.gaps.includes('contentWarnings') && (
+        <p>{t('queue.warningsFailed')}</p>
+      )}
+      {item.contentWarnings && item.contentWarnings.length > 0 && (
+        <>
+          <ul aria-label={t('queue.warnings')}>
+            {item.contentWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+          {item.attribution && <DogCredit url={item.attribution.url} />}
+        </>
+      )}
       {!hide('providers') &&
         (item.gaps.includes('providers') ? (
           <p>{t('queue.providersFailed')}</p>
@@ -619,6 +722,42 @@ function QueueCard({
             <Trailer videoId={item.trailerKey} backdropUrl={null} />
           )
         ))}
+      <div className="parent-note">
+        <label htmlFor={`parent-note-${item.id}`}>
+          {t('queue.parentNote', { title, name: item.kidName })}
+        </label>
+        <textarea
+          id={`parent-note-${item.id}`}
+          value={parentNote}
+          aria-describedby={`parent-note-hint-${item.id}`}
+          onChange={(event) => onParentNote(event.target.value)}
+        />
+        <p className="muted" id={`parent-note-hint-${item.id}`}>
+          {t('queue.parentNoteHint')}
+        </p>
+        {parentState?.kind === 'status' && (
+          <p role="status">{parentState.text}</p>
+        )}
+        {parentState?.kind === 'error' && (
+          <p id={`parent-note-error-${item.id}`} role="alert" tabIndex={-1}>
+            {parentState.text}
+          </p>
+        )}
+        <button
+          type="button"
+          disabled={parentWaiting}
+          onClick={onSaveParentNote}
+        >
+          {t('queue.saveParentNote', { title, name: item.kidName })}
+        </button>
+        <button
+          type="button"
+          disabled={parentWaiting}
+          onClick={onClearParentNote}
+        >
+          {t('queue.clearParentNote', { title, name: item.kidName })}
+        </button>
+      </div>
       <label htmlFor={`queue-note-${item.id}`}>
         {t('queue.note', { name: item.kidName })}
       </label>

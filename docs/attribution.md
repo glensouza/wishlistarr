@@ -2,7 +2,7 @@
 
 Wishlistarr shows full credits, with links to each service, on the in-app About page (`/about`). Only a signed-in parent can open it: the link is in the parent area, and anyone else who opens `/about` is sent to the parent sign-in. Kid mode never shows an outbound link. Every screen, kid screens included, ends with the TMDB logo and notice as plain text and an image, with no link and nothing else.
 
-A test (`web/src/assets.test.ts`) fails if any source file other than the About page contains an absolute `http(s)` link, a third-party `src`, `window.open` or `target="_blank"`, and component tests render the profile picker, the kid home and a paired device and check that none of them has an outbound link or an About link.
+A test (`web/src/assets.test.ts`) fails if any source file other than the About page and the parent-only warning credit contains an absolute `http(s)` link, a third-party `src`, `window.open` or `target="_blank"`, and component tests render the profile picker, the kid home and a paired device and check that none of them has an outbound link or an About link.
 
 Outbound links on the About page open in a new tab with `target="_blank"` and `rel="noreferrer noopener"`.
 
@@ -32,7 +32,7 @@ Artwork data from [fanart.tv](https://fanart.tv/). Text only, on the About page.
 
 ## DoesTheDogDie
 
-Powered by [DoesTheDogDie.com](https://www.doesthedogdie.com). The visible words are that phrase, and the link target is `https://www.doesthedogdie.com`. Text only, on the About page. It is a trigger-content site, which is why the link is not available in kid mode.
+Powered by [DoesTheDogDie.com](https://www.doesthedogdie.com). The visible words are that phrase, and the link target is `https://www.doesthedogdie.com`. The About page shows it, and a parent approval card shows the same phrase and link when that card displays topic names. The card omits the link when the lookup failed, when no key is saved, and when no topic name is shown. The credit component is parent-only and is not imported by a kid screen. It is a trigger-content site, which is why the link is not available in kid mode. Which data is shown, and which sources are left out, is in [Advisories](advisories.md).
 
 ## Plex
 

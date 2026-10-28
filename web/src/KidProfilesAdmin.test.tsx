@@ -28,6 +28,8 @@ const ada: KidProfile = {
   blockedGenreIds: [],
   blockedKeywordIds: [],
   allowedOriginalLanguages: [],
+  blockedDescriptors: [],
+  blockedTopics: [],
   homeRows: ['popular', 'library', 'genre'],
 }
 
@@ -206,6 +208,30 @@ it('sends content rules and keeps them when a profile is edited', async () => {
     blockedGenreIds: [53],
     blockedKeywordIds: [1721],
     allowedOriginalLanguages: ['EN', 'fr'],
+  })
+})
+
+it('keeps descriptor and topic blocks when the profile is saved', async () => {
+  profiles = [
+    { ...ada, blockedDescriptors: ['Violence'], blockedTopics: ['dogs'] },
+  ]
+  render(<KidProfilesAdmin />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Ada' }))
+  expect(
+    (screen.getByLabelText('Blocked descriptors') as HTMLInputElement).value,
+  ).toBe('Violence')
+  expect(
+    (screen.getByLabelText('Blocked topics') as HTMLInputElement).value,
+  ).toBe('dogs')
+  fireEvent.change(screen.getByLabelText('Name'), {
+    target: { value: 'Ada Mae' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(writes()).toHaveLength(1))
+  expect(writes()[0].body).toMatchObject({
+    name: 'Ada Mae',
+    blockedDescriptors: ['Violence'],
+    blockedTopics: ['dogs'],
   })
 })
 

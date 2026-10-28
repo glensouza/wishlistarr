@@ -6,6 +6,7 @@ using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Kids;
@@ -40,14 +41,36 @@ public sealed partial class KidContentPipeline(
     IEnumerable<ILibraryIndex> indexes,
     TimeProvider time,
     ILogger<KidContentPipeline> logger,
-    WishlistarrDbContext db)
+    WishlistarrDbContext db,
+    IDtddClient dtdd)
 {
+    public KidContentPipeline(
+        ITmdbClient tmdb,
+        IEnumerable<ILibraryIndex> indexes,
+        TimeProvider time,
+        ILogger<KidContentPipeline> logger,
+        WishlistarrDbContext db)
+        : this(tmdb, indexes, time, logger, db, MissingDtddClient.Instance)
+    {
+    }
+
     public const int MaxParallelLookups = 8;
     public const string PosterSize = "w342";
     public const string PosterRoute = "/api/v1/kid/images/tmdb";
     public const int MaxOverviewLength = 400;
 
     public static readonly TimeSpan LookupBudget = TimeSpan.FromSeconds(3);
+
+    private sealed class MissingDtddClient : IDtddClient
+    {
+        public static MissingDtddClient Instance { get; } = new();
+
+        public Task<IReadOnlyList<string>> GetWarningsAsync(MediaKind kind, int tmdbId, CancellationToken ct = default) =>
+            throw new DtddNotConfiguredException();
+
+        public Task<bool> TestApiKeyAsync(CancellationToken ct = default) =>
+            throw new DtddNotConfiguredException();
+    }
 
     public static KidCandidate? ToCandidate(TmdbSearchResult result)
     {
@@ -126,7 +149,7 @@ public sealed partial class KidContentPipeline(
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelLookups, CancellationToken = budget.Token },
                 async (candidate, token) =>
                 {
-                    if (await KidPolicyEvaluator.EvaluateAsync(tmdb, candidate.Key, policy, revoked.Contains(candidate.Key), token) is { } evaluation)
+                    if (await KidPolicyEvaluator.EvaluateAsync(tmdb, candidate.Key, policy, revoked.Contains(candidate.Key), token, dtdd: dtdd) is { } evaluation)
                         decisions[candidate.Key] = evaluation.Decision;
                 });
         }

@@ -21,6 +21,9 @@ public sealed class KidProfiles(
     public const int MaxBlockedGenres = 40;
     public const int MaxBlockedKeywords = 100;
     public const int MaxAllowedLanguages = 50;
+    public const int MaxBlockedDescriptors = 50;
+    public const int MaxBlockedTopics = 50;
+    public const int MaxAdvisoryLength = 100;
     public const int MaxHomeRows = 10;
 
     public async Task<IReadOnlyList<KidProfile>> ListAsync(CancellationToken ct = default) =>
@@ -132,6 +135,8 @@ public sealed class KidProfiles(
         profile.BlockedGenreIds = [.. input.BlockedGenreIds];
         profile.BlockedKeywordIds = [.. input.BlockedKeywordIds];
         profile.AllowedOriginalLanguages = [.. input.AllowedOriginalLanguages];
+        profile.BlockedDescriptors = [.. input.BlockedDescriptors];
+        profile.BlockedTopics = [.. input.BlockedTopics];
         profile.HomeRows = [.. input.HomeRows];
     }
 
@@ -145,6 +150,8 @@ public sealed class KidProfiles(
         IReadOnlyList<int> genres = [];
         IReadOnlyList<int> keywords = [];
         IReadOnlyList<string> languages = [];
+        IReadOnlyList<string> descriptors = [];
+        IReadOnlyList<string> topics = [];
         IReadOnlyList<string> homeRows = [];
         RatingLevel? movieRating = null;
         RatingLevel? tvRating = null;
@@ -196,6 +203,16 @@ public sealed class KidProfiles(
 
         if (error is null)
         {
+            TryNormalizeAdvisories(request.BlockedDescriptors, MaxBlockedDescriptors, "Blocked descriptors", out descriptors, out error);
+        }
+
+        if (error is null)
+        {
+            TryNormalizeAdvisories(request.BlockedTopics, MaxBlockedTopics, "Blocked topics", out topics, out error);
+        }
+
+        if (error is null)
+        {
             TryNormalizeHomeRows(request.HomeRows, out homeRows, out error);
         }
 
@@ -225,6 +242,8 @@ public sealed class KidProfiles(
                 genres,
                 keywords,
                 languages,
+                descriptors,
+                topics,
                 homeRows)
             : null;
     }
@@ -291,6 +310,8 @@ public sealed class KidProfiles(
         IReadOnlyList<int> BlockedGenreIds,
         IReadOnlyList<int> BlockedKeywordIds,
         IReadOnlyList<string> AllowedOriginalLanguages,
+        IReadOnlyList<string> BlockedDescriptors,
+        IReadOnlyList<string> BlockedTopics,
         IReadOnlyList<string> HomeRows);
 
     private static bool TryRating(string? value, out RatingLevel? rating, out string? error)
@@ -390,6 +411,57 @@ public sealed class KidProfiles(
         normalized = distinct;
     }
 
+    private static void TryNormalizeAdvisories(
+        IReadOnlyList<string>? values,
+        int max,
+        string label,
+        out IReadOnlyList<string> normalized,
+        out string? error)
+    {
+        normalized = [];
+        error = null;
+        if (values is null || values.Count == 0)
+        {
+            return;
+        }
+
+        if (values.Count > max)
+        {
+            error = $"{label} are limited to {max}.";
+            return;
+        }
+
+        List<string> distinct = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string? value in values)
+        {
+            string text = value?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            if (text.Length > MaxAdvisoryLength)
+            {
+                error = $"{label} are limited to {MaxAdvisoryLength} characters.";
+                return;
+            }
+
+            if (text.Any(char.IsControl))
+            {
+                error = $"{label} cannot include control characters.";
+                return;
+            }
+
+            if (seen.Add(text))
+            {
+                distinct.Add(text);
+            }
+        }
+
+        normalized = distinct;
+    }
+
     private static void TryNormalizeHomeRows(
         IReadOnlyList<string>? rows,
         out IReadOnlyList<string> normalized,
@@ -451,6 +523,8 @@ public sealed record KidProfileRequest(
     IReadOnlyList<int>? BlockedGenreIds = null,
     IReadOnlyList<int>? BlockedKeywordIds = null,
     IReadOnlyList<string>? AllowedOriginalLanguages = null,
+    IReadOnlyList<string>? BlockedDescriptors = null,
+    IReadOnlyList<string>? BlockedTopics = null,
     IReadOnlyList<string>? HomeRows = null);
 
 public sealed record ProfileOutcome(KidProfile? Profile, int Status, string? Error)

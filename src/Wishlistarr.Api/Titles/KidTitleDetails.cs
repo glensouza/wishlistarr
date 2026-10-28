@@ -11,6 +11,7 @@ using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Titles;
@@ -52,6 +53,7 @@ public sealed partial class KidTitleDetails(
     ITmdbClient tmdb,
     IEnumerable<ILibraryIndex> indexes,
     SettingsStore settings,
+    IDtddClient dtdd,
     ILogger<KidTitleDetails> logger)
 {
     public const int MaxCast = 12;
@@ -70,7 +72,7 @@ public sealed partial class KidTitleDetails(
         TitleKey key = new(kind, tmdbId);
         ContentPolicy policy = profile.ContentPolicy();
         bool revoked = await db.MediaRequests.AnyAsync(row => row.KidProfileId == profile.Id && row.Kind == kind && row.TmdbId == tmdbId && row.State == RequestState.Revoked, ct);
-        PolicyEvaluation? evaluation = await KidPolicyEvaluator.EvaluateAsync(tmdb, key, policy, revoked, ct);
+        PolicyEvaluation? evaluation = await KidPolicyEvaluator.EvaluateAsync(tmdb, key, policy, revoked, ct, dtdd: dtdd);
         if (evaluation is null) return new KidTitleResult(KidTitleOutcome.NotFound);
         ContentDecision decision = evaluation.Decision;
         if (decision.Outcome == ContentOutcome.Blocked)
