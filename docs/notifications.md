@@ -15,6 +15,18 @@ Provider configuration is encrypted with the application's existing Data Protect
 
 Request events include pending, approved, denied, available, and failed. Repeated PIN failures and profile locks are also selectable. New subscriptions start with future request events. Disabling a subscription cancels queued notifications when the delivery job next runs. A pending notification is only sent while the request is still waiting: requests that were auto-approved, already in the library, granted by a parent, or decided before delivery are skipped instead of announcing a decision that no longer needs one. Their other events, such as approved or available, are still sent to subscriptions that selected them. Delivered messages necessarily leave the application and are subject to the destination service's retention settings.
 
+## Browser notifications
+
+On the same notifications screen, **Turn on notifications** subscribes this browser. Wishlistarr gives the browser its public signing key. The browser then saves a push subscription for the signed-in parent: the endpoint and the keys that encrypt a message for that browser. The list shows only that a browser is saved. It does not show the endpoint or those keys. Removing a browser stops messages to it. A kid session cannot add, list, or remove a parent's browser.
+
+The private signing key is created once, protected with the same data protection keys as other secrets, and stored in the database. It is not sent to the browser and it is not written to the log. A backup restores it with the database, so the public key stays the same. See [backup.md](backup.md).
+
+The service worker that shows the notification is served with the built frontend at `/sw.js`. A browser that cannot show notifications, or that has blocked them, gets a plain message and nothing is saved.
+
+Messages for a subscribed browser use the same request events as the other providers, and the same PIN and lock notices. The text is encrypted to that browser and signed with the application key. A subscription the push service reports as gone (HTTP 404 or 410) is removed. A rate limit (HTTP 429) is retried, and a `Retry-After` delay longer than the next step is honored up to 60 minutes. A rejected signature (HTTP 401 or 403) is retried and does not delete the browser. Attempt limits match the other providers.
+
+Kid devices subscribe separately, as described in [kid-devices.md](kid-devices.md). A notice on a signed-in kid's own screen is described in [kid-home.md](kid-home.md).
+
 ## Approval links
 
 Pending notifications contain signed approve and deny links. Both choices share a single grant bound to the request and recipient, valid for 48 hours from first delivery preparation. A GET only renders a confirmation page: previews, unfurlers and repeated opens cannot consume a link or decide a request. If the browser is signed out, open parent sign-in and then use **Continue after signing in** on the confirmation page. A signed-in browser may also need this step when arriving from another site because the login cookie uses SameSite Strict.

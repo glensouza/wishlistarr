@@ -38,6 +38,14 @@ Only active profiles can be assigned. Archiving a profile removes it from every 
 
 A kid session belongs to the device it started on. It ends when the device is revoked or re-paired, when its profile is removed from the device, and it is not accepted from a browser that does not carry that device's cookie.
 
+## Ready notices
+
+A paired browser can turn on a notice for when a request belonging to one of its profiles is ready to watch. Available and labeled both count as ready. The subscription belongs to the device, not to a parent notification provider and not to one profile. `GET /api/v1/kid/web-push` returns the public signing key and whether this device is subscribed. It does not return the endpoint or the encryption keys. Saving and removing the subscription are `POST` and `DELETE` on that path. A browser that is not paired is refused.
+
+Revoking the device, or pairing it again, deletes that subscription, so the previous browser stops receiving notices. Removing a profile from the device stops notices for that profile.
+
+The push text names a title only when every profile assigned to the device is allowed to see it. The check is the same content policy the kid area already uses, and it is made again at send time. If any assigned profile is not allowed to see it, the notice stays generic and does not name the title. Delivery records do not store the title.
+
 ## Leaving kid mode
 
 On a paired device the **Parents** link leads to **Leave kid mode**, which asks for the parent's username and password. `POST /api/v1/kid/exit` takes `{ username, password }`, checks them the same way as parent login (including the account lockout), ends the kid session on the device and starts a parent session. A wrong password leaves the kid session as it was. While a kid is signed in the request needs the antiforgery token, like other kid writes.

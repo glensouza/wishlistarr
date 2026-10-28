@@ -192,6 +192,7 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
                 return null;
             }
 
+            await this.DeletePushAsync(deviceId, ct);
             await transaction.CommitAsync(ct);
         }
 
@@ -216,6 +217,7 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
         await db.KidPinAttempts.Where(attempt => attempt.KidDeviceId == id).ExecuteDeleteAsync(ct);
         await db.KidPairingCodes.Where(code => code.KidDeviceId == id).ExecuteDeleteAsync(ct);
         await db.KidDeviceProfiles.Where(assignment => assignment.KidDeviceId == id).ExecuteDeleteAsync(ct);
+        await this.DeletePushAsync(id, ct);
         bool removed = await db.KidDevices.Where(device => device.Id == id).ExecuteDeleteAsync(ct) > 0;
         await transaction.CommitAsync(ct);
         return removed;
@@ -251,6 +253,18 @@ public sealed class KidDevices(WishlistarrDbContext db, IOptions<KidOptions> opt
         }
 
         return builder.Length == CodeLength ? builder.ToString() : null;
+    }
+
+    private async Task DeletePushAsync(int deviceId, CancellationToken ct)
+    {
+        List<int> ids = await db.WebPushSubscriptions.Where(row => row.KidDeviceId == deviceId).Select(row => row.Id).ToListAsync(ct);
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        await db.WebPushDeliveries.Where(row => ids.Contains(row.WebPushSubscriptionId)).ExecuteDeleteAsync(ct);
+        await db.WebPushSubscriptions.Where(row => ids.Contains(row.Id)).ExecuteDeleteAsync(ct);
     }
 
     private static string HashCode(string normalized) =>

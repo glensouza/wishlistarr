@@ -382,8 +382,9 @@ public sealed class NotificationTests
         using NotificationFactory factory = new();
         using IServiceScope scope = factory.Services.CreateScope();
         WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        WebPushNotices webPush = scope.ServiceProvider.GetRequiredService<WebPushNotices>();
         await db.DisposeAsync();
-        QueuedParentNotifier notifier = new(db, factory.Trigger, factory.Clock, NullLogger<QueuedParentNotifier>.Instance);
+        QueuedParentNotifier notifier = new(db, factory.Trigger, webPush, factory.Clock, NullLogger<QueuedParentNotifier>.Instance);
 
         await notifier.NotifyAsync(new ParentNotification(ParentNotificationKinds.ProfileLocked, "Locked."));
 

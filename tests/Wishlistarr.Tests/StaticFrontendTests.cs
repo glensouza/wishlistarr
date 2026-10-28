@@ -9,12 +9,14 @@ public class WebRootFactory : ApiFactory
     public const string IndexHtml = "<!doctype html><title>test-shell</title>";
     public const string AssetJs = "console.log(1);";
     public const string NpmNotice = """{"packages":[{"name":"react","version":"1.0.0","license":"MIT"}]}""";
+    public const string ServiceWorker = "self.addEventListener('push',()=>{});";
 
     private readonly string webRoot = Directory.CreateTempSubdirectory("wishlistarr-web").FullName;
 
     public WebRootFactory()
     {
         File.WriteAllText(Path.Combine(this.webRoot, "index.html"), IndexHtml);
+        File.WriteAllText(Path.Combine(this.webRoot, "sw.js"), ServiceWorker);
         Directory.CreateDirectory(Path.Combine(this.webRoot, "assets"));
         File.WriteAllText(Path.Combine(this.webRoot, "assets", "x.js"), AssetJs);
         Directory.CreateDirectory(Path.Combine(this.webRoot, "licenses"));
@@ -86,6 +88,19 @@ public sealed class StaticFrontendTests(WebRootFactory factory) : IClassFixture<
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(WebRootFactory.AssetJs, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Service_worker_is_served_as_javascript_for_the_built_frontend()
+    {
+        HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync("/sw.js");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("javascript", response.Content.Headers.ContentType?.MediaType, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(WebRootFactory.ServiceWorker, await response.Content.ReadAsStringAsync());
+        Assert.NotEqual(WebRootFactory.IndexHtml, await client.GetStringAsync("/sw.js"));
     }
 
     [Fact]

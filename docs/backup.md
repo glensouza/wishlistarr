@@ -9,7 +9,7 @@ Backups are stored under the data directory, so the same layout works for a Dock
 | Docker (`WISHLISTARR_DATA_DIR=/data`) | `/data` | `/data/wishlistarr.db` | `/data/keys` | `/data/backups` |
 | Local default | `data` under the application folder | `data/wishlistarr.db` | `data/keys` | `data/backups` |
 
-The database copy is made with SQLite `VACUUM INTO`, which writes a consistent snapshot while the app is running and leaves the live database unchanged. That snapshot is a rollback-journal database. Wishlistarr enables WAL the next time it opens the file for writing. The zip then contains `wishlistarr.db` and the `keys/*.xml` files from the key ring. Nothing else is included.
+The database copy is made with SQLite `VACUUM INTO`, which writes a consistent snapshot while the app is running and leaves the live database unchanged. That snapshot is a rollback-journal database. Wishlistarr enables WAL the next time it opens the file for writing. The zip then contains `wishlistarr.db` and the `keys/*.xml` files from the key ring. Nothing else is included. The web push signing key is one of the protected secrets in that database, so restoring the zip brings the same key back and the public key stays the same.
 
 ## Schedule and retention
 

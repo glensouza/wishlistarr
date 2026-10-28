@@ -176,10 +176,10 @@ public static partial class LogRedactor
             return new KeyValuePair<ScalarValue, LogEventPropertyValue>(safeKey, Redact(key, pair.Value));
         }));
 
-    [GeneratedRegex("(?<p>\"(?<n>" + NameChars + "+)\"\\s*:\\s*\")(?:[^\"\\\\]|\\\\[\\s\\S]?)*(?<c>\"?)", Options, MatchTimeoutMilliseconds)]
+    [GeneratedRegex("(?<p>\"(?<n>(?>" + NameChars + "+))\"\\s*:\\s*\")(?:[^\"\\\\]|\\\\[\\s\\S]?)*(?<c>\"?)", Options, MatchTimeoutMilliseconds)]
     private static partial Regex JsonSecret();
 
-    [GeneratedRegex("(?<p>\"(?<n>" + NameChars + "+)\"\\s*:\\s*)(?:-?\\d[\\w.+\\-]*|true|false)", Options, MatchTimeoutMilliseconds)]
+    [GeneratedRegex("(?<p>\"(?<n>(?>" + NameChars + "+))\"\\s*:\\s*)(?:-?\\d[\\w.+\\-]*|true|false)", Options, MatchTimeoutMilliseconds)]
     private static partial Regex JsonBareSecret();
 
     [GeneratedRegex("(\\b(?:Set-)?Cookie\\s*:\\s*)[^\\r\\n]+", Options, MatchTimeoutMilliseconds)]
@@ -197,10 +197,10 @@ public static partial class LogRedactor
     [GeneratedRegex("(?<p><(?<n>" + NameChars + "+)(?:\\s[^<>]*)?>)[^<>]+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex XmlSecret();
 
-    [GeneratedRegex("(?<p>(?:^|[?&\\s{,;(])(?<n>" + NameChars + "+)\\s*=\\s*[\"']?)[^\\s&#\"'=;,)]+", Options, MatchTimeoutMilliseconds)]
+    [GeneratedRegex("(?<p>(?:^|[?&\\s{,;(])(?<n>(?>" + NameChars + "+))\\s*=\\s*[\"']?)[^\\s&#\"'=;,)]+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex AssignmentSecret();
 
-    [GeneratedRegex("(?<p>(?:^|[\\s{,;(])(?<n>" + NameChars + "+)\\s*:\\s*[\"']?)[^\\s,;\"'<>)}\\]]+", Options, MatchTimeoutMilliseconds)]
+    [GeneratedRegex("(?<p>(?:^|[\\s{,;(])(?<n>(?>" + NameChars + "+))\\s*:\\s*[\"']?)[^\\s,;\"'<>)}\\]]+", Options, MatchTimeoutMilliseconds)]
     private static partial Regex ColonSecret();
 
     [GeneratedRegex("(/api/v1/webhooks/[a-z]+/)[^\\s/?#\"'&]+", Options, MatchTimeoutMilliseconds)]

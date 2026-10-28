@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../api'
 import { useT } from '../i18n'
 import Avatar from './Avatar'
+import DevicePush from './DevicePush'
 import { kidSignIn, listPickerProfiles, type PickerProfile } from './kidApi'
 import { useKidSession } from './KidSession'
 import PinPad from './PinPad'
@@ -89,6 +90,7 @@ export default function ProfilePicker() {
         <section aria-labelledby="picker-title" className="picker">
           <h1 id="picker-title">{t('picker.title')}</h1>
           <p className="muted">{t('picker.subtitle')}</p>
+          <DevicePush />
           {error && (
             <p className="error" role="alert">
               {error}

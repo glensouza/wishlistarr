@@ -30,3 +30,7 @@ If a discover call or a library detail fails, that source is left out. Home answ
 Without a Kid session home answers `401`, and `403` for a parent session. Archiving a profile ends its Kid sessions, so the next request is `401` and TMDB is not called. `403` is also what home answers if the profile cannot be found by the time home reads it.
 
 "Because you watched" is not a home row.
+
+## New to watch
+
+When a request for the signed-in profile becomes ready to watch, that profile's home and title pages can show a **New to watch** notice. It is not a home row, and it is not the device push subscription described in [kid-devices.md](kid-devices.md). The notice names the title only after the same content policy check used for the rest of the kid area, and only for the signed-in profile. **Got it** dismisses it for that profile. A profile that is not allowed to see the title gets a generic notice instead, with no title.

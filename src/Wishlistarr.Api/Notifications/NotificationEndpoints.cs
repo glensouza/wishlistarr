@@ -78,6 +78,8 @@ public static class NotificationEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status502BadGateway);
+
+        group.MapParentWebPush();
     }
 
     public static void MapNotificationConfirmation(this IEndpointRouteBuilder app)

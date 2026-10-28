@@ -187,9 +187,10 @@ public sealed class KidWishlistTests
     {
         using KidRequestApiFactory factory = new();
         await factory.SetTimeZoneAsync("UTC");
-        factory.SetClock(new DateTimeOffset(2026, 10, 21, 15, 0, 0, TimeSpan.Zero));
         (HttpClient ada, int adaId) = await factory.SignInKidAsync(weeklyAllowance: 2);
         (HttpClient beau, int beauId) = await factory.SignInKidAsync("Beau", weeklyAllowance: 1);
+        // The kid cookie's absolute expiry is checked against the real clock, so the simulated week starts after sign-in.
+        factory.SetClock(new DateTimeOffset(2026, 10, 21, 15, 0, 0, TimeSpan.Zero));
         await AddRequestAsync(factory, adaId, 750, "Counts One");
         await AddRequestAsync(factory, adaId, 751, "Counts Two");
         await AddRequestAsync(factory, adaId, 752, "Already Here", counts: false);

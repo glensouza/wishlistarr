@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Api.Security;
@@ -129,6 +130,8 @@ public static class KidEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
+        paired.MapKidWebPush();
+
         RouteGroupBuilder signedIn = kid.MapGroup("/").RequireAuthorization(Policies.Kid)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
@@ -160,6 +163,7 @@ public static class KidEndpoints
             .WithSummary("Ends the current kid session.")
             .Produces(StatusCodes.Status204NoContent);
 
+        signedIn.MapKidReadyNotices();
         signedIn.MapKidRequests();
         signedIn.MapKidSearch();
         signedIn.MapKidTitles();

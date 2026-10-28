@@ -3,6 +3,7 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import { ApiError } from '../api'
 import { useT, type MessageKey } from '../i18n'
 import Artwork from './Artwork'
+import ReadyNotice from './ReadyNotice'
 import { useKidSession } from './KidSession'
 import Trailer from './Trailer'
 import { useKidSpatialNav } from './useKidSpatialNav'
@@ -275,6 +276,7 @@ export default function TitleDetails() {
   const { kind, tmdbId } = useParams()
   return (
     <div ref={rootRef}>
+      <ReadyNotice />
       <TitleScreen key={`${kind ?? ''}:${tmdbId ?? ''}`} />
     </div>
   )
