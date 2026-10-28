@@ -421,6 +421,9 @@ public sealed class RequestQueueBudgetTests
 
         public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
+        public Task<int?> GetTvdbIdAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
+
+
         public Task<TmdbImages> GetImagesAsync(TmdbMediaType type, int id, string imageLanguages = "en,null", CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<TmdbPage<TmdbSearchResult>> DiscoverAsync(TmdbMediaType type, TmdbDiscoverQuery query, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();

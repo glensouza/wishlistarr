@@ -630,6 +630,13 @@ fieldset label:has(input[type='checkbox']) {
   justify-self: start;
 }
 
+.title-logo {
+  display: block;
+  max-width: min(100%, 25rem);
+  max-height: 8rem;
+  object-fit: contain;
+}
+
 .title-poster,
 .artwork-fallback.title-poster,
 .season-poster,

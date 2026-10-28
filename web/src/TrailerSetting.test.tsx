@@ -1,7 +1,10 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import TrailerSetting, { trailerSettingKey } from './TrailerSetting'
+import TrailerSetting, {
+  trailerSettingKey,
+  trailerSourcesKey,
+} from './TrailerSetting'
 
 type Row = { key: string; isSecret: boolean; value: string | null }
 type Call = { method: string; path: string; body: unknown }
@@ -42,12 +45,28 @@ afterEach(() => {
 const checkbox = () =>
   screen.findByRole('checkbox', { name: 'Let kids play YouTube trailers' })
 
+it('saves the selected trailer source order', async () => {
+  const user = userEvent.setup()
+  render(<TrailerSetting />)
+  const select = await screen.findByRole('combobox', {
+    name: 'Trailer sources',
+  })
+  await user.selectOptions(select, 'plex,youtube')
+  await waitFor(() =>
+    expect(calls).toContainEqual({
+      method: 'PUT',
+      path: `/api/v1/settings/${trailerSourcesKey}`,
+      body: { value: 'plex,youtube', isSecret: false },
+    }),
+  )
+})
+
 it('stays off when the setting is missing, false, or not a boolean', async () => {
   const { unmount } = render(<TrailerSetting />)
   expect(((await checkbox()) as HTMLInputElement).checked).toBe(false)
   expect(
     screen.getByText(
-      'When this is off, kids never see a trailer and YouTube is not loaded.',
+      'When this is off, YouTube trailers are unavailable. Plex trailers follow the source order below.',
     ),
   ).toBeTruthy()
 
@@ -76,7 +95,7 @@ it('keeps the trailer heading while the setting is loading', async () => {
     })
   render(<TrailerSetting />)
 
-  expect(screen.getByRole('heading', { name: 'YouTube trailers' }).id).toBe(
+  expect(screen.getByRole('heading', { name: 'Trailers' }).id).toBe(
     'trailers-heading',
   )
   expect(screen.getByRole('status').textContent).toBe('Loading')

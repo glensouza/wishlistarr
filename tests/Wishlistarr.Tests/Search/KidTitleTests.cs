@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -74,6 +75,178 @@ public sealed class KidTitleTests
         factory.Tmdb.SetBody("/3/tv/82728/credits", """{"cast":[{"id":1,"name":"Bluey Heeler","character":"Bluey","profile_path":"/bluey-face.jpg"}],"crew":[]}""");
         factory.Tmdb.SetBody("/3/tv/82728/videos", Videos);
         return factory;
+    }
+
+    [Fact]
+    public async Task Fanart_key_is_secret_and_optional_artwork_is_proxied_for_allowed_titles()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        using FanartHandler handler = new();
+        factory.FanartHandler = handler;
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        JsonElement before = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal("/api/v1/kid/images/tmdb/w1280/tiny-bg.jpg", before.GetProperty("backdropUrl").GetString());
+        Assert.Equal(0, handler.Calls);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await parent.PutAsJsonAsync("/api/v1/settings/fanart.api_key", new { value = "fixture-key", isSecret = false })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await parent.PutAsJsonAsync("/api/v1/settings/fanart.client_key", new { value = "fixture-personal", isSecret = false })).StatusCode);
+        JsonElement settings = await (await parent.GetAsync("/api/v1/settings/")).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement saved = settings.EnumerateArray().Single(row => row.GetProperty("key").GetString() == "fanart.api_key");
+        Assert.True(saved.GetProperty("isSecret").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, saved.GetProperty("value").ValueKind);
+        JsonElement personal = settings.EnumerateArray().Single(row => row.GetProperty("key").GetString() == "fanart.client_key");
+        Assert.True(personal.GetProperty("isSecret").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, personal.GetProperty("value").ValueKind);
+        JsonElement title = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Contains(handler.Paths, path => path == "/v3/movies/800?api_key=fixture-key&client_key=fixture-personal");
+        string background = title.GetProperty("backdropUrl").GetString()!;
+        string logo = title.GetProperty("logoUrl").GetString()!;
+        Assert.StartsWith("/api/v1/kid/images/fanart/full/", background);
+        Assert.StartsWith("/api/v1/kid/images/fanart/bigpreview/", logo);
+        Assert.Equal(HttpStatusCode.OK, (await kid.GetAsync(background)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await kid.GetAsync("/api/v1/kid/images/fanart/full/a")).StatusCode);
+        factory.Tmdb.SetBody("/3/tv/82728/external_ids", """{"tvdb_id":353546}""");
+        JsonElement show = await ReadAsync(await kid.GetAsync(ShowPath));
+        Assert.StartsWith("/api/v1/kid/images/fanart/full/", show.GetProperty("backdropUrl").GetString());
+        Assert.Contains(handler.Paths, path => path.StartsWith("/v3/tv/353546?", StringComparison.Ordinal));
+        Assert.Equal(HttpStatusCode.Forbidden, (await kid.PutAsJsonAsync("/api/v1/settings/fanart.api_key", new { value = "other", isSecret = false })).StatusCode);
+        handler.Fail = true;
+        JsonElement failed = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal("/api/v1/kid/images/tmdb/w1280/tiny-bg.jpg", failed.GetProperty("backdropUrl").GetString());
+        Assert.Equal(JsonValueKind.Null, failed.GetProperty("logoUrl").ValueKind);
+        handler.Fail = false;
+        await parent.PutAsJsonAsync("/api/v1/settings/fanart.api_key", new { value = "", isSecret = false });
+        JsonElement personalOnly = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.StartsWith("/api/v1/kid/images/fanart/full/", personalOnly.GetProperty("backdropUrl").GetString());
+        Assert.Contains(handler.Paths, path => path == "/v3/movies/800?client_key=fixture-personal");
+        await parent.PutAsJsonAsync("/api/v1/settings/fanart.client_key", new { value = "", isSecret = false });
+        JsonElement after = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal("/api/v1/kid/images/tmdb/w1280/tiny-bg.jpg", after.GetProperty("backdropUrl").GetString());
+    }
+
+    [Fact]
+    public async Task Blocked_titles_do_not_request_fanart()
+    {
+        using KidRequestApiFactory factory = CreateFactory();
+        using FanartHandler handler = new();
+        factory.FanartHandler = handler;
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16, blockedGenreIds: [16]);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        await parent.PutAsJsonAsync("/api/v1/settings/fanart.api_key", new { value = "fixture-key", isSecret = false });
+        Assert.Equal(HttpStatusCode.NotFound, (await kid.GetAsync(MoviePath)).StatusCode);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    private sealed class FanartHandler : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+
+        public List<string> Paths { get; } = [];
+
+        public bool Fail { get; set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            this.Calls++;
+            this.Paths.Add(request.RequestUri!.PathAndQuery);
+            if (this.Fail) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+            if (request.RequestUri!.Host == "assets.fanart.tv")
+            {
+                ByteArrayContent image = new([1, 2, 3]);
+                image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = image });
+            }
+
+            string json = request.RequestUri!.AbsolutePath.StartsWith("/v3/tv/", StringComparison.Ordinal)
+                ? """{"showbackground":[{"url":"https://assets.fanart.tv/fanart/tv/353546/showbackground/demo.jpg"}]}"""
+                : """{"moviebackground":[{"url":"https://assets.fanart.tv/fanart/movies/800/moviebackground/demo.jpg"}],"hdmovielogo":[{"url":"https://assets.fanart.tv/fanart/movies/800/hdmovielogo/demo.png"}]}""";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
+        }
+    }
+
+    [Fact]
+    public async Task Trailer_source_order_selects_plex_then_youtube_and_respects_policy()
+    {
+        FakeLibraryIndex index = new();
+        index.Add(MediaKind.Movie, 800, new MediaItem("1", "plex://movie/a", "Tiny Tale", 2019, MediaKind.Movie, "1", []));
+        using KidRequestApiFactory factory = CreateFactory(index);
+        FakeTrailers trailers = new();
+        using FanartHandler fanart = new();
+        factory.Trailers = trailers;
+        factory.FanartHandler = fanart;
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        await parent.PutAsJsonAsync("/api/v1/settings/fanart.api_key", new { value = "fixture-key", isSecret = false });
+        await SetTrailersAsync(factory, "true");
+        Assert.Equal(HttpStatusCode.NoContent, (await parent.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "plex,youtube", isSecret = true })).StatusCode);
+        JsonElement plex = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal(MoviePath + "/trailer", plex.GetProperty("trailerUrl").GetString());
+        Assert.Equal(JsonValueKind.Null, plex.GetProperty("trailerKey").ValueKind);
+        int artworkCalls = fanart.Calls;
+        int creditCalls = factory.Tmdb.Count("/3/movie/800/credits");
+        HttpResponseMessage stream = await kid.GetAsync(MoviePath + "/trailer");
+        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+        Assert.Equal("video/mp4", stream.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(new byte[] { 1, 2, 3 }, await stream.Content.ReadAsByteArrayAsync());
+        Assert.Equal(artworkCalls, fanart.Calls);
+        Assert.Equal(creditCalls, factory.Tmdb.Count("/3/movie/800/credits"));
+
+        await parent.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "youtube,plex", isSecret = false });
+        JsonElement youtube = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal(OfficialTrailer, youtube.GetProperty("trailerKey").GetString());
+        Assert.Equal(JsonValueKind.Null, youtube.GetProperty("trailerUrl").ValueKind);
+        await parent.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "plex,youtube", isSecret = false });
+
+        trailers.Malformed = true;
+        JsonElement malformed = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal(OfficialTrailer, malformed.GetProperty("trailerKey").GetString());
+        trailers.Malformed = false;
+        trailers.Available = false;
+        JsonElement fallback = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal(OfficialTrailer, fallback.GetProperty("trailerKey").GetString());
+        Assert.Equal(JsonValueKind.Null, fallback.GetProperty("trailerUrl").ValueKind);
+        Assert.Equal(HttpStatusCode.NotFound, (await kid.GetAsync(MoviePath + "/trailer")).StatusCode);
+
+        await parent.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "none", isSecret = false });
+        JsonElement none = await ReadAsync(await kid.GetAsync(MoviePath));
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("trailerKey").ValueKind);
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("trailerUrl").ValueKind);
+        Assert.Equal(HttpStatusCode.BadRequest, (await parent.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "plex,plex", isSecret = false })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await kid.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "plex", isSecret = false })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Blocked_titles_cannot_stream_a_plex_extra()
+    {
+        FakeLibraryIndex index = new();
+        index.Add(MediaKind.Movie, 800, new MediaItem("1", "plex://movie/a", "Tiny Tale", 2019, MediaKind.Movie, "1", []));
+        using KidRequestApiFactory factory = CreateFactory(index);
+        FakeTrailers trailers = new();
+        factory.Trailers = trailers;
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 16, blockedGenreIds: [16]);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        await parent.PutAsJsonAsync("/api/v1/settings/kids.trailer_sources", new { value = "plex", isSecret = false });
+        Assert.Equal(HttpStatusCode.NotFound, (await kid.GetAsync(MoviePath + "/trailer")).StatusCode);
+        Assert.Equal(0, trailers.Calls);
+    }
+
+    private sealed class FakeTrailers : IMediaServerTrailers
+    {
+        public bool Available { get; set; } = true;
+
+        public bool Malformed { get; set; }
+
+        public int Calls { get; private set; }
+
+        public Task<bool> HasTrailerAsync(string itemId, CancellationToken ct = default)
+        {
+            this.Calls++;
+            return this.Malformed ? Task.FromException<bool>(new JsonException()) : Task.FromResult(this.Available);
+        }
+
+        public Task<HttpResponseMessage?> OpenTrailerAsync(string itemId, string? range, CancellationToken ct = default) =>
+            Task.FromResult<HttpResponseMessage?>(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) });
     }
 
     private static string Rating(string certification) =>

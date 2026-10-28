@@ -125,7 +125,9 @@ public sealed partial class RequestQueue(
 
         DateTimeOffset staleBefore = await titles.StaleBeforeAsync(ct);
         HashSet<(int ProfileId, MediaKind Kind, int TmdbId)> revoked = await this.RevokedAsync([.. profiles.Keys], ct);
-        bool trailers = YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
+        string? configuredSources = await settings.GetAsync(TrailerSources.SettingKey, ct);
+        bool youtubeSelected = configuredSources is null || (TrailerSources.TryParse(configuredSources, out string[] sources) && sources.Contains("youtube", StringComparer.Ordinal));
+        bool trailers = youtubeSelected && YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
         TitleLookup[] found = new TitleLookup[listed.Count];
         using (CancellationTokenSource deadline = new(PageBudget, time))
         using (CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token))
@@ -518,6 +520,8 @@ public sealed partial class RequestQueue(
 
         public Task<TmdbImages> GetImagesAsync(TmdbMediaType type, int id, string imageLanguages = "en,null", CancellationToken ct = default) =>
             this.RunAsync(token => inner.GetImagesAsync(type, id, imageLanguages, token), ct);
+
+        public Task<int?> GetTvdbIdAsync(int id, CancellationToken ct = default) => this.RunAsync(token => inner.GetTvdbIdAsync(id, token), ct);
 
         public Task<TmdbPage<TmdbSearchResult>> DiscoverAsync(TmdbMediaType type, TmdbDiscoverQuery query, string language = "en-US", CancellationToken ct = default) =>
             this.RunAsync(token => inner.DiscoverAsync(type, query, language, token), ct);

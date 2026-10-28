@@ -187,7 +187,11 @@ public sealed class KidWishlistTests
     {
         using KidRequestApiFactory factory = new();
         await factory.SetTimeZoneAsync("UTC");
-        factory.SetClock(new DateTimeOffset(2026, 10, 21, 15, 0, 0, TimeSpan.Zero));
+        DateTimeOffset today = new(DateTime.UtcNow.Date, TimeSpan.Zero);
+        int daysUntilWednesday = ((int)DayOfWeek.Wednesday - (int)today.DayOfWeek + 7) % 7;
+        // A future week keeps the test client's real-clock cookie expiry valid on every run.
+        DateTimeOffset wednesday = today.AddDays(daysUntilWednesday + 7).AddHours(15);
+        factory.SetClock(wednesday);
         (HttpClient ada, int adaId) = await factory.SignInKidAsync(weeklyAllowance: 2);
         (HttpClient beau, int beauId) = await factory.SignInKidAsync("Beau", weeklyAllowance: 1);
         await AddRequestAsync(factory, adaId, 750, "Counts One");
@@ -203,8 +207,8 @@ public sealed class KidWishlistTests
         JsonElement beauUsed = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, beauUsed.GetProperty("remaining").GetInt32());
 
-        // Monday 26 October is the next allowance week and is still inside the seven-day kid session.
-        factory.SetClock(new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.Zero));
+        // The following Monday is in the next allowance week and inside the seven-day kid session.
+        factory.SetClock(wednesday.AddDays(5));
         JsonElement nextWeek = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, nextWeek.GetProperty("remaining").GetInt32());
         JsonElement beauNext = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();

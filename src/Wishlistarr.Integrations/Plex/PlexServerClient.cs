@@ -49,6 +49,19 @@ internal sealed class PlexServerClient(IHttpClientFactory factory, IOptions<Plex
     public Task<PlexContainer> GetSectionLabelsAsync(PlexServerContext server, string sectionKey, CancellationToken ct) =>
         this.GetAsync(server, $"library/sections/{Uri.EscapeDataString(sectionKey)}/label", ct);
 
+    public Task<PlexContainer> GetExtrasAsync(PlexServerContext server, string ratingKey, CancellationToken ct) =>
+        this.GetAsync(server, $"library/metadata/{Uri.EscapeDataString(ratingKey)}/extras", ct);
+
+    public async Task<HttpResponseMessage> OpenPartAsync(PlexServerContext server, string path, string? range, CancellationToken ct)
+    {
+        using HttpRequestMessage request = this.Create(HttpMethod.Get, server, path.TrimStart('/'));
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.ParseAdd("video/mp4");
+        if (range is not null && System.Net.Http.Headers.RangeHeaderValue.TryParse(range, out System.Net.Http.Headers.RangeHeaderValue? parsed))
+            request.Headers.Range = parsed;
+        return await factory.CreateClient(HttpClientName).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+    }
+
     public Task<PlexContainer> GetSectionItemsAsync(PlexServerContext server, string sectionKey, int type, int start, int size, CancellationToken ct, long? updatedSince = null, string? label = null, string? guid = null) =>
         this.GetAsync(
             server,

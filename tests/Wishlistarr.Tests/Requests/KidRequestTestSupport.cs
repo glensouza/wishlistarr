@@ -13,6 +13,7 @@ using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Fanart;
 using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Tmdb;
 using Wishlistarr.Tests.Plex;
@@ -205,6 +206,10 @@ public class KidRequestApiFactory : AuthApiFactory
 
     public FakeLibraryIndex? Index { get; }
 
+    public IMediaServerTrailers? Trailers { get; set; }
+
+    public HttpMessageHandler? FanartHandler { get; set; }
+
     public FakePlexServer Plex { get; }
 
     public FakeTmdbServer Tmdb { get; }
@@ -331,6 +336,20 @@ public class KidRequestApiFactory : AuthApiFactory
             if (this.Index is not null)
             {
                 services.AddSingleton<ILibraryIndex>(this.Index);
+            }
+
+            if (this.Trailers is not null)
+            {
+                services.RemoveAll<IMediaServerTrailers>();
+                services.AddSingleton(this.Trailers);
+            }
+
+            if (this.FanartHandler is not null)
+            {
+                services.RemoveAll<FanartClient>();
+                services.AddTransient(provider => new FanartClient(
+                    new HttpClient(this.FanartHandler, disposeHandler: false) { BaseAddress = new Uri("https://webservice.fanart.tv/") },
+                    provider.GetRequiredService<TmdbCache>()));
             }
         });
     }

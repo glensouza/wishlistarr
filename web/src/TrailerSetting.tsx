@@ -3,6 +3,7 @@ import { request } from './api'
 import { useT } from './i18n'
 
 export const trailerSettingKey = 'kids.youtube_trailers'
+export const trailerSourcesKey = 'kids.trailer_sources'
 
 type SettingRow = { key: string; isSecret: boolean; value: string | null }
 type Load = 'loading' | 'loaded' | 'failed'
@@ -14,6 +15,7 @@ export default function TrailerSetting() {
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [sources, setSources] = useState('youtube')
 
   useEffect(() => {
     let current = true
@@ -22,6 +24,8 @@ export default function TrailerSetting() {
         if (!current) return
         const row = rows.find((item) => item.key === trailerSettingKey)
         setEnabled(row?.value === 'true')
+        const sourceRow = rows.find((item) => item.key === trailerSourcesKey)
+        setSources(sourceRow?.value ?? 'youtube')
         setLoad('loaded')
       },
       () => {
@@ -46,6 +50,25 @@ export default function TrailerSetting() {
       })
     } catch {
       setEnabled(previous)
+      setFailed(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function changeSources(next: string) {
+    if (saving || load !== 'loaded') return
+    const previous = sources
+    setSaving(true)
+    setFailed(false)
+    setSources(next)
+    try {
+      await request('PUT', `/api/v1/settings/${trailerSourcesKey}`, {
+        value: next,
+        isSecret: false,
+      })
+    } catch {
+      setSources(previous)
       setFailed(true)
     } finally {
       setSaving(false)
@@ -84,6 +107,24 @@ export default function TrailerSetting() {
             {t('parent.trailersLabel')}
           </label>
           <p className="muted">{t('parent.trailersHint')}</p>
+          <label>
+            {t('parent.trailerSources')}
+            <select
+              value={sources}
+              disabled={saving}
+              onChange={(event) => void changeSources(event.target.value)}
+            >
+              <option value="none">{t('parent.trailerNone')}</option>
+              <option value="plex,youtube">
+                {t('parent.trailerPlexFirst')}
+              </option>
+              <option value="youtube,plex">
+                {t('parent.trailerYoutubeFirst')}
+              </option>
+              <option value="plex">{t('parent.trailerPlexOnly')}</option>
+              <option value="youtube">{t('parent.trailerYoutubeOnly')}</option>
+            </select>
+          </label>
           {failed && (
             <p role="alert" className="error">
               {t('parent.trailersFailed')}

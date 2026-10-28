@@ -15,7 +15,7 @@ internal sealed partial class PlexMediaServer(
     PlexServerClient servers,
     IAppSettings settings,
     IOptions<PlexOptions> options,
-    TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IDisposable
+    TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IMediaServerTrailers, IDisposable
 {
     private static readonly TimeSpan DefaultPinLifetime = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan SelectionBackoffBase = TimeSpan.FromSeconds(2);
@@ -32,6 +32,39 @@ internal sealed partial class PlexMediaServer(
     private readonly object backoffGate = new();
     private int selectionFailures;
     private DateTimeOffset selectionBackoffUntil;
+
+    public Task<bool> HasTrailerAsync(string itemId, CancellationToken ct = default) =>
+        this.WithServerAsync(async (server, token) => await this.FindTrailerPartAsync(server, itemId, token) is not null, ct);
+
+    public Task<HttpResponseMessage?> OpenTrailerAsync(string itemId, string? range, CancellationToken ct = default) =>
+        this.WithServerAsync(async (server, token) =>
+        {
+            string? path = await this.FindTrailerPartAsync(server, itemId, token);
+            return path is null ? null : await servers.OpenPartAsync(server, path, range, token);
+        }, ct);
+
+    private async Task<string?> FindTrailerPartAsync(PlexServerContext server, string itemId, CancellationToken ct)
+    {
+        if (!IsValidKey(itemId)) return null;
+        PlexContainer extras = await servers.GetExtrasAsync(server, itemId, ct);
+        foreach (PlexMetadata extra in extras.Metadata ?? [])
+        {
+            if (extra is null) continue;
+            if (extra.Subtype != "trailer" && extra.Type != "trailer") continue;
+            foreach (PlexVideoMedia media in extra.Media ?? [])
+            {
+                if (media is null) continue;
+                if (media.Container != "mp4" || media.VideoCodec != "h264" || media.AudioCodec is not (null or "aac")) continue;
+                foreach (PlexVideoPart part in media.Parts ?? [])
+                {
+                    if (part is null) continue;
+                    if (part.Key is not null && !part.Key.EndsWith("/..", StringComparison.Ordinal) && !part.Key.EndsWith("/.", StringComparison.Ordinal) && TrailerPartPath().IsMatch(part.Key)) return part.Key;
+                }
+            }
+        }
+
+        return null;
+    }
 
     public async Task<MediaServerAccountStatus> GetStatusAsync(CancellationToken ct = default)
     {
@@ -809,4 +842,7 @@ internal sealed partial class PlexMediaServer(
 
     [GeneratedRegex(@"^[A-Za-z0-9]{1,20}\z", RegexOptions.CultureInvariant)]
     private static partial Regex SectionKey();
+
+    [GeneratedRegex(@"^(?:/library/parts/[0-9]{1,20}(?:/[0-9]{1,20})?/[A-Za-z0-9._-]{1,200}|/services/iva/assets/[0-9]{1,20}/video\.mp4(?:\?[A-Za-z0-9_=&.-]{1,200})?)\z", RegexOptions.CultureInvariant)]
+    private static partial Regex TrailerPartPath();
 }

@@ -764,6 +764,9 @@ public sealed class KidHomeTests
 
         public Task<TmdbVideos> GetVideosAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
+        public Task<int?> GetTvdbIdAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
+
+
         public Task<TmdbImages> GetImagesAsync(TmdbMediaType type, int id, string imageLanguages = "en,null", CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<TmdbPage<TmdbSearchResult>> GetTrendingAsync(TmdbMediaType type, string window = "week", int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();

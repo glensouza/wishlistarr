@@ -1,7 +1,10 @@
 using System.Globalization;
 using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.WebUtilities;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Tmdb;
+using Wishlistarr.Integrations.Fanart;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Search;
@@ -68,6 +71,33 @@ public static class KidSearchEndpoints
             .Produces(StatusCodes.Status200OK, contentType: "image/jpeg")
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
+
+        kid.MapGet("/images/fanart/{size}/{token}", async (string size, string token, FanartClient fanart, HttpContext http, CancellationToken ct) =>
+        {
+            if (token.Length > 800 || size is not ("full" or "preview" or "bigpreview")) return Results.BadRequest();
+            string url;
+            try { url = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(token)); }
+            catch (FormatException) { return Results.BadRequest(); }
+            if (!FanartClient.IsAllowedUrl(url)) return Results.BadRequest();
+            try
+            {
+                TmdbImageContent? image = await fanart.GetImageAsync(url, size, ct);
+                if (image is null) return Results.NotFound();
+                http.Response.Headers.CacheControl = "private, max-age=86400";
+                http.Response.Headers.XContentTypeOptions = "nosniff";
+                return Results.Bytes(image.Bytes, image.ContentType);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or TaskCanceledException)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The image could not be retrieved.");
+            }
+        })
+            .WithTags("Images")
+            .WithName("GetKidFanartImage")
+            .WithSummary("Proxies fanart.tv artwork for a signed-in profile.")
+            .Produces(StatusCodes.Status200OK, contentType: "image/png")
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status502BadGateway);
     }
 
