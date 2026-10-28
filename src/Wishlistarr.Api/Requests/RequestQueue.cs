@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Api.Kids;
@@ -7,6 +8,7 @@ using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Dtdd;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Requests;
@@ -18,6 +20,7 @@ public enum QueueGap
     Providers,
     Trailer,
     Keywords,
+    ContentWarnings,
 }
 
 public enum QueueReasonCode
@@ -34,6 +37,8 @@ public enum QueueReasonCode
     LanguageNotAllowed,
     ExplicitlyBlocked,
     Unavailable,
+    BlockedDescriptor,
+    BlockedTopic,
 }
 
 public sealed record QueueWatchProvider(string Name);
@@ -45,7 +50,9 @@ public sealed record QueueReason(
     RatingLevel? MaxLevel,
     string? GenreName,
     string? KeywordName,
-    string? Language);
+    string? Language,
+    string? Descriptor = null,
+    string? Topic = null);
 
 public sealed record ApprovalQueueItem(
     int Id,
@@ -62,7 +69,19 @@ public sealed record ApprovalQueueItem(
     IReadOnlyList<QueueWatchProvider> Providers,
     string? TrailerKey,
     QueueReason Reason,
-    IReadOnlyList<QueueGap> Gaps);
+    IReadOnlyList<QueueGap> Gaps,
+    IReadOnlyList<string>? ContentWarnings = null,
+    ContentWarningCredit? Attribution = null,
+    string? ParentNote = null);
+
+public sealed record ContentWarningCredit(string Text, string Url)
+{
+    public const string Phrase = "Powered by DoesTheDogDie.com";
+
+    public const string Link = "https://www.doesthedogdie.com";
+
+    public static ContentWarningCredit Required { get; } = new(Phrase, Link);
+}
 
 public sealed record ApprovalQueuePage(IReadOnlyList<ApprovalQueueItem> Items, int Total, int Limit, int Offset, bool TmdbConfigured = true);
 
@@ -70,6 +89,8 @@ public sealed partial class RequestQueue(
     WishlistarrDbContext db,
     ITmdbClient tmdb,
     ITmdbApiKeyProvider keys,
+    IDtddClient dtdd,
+    IDtddApiKeyProvider dtddKeys,
     RequestTitles titles,
     SettingsStore settings,
     TimeProvider time,
@@ -118,6 +139,7 @@ public sealed partial class RequestQueue(
         }
 
         bool configured = await keys.GetApiKeyAsync(ct) is { Length: > 0 };
+        bool warningsConfigured = await dtddKeys.GetApiKeyAsync(ct) is { Length: > 0 };
         if (listed.Count == 0)
         {
             return new ApprovalQueuePage([], total, limit, offset, configured);
@@ -125,12 +147,14 @@ public sealed partial class RequestQueue(
 
         DateTimeOffset staleBefore = await titles.StaleBeforeAsync(ct);
         HashSet<(int ProfileId, MediaKind Kind, int TmdbId)> revoked = await this.RevokedAsync([.. profiles.Keys], ct);
+        Dictionary<(MediaKind Kind, int TmdbId), string> notes = await this.NotesAsync(listed, ct);
         bool trailers = YoutubeTrailers.IsEnabled(await settings.GetAsync(YoutubeTrailers.SettingKey, ct));
         TitleLookup[] found = new TitleLookup[listed.Count];
         using (CancellationTokenSource deadline = new(PageBudget, time))
         using (CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token))
         {
             LimitedTmdbClient client = new(tmdb, time);
+            LimitedDtddClient warnings = new(dtdd, time);
             await Parallel.ForEachAsync(
                 Enumerable.Range(0, listed.Count),
                 new ParallelOptions { MaxDegreeOfParallelism = MaxParallelLookups, CancellationToken = ct },
@@ -138,9 +162,10 @@ public sealed partial class RequestQueue(
                 {
                     MediaRequest request = listed[index];
                     bool revokedBefore = revoked.Contains((request.KidProfileId, request.Kind, request.TmdbId));
-                    found[index] = configured
-                        ? await this.LookUpAsync(client, request, profiles[request.KidProfileId], revokedBefore, trailers, budget.Token, ct)
+                    TitleLookup lookup = configured
+                        ? await this.LookUpAsync(client, warnings, warningsConfigured, request, profiles[request.KidProfileId], revokedBefore, trailers, budget.Token, ct)
                         : new TitleLookup(null, revokedBefore, [], null, MissingDetails(trailers));
+                    found[index] = await this.WithWarningsAsync(warnings, warningsConfigured, request, lookup, budget.Token, ct);
                 });
             if (deadline.IsCancellationRequested)
             {
@@ -155,7 +180,8 @@ public sealed partial class RequestQueue(
             TitleLookup lookup = found[index];
             string title = RequestTitles.Fresh(request, staleBefore)
                 ?? (lookup.Evaluation is null ? string.Empty : await titles.StoreAsync(request.Id, lookup.Evaluation.Name, ct));
-            items.Add(Describe(request, profiles[request.KidProfileId], title, lookup));
+            notes.TryGetValue((request.Kind, request.TmdbId), out string? note);
+            items.Add(Describe(request, profiles[request.KidProfileId], title, lookup, note));
         }
 
         return new ApprovalQueuePage(items, total, limit, offset, configured);
@@ -249,13 +275,14 @@ public sealed partial class RequestQueue(
         return gaps;
     }
 
-    private static ApprovalQueueItem Describe(MediaRequest request, KidProfile profile, string title, TitleLookup lookup)
+    private static ApprovalQueueItem Describe(MediaRequest request, KidProfile profile, string title, TitleLookup lookup, string? parentNote)
     {
         PolicyEvaluation? evaluation = lookup.Evaluation;
         TmdbCertification? certification = evaluation?.Certification;
         QueueReason reason = evaluation is null
             ? Unavailable(null)
             : Explain(evaluation, profile.AutoApproval(), request.Kind, lookup.RevokedBefore);
+        IReadOnlyList<string>? warnings = lookup.Warnings;
         return new ApprovalQueueItem(
             request.Id,
             profile.Id,
@@ -271,7 +298,10 @@ public sealed partial class RequestQueue(
             lookup.Providers,
             lookup.Trailer,
             reason,
-            lookup.Gaps);
+            lookup.Gaps,
+            warnings,
+            warnings is { Count: > 0 } ? ContentWarningCredit.Required : null,
+            parentNote);
     }
 
     private static QueueReason Build(
@@ -292,7 +322,9 @@ public sealed partial class RequestQueue(
         string? genreName = code == QueueReasonCode.BlockedGenre ? GenreName(evaluation.Details, decided.GenreId) : null;
         string? keywordName = code == QueueReasonCode.BlockedKeyword ? KeywordName(evaluation.Keywords, decided.KeywordId) : null;
         string? language = code == QueueReasonCode.LanguageNotAllowed ? decided.OriginalLanguage : null;
-        return new QueueReason(code, rating, level, max, genreName, keywordName, language);
+        string? descriptor = code == QueueReasonCode.BlockedDescriptor ? decided.Descriptor : null;
+        string? topic = code == QueueReasonCode.BlockedTopic ? decided.Topic : null;
+        return new QueueReason(code, rating, level, max, genreName, keywordName, language, descriptor, topic);
     }
 
     private static QueueReasonCode BlockedCode(ContentReasonCode code) => code switch
@@ -302,6 +334,8 @@ public sealed partial class RequestQueue(
         ContentReasonCode.BlockedKeyword => QueueReasonCode.BlockedKeyword,
         ContentReasonCode.LanguageNotAllowed => QueueReasonCode.LanguageNotAllowed,
         ContentReasonCode.ExplicitlyBlocked => QueueReasonCode.ExplicitlyBlocked,
+        ContentReasonCode.BlockedDescriptor => QueueReasonCode.BlockedDescriptor,
+        ContentReasonCode.BlockedTopic => QueueReasonCode.BlockedTopic,
         _ => QueueReasonCode.Unavailable,
     };
 
@@ -380,8 +414,77 @@ public sealed partial class RequestQueue(
         return [.. rows.Select(row => (row.KidProfileId, row.Kind, row.TmdbId))];
     }
 
+    private async Task<Dictionary<(MediaKind Kind, int TmdbId), string>> NotesAsync(List<MediaRequest> listed, CancellationToken ct)
+    {
+        int[] ids = [.. listed.Select(request => request.TmdbId).Distinct()];
+        List<ParentNote> rows = await db.ParentNotes.AsNoTracking()
+            .Where(note => ids.Contains(note.TmdbId))
+            .ToListAsync(ct);
+        Dictionary<(MediaKind Kind, int TmdbId), string> notes = [];
+        foreach (ParentNote note in rows)
+        {
+            notes[(note.Kind, note.TmdbId)] = note.Text;
+        }
+
+        return notes;
+    }
+
+    private async Task<TitleLookup> WithWarningsAsync(
+        IDtddClient warnings,
+        bool configured,
+        MediaRequest request,
+        TitleLookup lookup,
+        CancellationToken budget,
+        CancellationToken ct)
+    {
+        if (!configured || ct.IsCancellationRequested)
+        {
+            return lookup;
+        }
+
+        if (lookup.Evaluation?.Topics is not null)
+        {
+            return lookup with { Warnings = lookup.Evaluation.Topics };
+        }
+
+        if (lookup.Evaluation?.FailedLookup == PolicyLookup.Topics || budget.IsCancellationRequested)
+        {
+            return WarningGap(lookup);
+        }
+
+        try
+        {
+            IReadOnlyList<string> names = await warnings.GetWarningsAsync(request.Kind, request.TmdbId, budget);
+            ct.ThrowIfCancellationRequested();
+            return lookup with { Warnings = names };
+        }
+        catch (Exception ex) when (WarningFailed(ex, ct))
+        {
+            if (budget.IsCancellationRequested)
+            {
+                this.LogSkipped(request.Kind, request.TmdbId);
+            }
+            else
+            {
+                this.LogWarningsFailed(ex, request.Kind, request.TmdbId);
+            }
+
+            return WarningGap(lookup);
+        }
+    }
+
+    private static TitleLookup WarningGap(TitleLookup lookup) =>
+        lookup.Gaps.Contains(QueueGap.ContentWarnings)
+            ? lookup
+            : lookup with { Gaps = [.. lookup.Gaps, QueueGap.ContentWarnings] };
+
+    private static bool WarningFailed(Exception ex, CancellationToken ct) =>
+        !ct.IsCancellationRequested && ex is DtddException or HttpRequestException or OperationCanceledException or JsonException;
+
     private async Task<TitleLookup> LookUpAsync(
         ITmdbClient client,
+        IDtddClient warnings,
+        bool warningsConfigured,
         MediaRequest request,
         KidProfile profile,
         bool revokedBefore,
@@ -394,7 +497,14 @@ public sealed partial class RequestQueue(
         PolicyEvaluation? evaluation = null;
         try
         {
-            evaluation = await KidPolicyEvaluator.EvaluateAsync(client, key, profile.ContentPolicy(), revokedBefore, budget, keepPartialOnCancel: true);
+            evaluation = await KidPolicyEvaluator.EvaluateAsync(
+                client,
+                key,
+                profile.ContentPolicy(),
+                revokedBefore,
+                budget,
+                keepPartialOnCancel: true,
+                dtdd: warningsConfigured ? warnings : null);
             ct.ThrowIfCancellationRequested();
         }
         catch (Exception ex) when (LookupFailed(ex, ct))
@@ -419,7 +529,10 @@ public sealed partial class RequestQueue(
                 this.LogLookupFailed(failed, request.Kind, request.TmdbId);
             }
 
-            gaps.Add(failed == PolicyLookup.Certification ? QueueGap.Rating : QueueGap.Keywords);
+            if (failed != PolicyLookup.Topics)
+            {
+                gaps.Add(failed == PolicyLookup.Certification ? QueueGap.Rating : QueueGap.Keywords);
+            }
         }
 
         if (evaluation.Details is null)
@@ -477,6 +590,9 @@ public sealed partial class RequestQueue(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read the {Lookup} for {Kind} {TmdbId}")]
     private partial void LogLookupFailed(PolicyLookup lookup, MediaKind kind, int tmdbId);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read content warnings for {Kind} {TmdbId}")]
+    private partial void LogWarningsFailed(Exception exception, MediaKind kind, int tmdbId);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Approval queue could not read watch providers for {Kind} {TmdbId}")]
     private partial void LogProvidersFailed(Exception exception, MediaKind kind, int tmdbId);
 
@@ -491,7 +607,8 @@ public sealed partial class RequestQueue(
         bool RevokedBefore,
         IReadOnlyList<QueueWatchProvider> Providers,
         string? Trailer,
-        IReadOnlyList<QueueGap> Gaps);
+        IReadOnlyList<QueueGap> Gaps,
+        IReadOnlyList<string>? Warnings = null);
 
     private sealed class LimitedTmdbClient(ITmdbClient inner, TimeProvider time) : ITmdbClient
     {
@@ -547,6 +664,29 @@ public sealed partial class RequestQueue(
             {
                 // Shaped like an HttpClient timeout so the shared evaluator treats it as a failed lookup rather than a cancellation.
                 throw new TaskCanceledException($"TMDB did not answer within {CallLimit.TotalSeconds} seconds.", new TimeoutException());
+            }
+        }
+    }
+
+    private sealed class LimitedDtddClient(IDtddClient inner, TimeProvider time) : IDtddClient
+    {
+        public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => inner.TestApiKeyAsync(ct);
+
+        public Task<IReadOnlyList<string>> GetWarningsAsync(MediaKind kind, int tmdbId, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetWarningsAsync(kind, tmdbId, token), ct);
+
+        private async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> call, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            using CancellationTokenSource limit = new(CallLimit, time);
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
+            try
+            {
+                return await call(linked.Token);
+            }
+            catch (OperationCanceledException) when (limit.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                throw new TaskCanceledException($"DoesTheDogDie did not answer within {CallLimit.TotalSeconds} seconds.", new TimeoutException());
             }
         }
     }

@@ -23,7 +23,12 @@ const item = {
     genreName: null,
     keywordName: null,
     language: null,
+    descriptor: null,
+    topic: null,
   },
+  contentWarnings: null,
+  attribution: null,
+  parentNote: null,
 }
 
 function queue(gaps: string[]) {
@@ -57,4 +62,46 @@ it('rejects a TMDB flag that is not true or false', () => {
   expect(() => readQueue({ ...queue([]), tmdbConfigured: 'no' })).toThrow(
     QueueShapeError,
   )
+})
+
+it('reads warning names, attribution and the shared parent note', () => {
+  const page = readQueue({
+    items: [
+      {
+        ...item,
+        gaps: ['contentWarnings', 'posters'],
+        contentWarnings: ['a dog dies'],
+        attribution: {
+          text: 'Powered by DoesTheDogDie.com',
+          url: 'https://www.doesthedogdie.com',
+        },
+        parentNote: 'Shared',
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  })
+  expect(page.items[0].gaps).toEqual(['contentWarnings'])
+  expect(page.items[0].contentWarnings).toEqual(['a dog dies'])
+  expect(page.items[0].attribution).toEqual({
+    text: 'Powered by DoesTheDogDie.com',
+    url: 'https://www.doesthedogdie.com',
+  })
+  expect(page.items[0].parentNote).toBe('Shared')
+})
+
+it('rejects an item that omits the warning fields', () => {
+  const { contentWarnings, attribution, parentNote, ...rest } = item
+  expect(contentWarnings).toBeNull()
+  expect(attribution).toBeNull()
+  expect(parentNote).toBeNull()
+  expect(() =>
+    readQueue({
+      items: [{ ...rest, gaps: [] }],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    }),
+  ).toThrow(QueueShapeError)
 })

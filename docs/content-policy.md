@@ -1,6 +1,6 @@
 # Content policy
 
-`ContentPolicyEngine` in `Wishlistarr.Core.Content` decides whether a title is allowed for a kid profile. It is pure: callers pass certifications, TMDB genre ids, TMDB keyword ids and the original language, and the engine does no I/O.
+`ContentPolicyEngine` in `Wishlistarr.Core.Content` decides whether a title is allowed for a kid profile. It is pure: callers pass certifications, TMDB genre ids, TMDB keyword ids, the original language, TMDB certification descriptors and DoesTheDogDie topic names, and the engine does no I/O. Descriptor and topic lists default to absent. Parent notes are not inputs. Which sources are used, and which are left out, is in [Advisories](advisories.md).
 
 ## Outcomes and reasons
 
@@ -22,16 +22,20 @@ Every decision is a `ContentDecision(Outcome, Reason)`. The outcome is `Allowed`
 | `NoLanguageLimit` | Allowed | |
 | `LanguageAllowed` | Allowed | original language |
 | `LanguageNotAllowed` | Blocked | original language, omitted when it is missing |
+| `BlockedDescriptor` | Blocked | descriptor text, the title's own spelling |
+| `NoBlockedDescriptor` | Allowed | |
+| `BlockedTopic` | Blocked | topic name, the title's own spelling |
+| `NoBlockedTopic` | Allowed | |
 
-The genre id and keyword id are the TMDB ids. The original language is the ISO 639-1 code.
+The genre id and keyword id are the TMDB ids. The original language is the ISO 639-1 code. Descriptor and topic text is compared with surrounding space removed and without regard to case.
 
 ## Order of evaluation
 
-1. A title on the profile's block list is blocked, even if it is also on the allow list. This is checked before any rule, so an explicit block wins over a genre, keyword or language result too.
-2. A title on the allow list is allowed, whatever its rating, genres, keywords or original language.
+1. A title on the profile's block list is blocked, even if it is also on the allow list. This is checked before any rule, so an explicit block wins over a genre, keyword, language, descriptor or topic result too.
+2. A title on the allow list is allowed, whatever its rating, genres, keywords, original language, descriptors or topics.
 3. Otherwise every rule runs and the most restrictive outcome wins. `Allowed` is less restrictive than `NeedsApproval`, which is less restrictive than `Blocked`. When two rules return the same outcome, the earlier rule's reason is kept.
 
-The rules, in order, are the rating rule, the genre block, the keyword block and the original-language allow list. Each implements `IContentRule`.
+The rules, in order, are the rating rule, the genre block, the keyword block, the original-language allow list, the descriptor block and the topic block. Each implements `IContentRule`. An empty descriptor block and an empty topic block return `Allowed`, so a title that has descriptors or topics still gets the decision it already had when the profile lists neither. A block is `Blocked`. When two rules return the same outcome, the earlier rule's reason is kept, so a rating block wins a tie with a descriptor or topic block.
 
 Titles are identified by `TitleKey(Kind, TmdbId)`. A show is decided at series level: its seasons and episodes share the series key and the series rating.
 
@@ -46,6 +50,20 @@ When the profile blocks at least one genre and the title has no genre ids, the r
 Keyword blocks use TMDB keyword ids. A movie's list comes from `GET /movie/{id}/keywords` (`keywords`) and a show's from `GET /tv/{id}/keywords` (`results`); each entry is an `id` and a `name`. A title is blocked when any of its keyword ids is on the profile's list. The reason is `BlockedKeyword` and the id is the first blocked id in the title's own list.
 
 The engine does not call TMDB. Callers pass the ids from a lookup that succeeded. An empty list is not a match, and the rule's decision is `NoBlockedKeyword`. An empty block list blocks nothing. When the profile has keyword blocks, [search](kid-search.md) and [requests](requests.md) do that lookup and refuse the title if it fails or times out, instead of passing an empty list in place of a failure.
+
+## Certification descriptors
+
+A profile can block TMDB certification descriptor strings. They are the descriptors on the certification the existing client already selected. A title is blocked when any descriptor matches (`BlockedDescriptor`). An empty block list blocks nothing (`NoBlockedDescriptor`) and does not change an earlier decision.
+
+The engine does no I/O. When the profile has descriptor blocks, callers pass the descriptors from the certification lookup that already ran. A certification lookup that fails is `MetadataUnavailable` with outcome `Blocked`, the same failure as a keyword lookup that fails: it is not treated as an empty descriptor list, and it is not `NeedsApproval`. A kid request is then `422` with `That one isn't available.` Search and title details drop the title the way they drop any other blocked title. The approval queue reason is `unavailable`. A successful certification with no descriptors is an empty list and is not a match.
+
+## Content warning topics
+
+A profile can block DoesTheDogDie topic names the same way (`BlockedTopic`, or `NoBlockedTopic` when the block list is empty). An empty block list changes nothing. The names are the topics that pass the vote rule in [Advisories](advisories.md). A successful lookup that found nothing is an empty list and is not a match.
+
+Callers load topics only when a DoesTheDogDie key is saved and the profile blocks at least one topic, and they skip that load when the title is on an explicit allow or block list. When the profile has topic blocks and the list was not loaded, because no key is saved or the lookup failed or timed out, callers do not pass an empty list. The decision is `MetadataUnavailable` with outcome `Blocked`, the same as a failed keyword lookup, not `NeedsApproval`. Kid search and kid requests refuse the title. The approval queue reason is `unavailable`. When a key is saved, the queue also reports a `contentWarnings` gap and does not show an attribution for data it did not display. When no key is saved, it makes no DoesTheDogDie call and does not add that gap.
+
+Kid HTTP responses and kid screens do not include topic names, the attribution link or parent notes. A kid-facing refusal stays the generic sentence and does not name the topic or the descriptor. Parents see the specific names on the approval queue and in content controls.
 
 ## Original language
 
@@ -83,7 +101,7 @@ Outside the US, a few letter ratings are recognized (`U` in GB and FR, `G` and `
 
 ## Profile configuration
 
-Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids and allowed original languages. [Home](kid-home.md) shows a title only when the decision is `Allowed`, so a title that needs approval or whose lookup failed is left out rather than masked. `ContentPolicy.FromAgeLimits` turns each age limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on. `ContentPolicy.ForProfile` does the same and copies the three lists. See [kid profiles](kid-profiles.md) for how they are saved.
+Profiles store movie and TV age limits, blocked genre ids, blocked keyword ids, allowed original languages, blocked descriptor strings and blocked topic strings. [Home](kid-home.md) shows a title only when the decision is `Allowed`, so a title that needs approval or whose lookup failed is left out rather than masked. `ContentPolicy.FromAgeLimits` turns each age limit into the highest level whose minimum age is at or below it: ages 0 to 6 allow up to `General`, 7 allows TV-Y7, 8 to 12 allow PG and TV-PG, and so on. `ContentPolicy.ForProfile` does the same and copies the lists. See [kid profiles](kid-profiles.md) for how they are saved.
 
 `Preschool` cannot be reached from an age limit. TV-Y, G and TV-G are all suitable for every age, so no age separates them; a policy can still set `Preschool` as its max level directly to allow only TV-Y.
 
@@ -95,7 +113,7 @@ A ceiling compares the title's rating level, the same level `RatingRule` would r
 
 ## Parent content controls
 
-The parent area provides automatic saving of profile rules, title search, per-profile blocked and always-allowed lists, and a policy preview. Title list changes take effect on the next policy evaluation in requests, search, details and home. They do not remove existing Plex labels. Explicit blocks also prevent requesting a previously revoked title. An always-allowed entry overrides rating, genre, keyword and language restrictions; a block for the same key still wins.
+The parent area provides automatic saving of profile rules, title search, per-profile blocked and always-allowed lists, and a policy preview. Title list changes take effect on the next policy evaluation in requests, search, details and home. They do not remove existing Plex labels. Explicit blocks also prevent requesting a previously revoked title. An always-allowed entry overrides rating, genre, keyword, language, descriptor and topic restrictions; a block for the same key still wins.
 
 All routes below use the existing parent authorization and mutation antiforgery protection. Kid sessions cannot access them. The base is `/api/v1/kid-profiles`.
 
@@ -109,10 +127,10 @@ All routes below use the existing parent authorization and mutation antiforgery 
 | GET | `/{id}/content-rules` | Export a versioned document containing all content rules and both title lists. |
 | PUT | `/{id}/content-rules` | Validate and atomically replace all content rules and title entries. |
 
-The JSON document has exactly three fields: `version: 1`, `rules` and `titles`. Rules must contain all nine fields: `movieAgeLimit`, `tvAgeLimit`, `weeklyAllowance`, `autoApprove`, `autoApproveMovieRating`, `autoApproveTvRating`, `blockedGenreIds`, `blockedKeywordIds`, `allowedOriginalLanguages`. Titles is an array of `{kind, tmdbId, title, blocked}` entries; `blocked: false` denotes always allowed. Empty lists must be included. Partial files, invalid fields and duplicate title keys within a list are rejected before any changes are applied. Other profile settings, the PIN and home rows are preserved. Each profile supports up to 1000 title entries and import files up to 1 MiB. A failed TMDB keyword lookup denies the request and preview with `MetadataUnavailable` rather than assuming an empty keyword list.
+The JSON document has exactly three fields: `version: 1`, `rules` and `titles`. Rules must contain all eleven fields: `movieAgeLimit`, `tvAgeLimit`, `weeklyAllowance`, `autoApprove`, `autoApproveMovieRating`, `autoApproveTvRating`, `blockedGenreIds`, `blockedKeywordIds`, `allowedOriginalLanguages`, `blockedDescriptors`, `blockedTopics`. Titles is an array of `{kind, tmdbId, title, blocked}` entries; `blocked: false` denotes always allowed. Empty lists must be included. Partial files, invalid fields and duplicate title keys within a list are rejected before any changes are applied. Other profile settings, the PIN and home rows are preserved. Each profile supports up to 1000 title entries and import files up to 1 MiB. A failed TMDB keyword lookup, a failed certification lookup when the profile blocks descriptors, and a missing or failed DoesTheDogDie lookup when the profile blocks topics, all deny the request and preview with `MetadataUnavailable` rather than assuming an empty list. `blockedDescriptors` and `blockedTopics` are short strings, not TMDB ids: at most 50 entries, each 1 to 100 characters after trimming, with no control characters. The same text with different case is stored once, keeping the first spelling. Blank entries are dropped. More than 50 entries is rejected before blanks are dropped.
 
 Display names follow the existing TMDB retention and clear-data workflow. Purging metadata clears names while preserving title keys and policy entries; lists and exports show a kind/id fallback for names that have been cleared, and cleared names are not downloaded again. Previously revoked titles that would otherwise be blocked by a general rule can be requested for parent review, and preview reports `NeedsApproval` with `PreviouslyRevoked` for that shared exception. Explicit title blocks always deny them.
 
-Search, details, home, request submission, preview and the parent approval queue use the same evaluator and TMDB detail, certification and (when needed) keyword lookups. Adult titles and failed required lookups are blocked, including always-allowed titles. Explicit lists skip keyword lookup; always-allowed titles still require details and certification lookup to succeed. Previously revoked titles blocked by ordinary rules appear masked in search and details and can be requested for parent review; home includes only Allowed titles. Metadata failures and adult titles never receive the revocation exception.
+Search, details, home, request submission, preview and the parent approval queue use the same evaluator and TMDB detail, certification and (when needed) keyword lookups. DoesTheDogDie is called on that same path only when a key is saved and the profile blocks topics, and an explicit allow or block skips it. Adult titles and failed required lookups are blocked, including always-allowed titles. Explicit lists skip keyword and topic lookup; always-allowed titles still require details and certification lookup to succeed. Previously revoked titles blocked by ordinary rules appear masked in search and details and can be requested for parent review; home includes only Allowed titles. Metadata failures and adult titles never receive the revocation exception.
 
 Client-supplied display names have no fetched timestamp, so import cannot extend their retention. Kind/id placeholders are never stored as names. Cleared names are not downloaded by the daily refresh; only names still present on active profiles are refreshed.

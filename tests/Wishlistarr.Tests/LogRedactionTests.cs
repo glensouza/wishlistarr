@@ -85,6 +85,8 @@ public sealed class LogRedactionTests
     [InlineData("sent wishlistarr.auth=" + Secret + " done")]
     [InlineData("sent wishlistarr.kid=" + Secret)]
     [InlineData("Proxy-Authorization: Basic " + Secret)]
+    [InlineData("X-API-KEY: " + Secret)]
+    [InlineData("{\"dtdd.api_key\":\"" + Secret + "\"}")]
     public void Redact_covers_the_text_shapes(string text)
     {
         string redacted = LogRedactor.Redact(text);

@@ -19,6 +19,10 @@ public sealed class ContentControlsRegressionTests
         Assert.Equal(13, (int)Wishlistarr.Core.Content.ContentReasonCode.LanguageNotAllowed);
         Assert.Equal(14, (int)Wishlistarr.Core.Content.ContentReasonCode.PreviouslyRevoked);
         Assert.Equal(15, (int)Wishlistarr.Core.Content.ContentReasonCode.MetadataUnavailable);
+        Assert.Equal(16, (int)Wishlistarr.Core.Content.ContentReasonCode.BlockedDescriptor);
+        Assert.Equal(17, (int)Wishlistarr.Core.Content.ContentReasonCode.NoBlockedDescriptor);
+        Assert.Equal(18, (int)Wishlistarr.Core.Content.ContentReasonCode.BlockedTopic);
+        Assert.Equal(19, (int)Wishlistarr.Core.Content.ContentReasonCode.NoBlockedTopic);
     }
 
     private static void Catalog(KidRequestApiFactory factory)

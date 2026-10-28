@@ -9,7 +9,13 @@ type Preview = {
   decision: 'allowed' | 'blocked' | 'needsApproval'
   reason: string
   reasonCode?: string
-  reasonDetails?: { rating?: string; genreId?: number; keywordId?: number }
+  reasonDetails?: {
+    rating?: string
+    genreId?: number
+    keywordId?: number
+    descriptor?: string
+    topic?: string
+  }
 }
 
 export default function TitleControls({
@@ -160,6 +166,8 @@ export default function TitleControls({
                     rating: preview.reasonDetails?.rating ?? '',
                     genre: String(preview.reasonDetails?.genreId ?? ''),
                     keyword: String(preview.reasonDetails?.keywordId ?? ''),
+                    descriptor: preview.reasonDetails?.descriptor ?? '',
+                    topic: preview.reasonDetails?.topic ?? '',
                   })
                 : preview.reason}
             </p>

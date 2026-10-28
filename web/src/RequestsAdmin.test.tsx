@@ -54,6 +54,8 @@ const ada: KidProfile = {
   blockedGenreIds: [],
   blockedKeywordIds: [],
   allowedOriginalLanguages: [],
+  blockedDescriptors: [],
+  blockedTopics: [],
 }
 
 let calls: Call[]

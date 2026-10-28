@@ -20,7 +20,9 @@ public sealed record ContentTitle(
     IReadOnlyList<RegionCertification> Certifications,
     IReadOnlyList<int>? GenreIds = null,
     IReadOnlyList<int>? KeywordIds = null,
-    string? OriginalLanguage = null);
+    string? OriginalLanguage = null,
+    IReadOnlyList<string>? Descriptors = null,
+    IReadOnlyList<string>? Topics = null);
 
 public sealed record ContentPolicy
 {
@@ -46,6 +48,18 @@ public sealed record ContentPolicy
         init => field = ToLanguages(value);
     } = ImmutableHashSet<string>.Empty;
 
+    public IReadOnlySet<string> BlockedDescriptors
+    {
+        get;
+        init => field = AdvisoryText.ToSet(value);
+    } = AdvisoryText.ToSet(null);
+
+    public IReadOnlySet<string> BlockedTopics
+    {
+        get;
+        init => field = AdvisoryText.ToSet(value);
+    } = AdvisoryText.ToSet(null);
+
     public RatingLevel? MaxRatingFor(MediaKind kind) => kind == MediaKind.Movie ? this.MaxMovieRating : this.MaxTvRating;
 
     public bool HasUnknownGenres(IReadOnlyList<int>? genreIds) =>
@@ -62,12 +76,16 @@ public sealed record ContentPolicy
         int? tvAgeLimit,
         IEnumerable<int>? blockedGenreIds,
         IEnumerable<int>? blockedKeywordIds,
-        IEnumerable<string>? allowedOriginalLanguages) =>
+        IEnumerable<string>? allowedOriginalLanguages,
+        IEnumerable<string>? blockedDescriptors = null,
+        IEnumerable<string>? blockedTopics = null) =>
         FromAgeLimits(movieAgeLimit, tvAgeLimit) with
         {
             BlockedGenreIds = ToIds(blockedGenreIds),
             BlockedKeywordIds = ToIds(blockedKeywordIds),
             AllowedOriginalLanguages = ToLanguages(allowedOriginalLanguages),
+            BlockedDescriptors = AdvisoryText.ToSet(blockedDescriptors),
+            BlockedTopics = AdvisoryText.ToSet(blockedTopics),
         };
 
     private static HashSet<int> ToIds(IEnumerable<int>? ids) => ids is null ? [] : [.. ids];

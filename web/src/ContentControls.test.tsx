@@ -24,6 +24,8 @@ const ada: KidProfile = {
   blockedGenreIds: [],
   blockedKeywordIds: [],
   allowedOriginalLanguages: [],
+  blockedDescriptors: [],
+  blockedTopics: [],
   plexLabel: 'Ada',
   plexUserId: '42',
   homeRows: ['library'],
@@ -130,6 +132,31 @@ it('saves genre, keyword, language and approval rules for the selected profile',
     autoApprove: true,
     autoApproveMovieRating: 'teen',
   })
+})
+
+it('saves descriptor and topic blocks as text', async () => {
+  await open()
+  fireEvent.change(field('Blocked descriptors'), {
+    target: { value: ' Violence , Language' },
+  })
+  fireEvent.change(field('Blocked topics'), {
+    target: { value: 'a dog dies' },
+  })
+  await screen.findByText('Saved')
+  expect(writes.at(-1)?.body).toMatchObject({
+    blockedDescriptors: ['Violence', 'Language'],
+    blockedTopics: ['a dog dies'],
+    blockedGenreIds: [],
+  })
+})
+
+it('does not save a descriptor that is too long', async () => {
+  await open()
+  fireEvent.change(field('Blocked descriptors'), {
+    target: { value: 'a'.repeat(101) },
+  })
+  expect(screen.getByRole('alert').textContent).toContain('have not been saved')
+  expect(writes).toHaveLength(0)
 })
 
 it('does not send invalid drafts and allows discarding them', async () => {
@@ -241,6 +268,14 @@ it.each([
   JSON.stringify({
     version: 1,
     rules: { ...profileRules(ada), blockedTitles: [] },
+  }),
+  JSON.stringify({
+    version: 1,
+    rules: { ...profileRules(ada), blockedDescriptors: ['x'.repeat(101)] },
+  }),
+  JSON.stringify({
+    version: 1,
+    rules: { ...profileRules(ada), blockedTopics: Array(51).fill('dogs') },
   }),
 ])('rejects unsupported or malformed imports: %s', (text) => {
   expect(importRules(text)).toBeNull()

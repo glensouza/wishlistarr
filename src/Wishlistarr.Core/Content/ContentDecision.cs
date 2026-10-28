@@ -25,6 +25,10 @@ public enum ContentReasonCode
     LanguageNotAllowed,
     PreviouslyRevoked,
     MetadataUnavailable,
+    BlockedDescriptor,
+    NoBlockedDescriptor,
+    BlockedTopic,
+    NoBlockedTopic,
 }
 
 public sealed record ContentReason(
@@ -35,6 +39,8 @@ public sealed record ContentReason(
     RatingLevel? MaxLevel = null,
     int? GenreId = null,
     int? KeywordId = null,
-    string? OriginalLanguage = null);
+    string? OriginalLanguage = null,
+    string? Descriptor = null,
+    string? Topic = null);
 
 public sealed record ContentDecision(ContentOutcome Outcome, ContentReason Reason);

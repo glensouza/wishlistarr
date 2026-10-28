@@ -98,6 +98,8 @@ it('round trips both title lists and rejects missing lists, invalid keys and dup
     blockedGenreIds: [],
     blockedKeywordIds: [],
     allowedOriginalLanguages: [],
+    blockedDescriptors: [],
+    blockedTopics: [],
   }
   const titles = [title, { ...title, kind: 'show' as const, blocked: false }]
   const text = exportRules(rules, titles)

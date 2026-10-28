@@ -941,6 +941,18 @@ fieldset label:has(input[type='checkbox']) {
   overflow-wrap: anywhere;
 }
 
+.approval-card .parent-note {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.approval-card .parent-note textarea,
+.approval-card .parent-note button {
+  width: 100%;
+  min-height: var(--tap-size);
+}
+
 .approval-card .trailer-stage {
   max-width: 100%;
 }

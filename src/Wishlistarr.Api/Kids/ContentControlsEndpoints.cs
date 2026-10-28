@@ -115,6 +115,8 @@ public static class ContentControlsEndpoints
                     profile.BlockedGenreIds,
                     profile.BlockedKeywordIds,
                     profile.AllowedOriginalLanguages,
+                    profile.BlockedDescriptors,
+                    profile.BlockedTopics,
                 },
                 titles = profile.TitleRules.Select(row => new TitleRuleInput(row.Kind, row.TmdbId, row.Title ?? $"{row.Kind} {row.TmdbId}", row.Blocked))
             });
@@ -140,7 +142,7 @@ public static class ContentControlsEndpoints
         catch (JsonException) { return Invalid("Invalid content rules file."); }
         using JsonDocument parsed = document;
         JsonElement file = parsed.RootElement;
-        string[] keys = ["movieAgeLimit", "tvAgeLimit", "weeklyAllowance", "autoApprove", "autoApproveMovieRating", "autoApproveTvRating", "blockedGenreIds", "blockedKeywordIds", "allowedOriginalLanguages"];
+        string[] keys = ["movieAgeLimit", "tvAgeLimit", "weeklyAllowance", "autoApprove", "autoApproveMovieRating", "autoApproveTvRating", "blockedGenreIds", "blockedKeywordIds", "allowedOriginalLanguages", "blockedDescriptors", "blockedTopics"];
         if (id <= 0 || !ExactKeys(file, ["version", "rules", "titles"]) || (file.GetProperty("version").ValueKind != JsonValueKind.Number || !file.GetProperty("version").TryGetInt32(out int version)) || version != 1
             || !ExactKeys(file.GetProperty("rules"), keys) || file.GetProperty("titles").ValueKind != JsonValueKind.Array || file.GetProperty("titles").GetArrayLength() > 1000)
         {
@@ -207,6 +209,8 @@ public static class ContentControlsEndpoints
         ContentReasonCode.Unrated => "This title has no recognized rating and needs a parent's approval.",
         ContentReasonCode.BlockedGenre => $"This title includes blocked genre {reason.GenreId}.",
         ContentReasonCode.BlockedKeyword => $"This title includes blocked keyword {reason.KeywordId}.",
+        ContentReasonCode.BlockedDescriptor => $"This title includes the blocked descriptor {reason.Descriptor}.",
+        ContentReasonCode.BlockedTopic => $"This title includes the blocked topic {reason.Topic}.",
         ContentReasonCode.UnknownGenres => "Genre information is missing and needs a parent's approval.",
         ContentReasonCode.LanguageNotAllowed => "The original language is not on the profile's allowed language list.",
         ContentReasonCode.PreviouslyRevoked => "This title was previously revoked and needs a parent to review it again.",

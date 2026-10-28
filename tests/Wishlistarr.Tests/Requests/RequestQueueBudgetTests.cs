@@ -296,6 +296,8 @@ public sealed class RequestQueueBudgetTests
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
             keys ?? new FixedKeyProvider(),
+            scope.ServiceProvider.GetRequiredService<Wishlistarr.Integrations.Dtdd.IDtddClient>(),
+            scope.ServiceProvider.GetRequiredService<Wishlistarr.Integrations.Dtdd.IDtddApiKeyProvider>(),
             scope.ServiceProvider.GetRequiredService<RequestTitles>(),
             scope.ServiceProvider.GetRequiredService<SettingsStore>(),
             time,

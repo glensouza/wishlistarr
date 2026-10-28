@@ -19,6 +19,8 @@ public sealed class ContentPolicyEngine
         new GenreBlockRule(),
         new KeywordBlockRule(),
         new OriginalLanguageRule(),
+        new DescriptorBlockRule(),
+        new TopicBlockRule(),
     ]);
 
     public ContentDecision Evaluate(ContentTitle title, ContentPolicy policy)

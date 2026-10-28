@@ -84,3 +84,44 @@ export async function request<T>(
 ): Promise<T> {
   return (await requestWithStatus<T>(method, path, body, signal)).body
 }
+
+export const maxParentNoteLength = 2000
+
+export type ParentNoteResponse = {
+  kind: 'movie' | 'show'
+  tmdbId: number
+  note: string | null
+}
+
+function readParentNote(body: unknown): ParentNoteResponse {
+  if (typeof body !== 'object' || body === null) {
+    throw new ApiError(200, 'Request failed (200)')
+  }
+  const value = body as Record<string, unknown>
+  if (
+    (value.kind !== 'movie' && value.kind !== 'show') ||
+    typeof value.tmdbId !== 'number' ||
+    !(value.note === null || typeof value.note === 'string')
+  ) {
+    throw new ApiError(200, 'Request failed (200)')
+  }
+  return { kind: value.kind, tmdbId: value.tmdbId, note: value.note }
+}
+
+export async function getParentNote(kind: 'movie' | 'show', tmdbId: number) {
+  return readParentNote(
+    await request<unknown>('GET', `/api/v1/titles/${kind}/${tmdbId}/note`),
+  )
+}
+
+export async function saveParentNote(
+  kind: 'movie' | 'show',
+  tmdbId: number,
+  note: string,
+) {
+  return readParentNote(
+    await request<unknown>('PUT', `/api/v1/titles/${kind}/${tmdbId}/note`, {
+      note,
+    }),
+  )
+}
