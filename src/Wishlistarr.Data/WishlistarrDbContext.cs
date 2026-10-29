@@ -54,8 +54,33 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
 
     public DbSet<LabelGuardianEntry> LabelGuardianEntries => this.Set<LabelGuardianEntry>();
 
+    public DbSet<LibraryBackfillBatch> LibraryBackfillBatches => this.Set<LibraryBackfillBatch>();
+
+    public DbSet<LibraryBackfillItem> LibraryBackfillItems => this.Set<LibraryBackfillItem>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<LibraryBackfillBatch>(entity =>
+        {
+            entity.Property(batch => batch.ServerId).HasMaxLength(100);
+            entity.Property(batch => batch.Label).HasMaxLength(64);
+            entity.Property(batch => batch.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(batch => batch.Error).HasMaxLength(300);
+            entity.HasOne<KidProfile>().WithMany().HasForeignKey(batch => batch.KidProfileId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasMany(batch => batch.Items).WithOne(item => item.Batch).HasForeignKey(item => item.BatchId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LibraryBackfillItem>(entity =>
+        {
+            entity.Property(item => item.RatingKey).HasMaxLength(20);
+            entity.Property(item => item.Guid).HasMaxLength(256);
+            entity.Property(item => item.Title).HasMaxLength(500);
+            entity.Property(item => item.Kind).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.State).HasConversion<string>().HasMaxLength(16);
+            entity.Property(item => item.Detail).HasMaxLength(300);
+            entity.HasIndex(item => new { item.BatchId, item.RatingKey }).IsUnique();
+        });
+
         modelBuilder.Entity<NotificationSubscription>(entity =>
         {
             entity.Property(row => row.Provider).HasMaxLength(16);

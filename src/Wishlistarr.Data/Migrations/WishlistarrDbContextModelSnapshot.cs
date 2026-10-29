@@ -398,6 +398,96 @@ namespace Wishlistarr.Data.Migrations
                     b.ToTable("LabelGuardianReports");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.LibraryBackfillBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("KidProfileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ServerId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KidProfileId");
+
+                    b.ToTable("LibraryBackfillBatches");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryBackfillItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BatchId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Guid")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("OwnsLabel")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RatingKey")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TmdbId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchId", "RatingKey")
+                        .IsUnique();
+
+                    b.ToTable("LibraryBackfillItems");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.LibraryExternalId", b =>
                 {
                     b.Property<int>("Id")
@@ -1089,6 +1179,26 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("Report");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.LibraryBackfillBatch", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.KidProfile", null)
+                        .WithMany()
+                        .HasForeignKey("KidProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryBackfillItem", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.LibraryBackfillBatch", "Batch")
+                        .WithMany("Items")
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.LibraryExternalId", b =>
                 {
                     b.HasOne("Wishlistarr.Data.LibraryItem", "Item")
@@ -1226,6 +1336,11 @@ namespace Wishlistarr.Data.Migrations
             modelBuilder.Entity("Wishlistarr.Data.LabelGuardianReport", b =>
                 {
                     b.Navigation("Entries");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.LibraryBackfillBatch", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.LibraryItem", b =>
