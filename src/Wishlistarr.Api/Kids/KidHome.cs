@@ -1,16 +1,18 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using Wishlistarr.Api.Lists;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Lists;
 using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Kids;
 
-public sealed record KidHomeRow(string Id, int? GenreId, string? GenreName, IReadOnlyList<KidMediaItem> Items);
+public sealed record KidHomeRow(string Id, int? GenreId, string? GenreName, IReadOnlyList<KidMediaItem> Items, string? Name = null);
 
 public sealed record KidHomeResponse(IReadOnlyList<KidHomeRow> Rows);
 
@@ -34,6 +36,7 @@ public sealed partial class KidHome(
     WishlistarrDbContext db,
     ITmdbClient tmdb,
     KidContentPipeline pipeline,
+    DiscoveryLists lists,
     IEnumerable<ILibraryIndex> indexes,
     TimeProvider time,
     ILogger<KidHome> logger)
@@ -106,7 +109,49 @@ public sealed partial class KidHome(
             }
         }
 
+        await this.AddListRowsAsync(rows, profile, policy, ct);
         return HomeLoad.Ready(new KidHomeResponse(rows));
+    }
+
+    private async Task AddListRowsAsync(List<KidHomeRow> rows, KidProfile profile, ContentPolicy policy, CancellationToken ct)
+    {
+        IReadOnlyList<DiscoveryListSnapshot> snapshots = await lists.SnapshotsAsync(ct);
+        List<LibraryCatalogEntry> entries = [.. snapshots.SelectMany(snapshot => snapshot.Items)
+            .Select(item => new LibraryCatalogEntry(item.Kind, item.TmdbId)).Distinct()];
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        IReadOnlyList<KidCandidate> candidates;
+        using CancellationTokenSource deadline = new(KidContentPipeline.LookupBudget, time);
+        using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
+        try
+        {
+            candidates = await this.LoadDetailsAsync(entries, budget.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return;
+        }
+
+        IReadOnlyList<KidMediaItem> allowed = await pipeline.FilterAsync(candidates, policy, profile.Id, allowedOnly: true, ct);
+        Dictionary<TitleKey, KidMediaItem> byKey = allowed.ToDictionary(item => new TitleKey(item.Kind, item.TmdbId));
+        foreach (DiscoveryListSnapshot snapshot in snapshots)
+        {
+            List<KidMediaItem> items = [];
+            foreach (ListItem entry in snapshot.Items)
+            {
+                if (byKey.TryGetValue(new TitleKey(entry.Kind, entry.TmdbId), out KidMediaItem? item))
+                {
+                    items.Add(item);
+                }
+            }
+            if (items.Count > 0)
+            {
+                rows.Add(new KidHomeRow($"list:{snapshot.Source.Provider}:{snapshot.Source.ListId}", null, null, items, snapshot.Source.Name));
+            }
+        }
     }
 
     private static List<KidCandidate> Interleave(List<KidCandidate> movies, List<KidCandidate> shows, int take)

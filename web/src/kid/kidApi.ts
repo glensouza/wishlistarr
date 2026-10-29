@@ -48,6 +48,7 @@ export type HomeItem = SearchItem
 
 export type HomeRow = {
   id: string
+  name?: string | null
   genreId: number | null
   genreName: string | null
   items: HomeItem[]
