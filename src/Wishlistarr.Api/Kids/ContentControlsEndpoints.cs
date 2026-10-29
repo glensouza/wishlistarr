@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
 using Wishlistarr.Core.Content;
@@ -123,7 +124,7 @@ public static class ContentControlsEndpoints
         profiles.MapPut("/{id}/content-rules", ImportAsync);
     }
 
-    private static async Task<IResult> ImportAsync(int id, HttpRequest request, WishlistarrDbContext db, KidProfiles profiles, CancellationToken ct)
+    private static async Task<IResult> ImportAsync(int id, HttpRequest request, WishlistarrDbContext db, KidProfiles profiles, IProfileLabelGate labels, CancellationToken ct)
     {
         const int maxBytes = 1048576;
         using MemoryStream body = new();
@@ -168,10 +169,12 @@ public static class ContentControlsEndpoints
             return Invalid("Invalid content rules file.");
         }
 
+        // Acquire the label gate before SQLite's write transaction; taking them in the opposite order could block undo's ledger cleanup.
+        using IDisposable held = await labels.EnterAsync(ct);
         KidProfile? profile = await db.KidProfiles.FirstWithContentRulesAsync(row => row.Id == id && row.ArchivedAt == null, ct);
         if (profile is null) return Missing();
         await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
-        ProfileOutcome result = await profiles.UpdateAsync(id, rules with { Name = profile.Name, Avatar = profile.Avatar, PlexLabel = profile.PlexLabel, PlexUserId = profile.PlexUserId, HomeRows = profile.HomeRows }, ct);
+        ProfileOutcome result = await profiles.UpdateWithLabelGateHeldAsync(id, rules with { Name = profile.Name, Avatar = profile.Avatar, PlexLabel = profile.PlexLabel, PlexUserId = profile.PlexUserId, HomeRows = profile.HomeRows }, ct);
         if (result.Profile is null) return Results.Problem(statusCode: result.Status, title: result.Error);
         db.ProfileTitleRules.RemoveRange(profile.TitleRules);
         await db.SaveChangesAsync(ct);

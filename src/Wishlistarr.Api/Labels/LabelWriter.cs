@@ -14,18 +14,80 @@ public enum LabelWriteOutcome
     NotPresent,
     NotOwned,
     ItemNotFound,
+    LabelInUse,
+    ProfileUnavailable,
 }
 
 public sealed record LabelWriteResult(LabelWriteOutcome Outcome, MediaItemLabels? Item = null);
 
 public sealed record ProfileLabels(MediaItemLabels Item, IReadOnlyList<OwnedLabel> Owned);
 
-public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, ItemLocks locks, TimeProvider time)
+public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, ItemLocks locks, TimeProvider time, IProfileLabelGate profileLabels)
 {
     public const int MaxAttempts = 3;
     public const int MaxSourceLength = 32;
 
     public static StringComparer LabelComparer { get; } = StringComparer.OrdinalIgnoreCase;
+
+    public async Task<LabelWriteResult> AddBackfillAsync(string itemId, string label, int profileId, string source, string serverId, string guid, Action reserveItem, CancellationToken ct)
+    {
+        using IDisposable held = await profileLabels.EnterAsync(ct);
+        if (!await db.KidProfiles.AnyAsync(profile => profile.Id == profileId && profile.ArchivedAt == null && profile.PlexLabel == label, ct))
+            return new LabelWriteResult(LabelWriteOutcome.ProfileUnavailable);
+        return await this.WriteAsync(
+            itemId,
+            async (item, token) =>
+            {
+                OwnedLabel? owned = await this.FindOwnedAsync(item, label, token);
+                if (item.Labels.Contains(label, LabelComparer) || (owned is not null && owned.Source != source)) return null;
+                return [.. item.Labels, label];
+            },
+            item => item.Labels.Contains(label, LabelComparer),
+            item => this.ReserveAsync(item, label, profileId, source, reserveItem),
+            (_, _) => Task.CompletedTask,
+            LabelWriteOutcome.Added,
+            LabelWriteOutcome.AlreadyPresent,
+            ct,
+            serverId,
+            guid,
+            keepReservationOnFailure: true);
+    }
+
+    public async Task<bool> LabelInUseAsync(int profileId, string label, CancellationToken ct)
+    {
+        List<string> active = await db.KidProfiles.AsNoTracking().Where(profile => profile.Id != profileId && profile.ArchivedAt == null)
+            .Select(profile => profile.PlexLabel).ToListAsync(ct);
+        return active.Contains(label, LabelComparer);
+    }
+
+    public async Task<LabelWriteResult> RemoveBackfillAsync(string itemId, string label, int profileId, string source, string serverId, string guid, CancellationToken ct)
+    {
+        using IDisposable held = await profileLabels.EnterAsync(ct);
+        bool owned = false;
+        bool inUse = false;
+        LabelWriteResult result = await this.WriteAsync(
+            itemId,
+            async (item, token) =>
+            {
+                owned = (await this.FindOwnedAsync(item, label, token))?.Source == source;
+                // A profile can reuse an archived or renamed profile's label while an earlier undo is still pending.
+                inUse = owned && await this.LabelInUseAsync(profileId, label, token);
+                if (inUse) return null;
+                return owned && item.Labels.Contains(label, LabelComparer)
+                    ? [.. item.Labels.Where(existing => !LabelComparer.Equals(existing, label))]
+                    : null;
+            },
+            item => !item.Labels.Contains(label, LabelComparer),
+            _ => Task.FromResult<Func<Task>>(() => Task.CompletedTask),
+            (_, _) => Task.CompletedTask,
+            LabelWriteOutcome.Removed,
+            LabelWriteOutcome.NotPresent,
+            ct,
+            serverId,
+            guid);
+        return inUse ? result with { Outcome = LabelWriteOutcome.LabelInUse }
+            : result.Outcome == LabelWriteOutcome.NotPresent && !owned ? result with { Outcome = LabelWriteOutcome.NotOwned } : result;
+    }
 
     public async Task<LabelWriteResult> AddAsync(string itemId, string label, int kidProfileId, string source, CancellationToken ct = default)
     {
@@ -50,6 +112,16 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             {
                 if (item.Labels.Contains(label, LabelComparer))
                 {
+                    OwnedLabel? existing = await this.FindOwnedAsync(item, label, token);
+                    if (existing is not null && (existing.Source.StartsWith("backfill:", StringComparison.Ordinal) || existing.Source.StartsWith("undo:", StringComparison.Ordinal)))
+                    {
+                        // A later explicit grant must survive undoing the earlier bulk operation, including while that undo is paused.
+                        existing.Source = source;
+                        existing.KidProfileId = kidProfileId;
+                        existing.AppliedAt = time.GetUtcNow();
+                        await db.SaveChangesAsync(token);
+                    }
+
                     return null;
                 }
 
@@ -107,7 +179,16 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             {
                 OwnedLabel? row = await this.FindOwnedAsync(item, label, token);
                 owned = row is not null
+                    && !row.Source.StartsWith("undo:", StringComparison.Ordinal)
                     && await db.KidProfiles.AnyAsync(profile => profile.Id == row.KidProfileId && profile.ArchivedAt == null, token);
+                if (owned && row!.Source.StartsWith("backfill:", StringComparison.Ordinal))
+                {
+                    // Recheck the copy claim at the write boundary, because a guardian plan can predate a batch's apply or undo transition.
+                    owned = LibraryBackfill.TryBatchId(row.Source, out int batchId)
+                        && await LibraryBackfill.RepairableCopies(db, batchId).AnyAsync(copy => copy.RatingKey == item.Id && copy.Guid == item.Guid
+                            && copy.Batch!.ServerId == item.ServerId && copy.Batch.KidProfileId == row.KidProfileId, token);
+                }
+
                 return !owned || item.Labels.Contains(label, LabelComparer)
                     ? null
                     : [.. item.Labels, row!.Label];
@@ -158,10 +239,13 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         Func<MediaItemLabels, CancellationToken, Task> record,
         LabelWriteOutcome changed,
         LabelWriteOutcome unchanged,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? expectedServerId = null,
+        string? expectedGuid = null,
+        bool keepReservationOnFailure = false)
     {
         MediaItemLabels? target = await server.GetLabelsAsync(itemId, ct);
-        if (target is null)
+        if (target is null || (expectedServerId is not null && (target.ServerId != expectedServerId || target.Guid != expectedGuid)))
         {
             return new LabelWriteResult(LabelWriteOutcome.ItemNotFound);
         }
@@ -171,12 +255,13 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             throw new MediaServerException("The Plex item has no guid, so its labels cannot be tracked.");
         }
 
-        using IDisposable held = await locks.AcquireAsync($"{target.ServerId}/{target.Id}", ct);
+        // Copies with the same guid share one ledger row, so their ownership checks and reservations must also share a lock.
+        using IDisposable held = await locks.AcquireAsync($"{target.ServerId}/{target.Guid}", ct);
         Func<Task>? release = null;
         for (int attempt = 0; attempt < MaxAttempts; attempt++)
         {
             MediaItemLabels? current = await server.GetLabelsAsync(target.Id, ct);
-            if (current is null)
+            if (current is null || current.ServerId != target.ServerId || current.Guid != target.Guid)
             {
                 return new LabelWriteResult(LabelWriteOutcome.ItemNotFound);
             }
@@ -188,7 +273,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
             // Plex has no conditional write, so a second read narrows the window in which an edit made elsewhere could be overwritten.
             MediaItemLabels? confirm = await server.GetLabelsAsync(target.Id, ct);
-            if (confirm is null || !confirm.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
+            if (confirm is null || confirm.ServerId != target.ServerId || confirm.Guid != target.Guid || !confirm.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
             {
                 continue;
             }
@@ -201,19 +286,19 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await release();
+                if (!keepReservationOnFailure) await release();
                 throw;
             }
 
             MediaItemLabels? written = await server.GetLabelsAsync(target.Id, ct);
-            if (written is not null && written.Locked && verify(written))
+            if (written is not null && written.ServerId == target.ServerId && written.Guid == target.Guid && written.Locked && verify(written))
             {
                 await record(written, ct);
                 return new LabelWriteResult(changed, written);
             }
         }
 
-        if (release is not null)
+        if (release is not null && !keepReservationOnFailure)
         {
             await release();
         }
@@ -221,10 +306,16 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         throw new MediaServerException("Plex did not keep the label change.");
     }
 
-    private Task<OwnedLabel?> FindOwnedAsync(MediaItemLabels item, string label, CancellationToken ct) =>
-        db.OwnedLabels.Where(OwnedOn(item)).FirstOrDefaultAsync(owned => owned.Label == label, ct);
+    private async Task<OwnedLabel?> FindOwnedAsync(MediaItemLabels item, string label, CancellationToken ct)
+    {
+        OwnedLabel? owned = await db.OwnedLabels.Where(OwnedOn(item)).FirstOrDefaultAsync(owned => owned.Label == label, ct);
+        if (owned is null) return null;
+        // A batched caller can outlive a grant made in another scope; reload instead of trusting the context's tracked copy.
+        await db.Entry(owned).ReloadAsync(ct);
+        return db.Entry(owned).State == EntityState.Detached ? null : owned;
+    }
 
-    private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source)
+    private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source, Action? reserveItem = null)
     {
         OwnedLabel? owned = await this.FindOwnedAsync(item, label, CancellationToken.None);
         bool created = owned is null;
@@ -245,6 +336,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         owned.KidProfileId = kidProfileId;
         owned.Source = source;
         owned.AppliedAt = time.GetUtcNow();
+        reserveItem?.Invoke();
         await db.SaveChangesAsync(CancellationToken.None);
         return async () =>
         {

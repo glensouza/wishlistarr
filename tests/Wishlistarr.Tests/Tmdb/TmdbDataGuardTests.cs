@@ -28,6 +28,7 @@ public sealed class TmdbDataGuardTests(AuthApiFactory factory) : IClassFixture<A
     [
         (nameof(LibraryItem), nameof(LibraryItem.Title)),
         (nameof(LabelGuardianEntry), nameof(LabelGuardianEntry.Title)),
+        (nameof(LibraryBackfillItem), nameof(LibraryBackfillItem.Title)),
         (nameof(KidProfile), nameof(KidProfile.Name)),
         (nameof(KidDevice), nameof(KidDevice.Name)),
     ];

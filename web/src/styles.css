@@ -954,3 +954,10 @@ fieldset label:has(input[type='checkbox']) {
 .button-deny:hover:not(:disabled) {
   background: var(--color-surface);
 }
+.backfill-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+  overflow-wrap: anywhere;
+}

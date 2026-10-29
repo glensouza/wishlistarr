@@ -90,7 +90,7 @@ public sealed partial class LabelGuardian(
             .ToListAsync(ct);
         int[] active = [.. profiles.Select(profile => profile.Id)];
         List<OwnedLabel> rows = await db.OwnedLabels.AsNoTracking()
-            .Where(row => row.ServerId == serverId && active.Contains(row.KidProfileId))
+            .Where(row => row.ServerId == serverId && active.Contains(row.KidProfileId) && !row.Source.StartsWith("undo:"))
             .OrderBy(row => row.Id)
             .ToListAsync(ct);
         Dictionary<string, HashSet<string>> owned = await this.LoadOwnedAsync(serverId, ct);
@@ -243,6 +243,17 @@ public sealed partial class LabelGuardian(
     // An item added again gets a new rating key, while its guid comes from the metadata match, so copies are found by guid first.
     private async Task<(List<MediaItemLabels> Items, string? Detail)> ResolveAsync(OwnedLabel row, string serverId, CancellationToken ct)
     {
+        if (row.Source.StartsWith("backfill:", StringComparison.Ordinal))
+        {
+            if (!LibraryBackfill.TryBatchId(row.Source, out int batchId)) return ([], NotFoundDetail);
+            // A guid identifies a title, but bulk selection and undo own individual copies. Never expand a batch grant to other copies.
+            List<string> claimed = await LibraryBackfill.RepairableCopies(db, batchId)
+                .Where(item => item.Guid == row.Guid && item.Batch!.ServerId == serverId && item.Batch.KidProfileId == row.KidProfileId)
+                .Select(item => item.RatingKey).ToListAsync(ct);
+            List<MediaItemLabels> selected = await this.ConfirmAsync(claimed, serverId, item => item.Guid == row.Guid, ct);
+            return (selected, selected.Count == 0 ? NotFoundDetail : null);
+        }
+
         List<string> keys = [row.RatingKey];
         keys.AddRange(await db.LibraryItems.AsNoTracking()
             .Where(item => item.ServerId == serverId && item.Guid == row.Guid)
@@ -428,7 +439,7 @@ public sealed partial class LabelGuardian(
         try
         {
             int changed = await db.OwnedLabels
-                .Where(owned => owned.Id == row.Id && owned.Guid == row.Guid && owned.RatingKey == row.RatingKey)
+                .Where(owned => owned.Id == row.Id && owned.Guid == row.Guid && owned.RatingKey == row.RatingKey && !owned.Source.StartsWith("undo:"))
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(owned => owned.Guid, move.Guid)
