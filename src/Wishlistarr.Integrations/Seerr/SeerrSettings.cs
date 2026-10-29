@@ -45,6 +45,18 @@ public sealed class SeerrConnectionStore(IAppSettings settings)
         return new SeerrConnection(url, key, view.UserId.Value);
     }
 
+    public async Task<SeerrConnection?> CandidateAsync(Uri url, string? apiKey, int userId, CancellationToken ct = default)
+    {
+        if (apiKey is null)
+        {
+            SeerrSettingsView view = await this.GetViewAsync(ct);
+            bool sameUrl = SeerrSettings.TryNormalizeUrl(view.Url, out Uri saved) && saved == url;
+            apiKey = sameUrl ? await settings.GetAsync(SeerrSettings.ApiKeyKey, ct) : null;
+        }
+
+        return string.IsNullOrEmpty(apiKey) || userId <= 0 ? null : new SeerrConnection(url, apiKey, userId);
+    }
+
     public async Task SaveAsync(Uri url, string? apiKey, int userId, CancellationToken ct = default)
     {
         await settings.SetAsync(SeerrSettings.UrlKey, url.AbsoluteUri, false, ct);

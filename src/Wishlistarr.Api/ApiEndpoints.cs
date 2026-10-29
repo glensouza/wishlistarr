@@ -8,6 +8,7 @@ using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
+using Wishlistarr.Api.Setup;
 using Wishlistarr.Api.System;
 using Wishlistarr.Api.Titles;
 using Wishlistarr.Api.Tmdb;
@@ -47,6 +48,7 @@ public static class ApiEndpoints
         v1.MapWebhookSettings();
         v1.MapObservability();
         v1.MapNotificationSettings();
+        v1.MapSetup();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")

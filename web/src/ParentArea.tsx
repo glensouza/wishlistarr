@@ -19,6 +19,7 @@ import UpdateNotice from './UpdateNotice'
 import ParentHome from './ParentHome'
 import RequestHistoryPanel from './RequestHistoryPanel'
 import NotificationSettings from './NotificationSettings'
+import SetupGuide from './SetupGuide'
 
 export default function ParentArea() {
   const t = useT()
@@ -54,16 +55,18 @@ export default function ParentArea() {
           <p>
             <Link to="/about">{t('about.link')}</Link>
           </p>
-          <ParentHome />
-          <RequestsAdmin />
-          <KidProfilesAdmin />
-          <ContentControls />
-          <KidDevicesAdmin />
-          <TrailerSetting />
-          <NotificationSettings />
-          <BackupsAdmin />
-          <RequestHistoryPanel />
-          <LogViewer />
+          <SetupGuide>
+            <ParentHome />
+            <RequestsAdmin />
+            <KidProfilesAdmin />
+            <ContentControls />
+            <KidDevicesAdmin />
+            <TrailerSetting />
+            <NotificationSettings />
+            <BackupsAdmin />
+            <RequestHistoryPanel />
+            <LogViewer />
+          </SetupGuide>
           {error && <p role="alert">{error}</p>}
           <button type="button" onClick={() => void signOut()}>
             {kidDevice ? t('parent.returnToKidMode') : t('parent.signOut')}

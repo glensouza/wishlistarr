@@ -19,11 +19,13 @@ public abstract class ArrBackend(ArrService service, ArrClient client, ArrConnec
     public async Task<ArrTestResult> TestAsync(CancellationToken ct = default)
     {
         ArrConnection? connection = await store.GetAsync(service, ct);
-        if (connection is null)
-        {
-            return new ArrTestResult(false, $"{this.Name} is not configured. Save its address and API key first.", Code: ArrTestCode.NotConfigured);
-        }
+        return connection is null
+            ? new ArrTestResult(false, $"{this.Name} is not configured. Save its address and API key first.", Code: ArrTestCode.NotConfigured)
+            : await this.TestAsync(connection, ct);
+    }
 
+    public async Task<ArrTestResult> TestAsync(ArrConnection connection, CancellationToken ct = default)
+    {
         try
         {
             JsonNode? status = await client.SendAsync(service, connection, HttpMethod.Get, "api/v3/system/status", null, ct);
