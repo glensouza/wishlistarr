@@ -24,7 +24,7 @@ Reads (the status, the public settings, the user lookup, title details and reque
 
 ## Test button
 
-`POST /api/v1/settings/seerr/test` uses the saved connection and ignores any address or key in the body. It reads `/api/v1/status`, which Seerr serves without a key, and reports `version`, or `commitTag` when version is absent. It then looks up the configured user with the key, which is where a wrong key is caught.
+`POST /api/v1/settings/seerr/test` uses the saved connection and ignores any address or key in the body. To check values before saving them, `POST /api/v1/settings/seerr/test-candidate` takes the same `{ "url", "apiKey", "userId" }` body as saving, validated the same way, and saves nothing. Leaving `apiKey` out reuses the saved key, but only when the address is the saved one, so a saved key is never sent to a new address. It answers like the test button below. The test reads `/api/v1/status`, which Seerr serves without a key, and reports `version`, or `commitTag` when version is absent. It then looks up the configured user with the key, which is where a wrong key is caught.
 
 It answers `200` with `{ "version", "warnings", "flavour" }`. `flavour` reports what was detected from the version and the public settings (see Tracking below), and the test button always reads them afresh:
 

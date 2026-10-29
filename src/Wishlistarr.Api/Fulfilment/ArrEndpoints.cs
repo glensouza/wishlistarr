@@ -29,27 +29,13 @@ public static class ArrEndpoints
 
         v1.MapPut($"/settings/{route}", async (ArrSettingsUpdate? update, ArrConnectionStore store, CancellationToken ct) =>
         {
-            if (update is null || !ArrSettings.TryNormalizeUrl(update.Url, out Uri url))
+            (Uri? url, string? apiKey, IResult? problem) = await ValidateConnectionAsync(service, update, store, ct);
+            if (problem is not null)
             {
-                return Problem("The address must be a full http or https URL without a username, query or fragment.");
+                return problem;
             }
 
-            ArrSettingsView current = await store.GetViewAsync(service, ct);
-            bool sameUrl = ArrSettings.TryNormalizeUrl(current.Url, out Uri saved) && saved == url;
-            string? apiKey = string.IsNullOrWhiteSpace(update.ApiKey) ? null : update.ApiKey.Trim();
-            if (apiKey is { Length: > MaxApiKeyLength })
-            {
-                return Problem($"API keys are limited to {MaxApiKeyLength} characters.");
-            }
-
-            if (apiKey is null && !(current.HasApiKey && sameUrl))
-            {
-                return Problem(current.HasApiKey
-                    ? "Enter the API key again when changing the address."
-                    : "An API key is required.");
-            }
-
-            if (update.QualityProfileId is <= 0)
+            if (update!.QualityProfileId is <= 0)
             {
                 return Problem("The quality profile id is not valid.");
             }
@@ -66,7 +52,7 @@ public static class ArrEndpoints
                 return Problem("The tag ids are not valid.");
             }
 
-            await store.SaveAsync(service, url, apiKey, update.QualityProfileId, rootFolder, tagIds, ct);
+            await store.SaveAsync(service, url!, apiKey, update.QualityProfileId, rootFolder, tagIds, ct);
             return Results.Ok(await store.GetViewAsync(service, ct));
         })
             .WithTags("Settings")
@@ -91,6 +77,25 @@ public static class ArrEndpoints
             .WithName($"Test{name}Connection")
             .WithSummary($"Checks that {name} answers with the saved address and API key.")
             .Produces<ArrTestResult>();
+
+        v1.MapPost($"/settings/{route}/test-candidate", async (ArrSettingsUpdate? candidate, ArrBackends backends, ArrConnectionStore store, CancellationToken ct) =>
+        {
+            (Uri? url, string? apiKey, IResult? problem) = await ValidateConnectionAsync(service, candidate, store, ct);
+            if (problem is not null)
+            {
+                return problem;
+            }
+
+            ArrConnection? connection = await store.CandidateAsync(service, url!, apiKey, ct);
+            return connection is null
+                ? Problem("An API key is required.")
+                : Results.Ok(await backends.Get(service).TestAsync(connection, ct));
+        })
+            .WithTags("Settings")
+            .WithName($"Test{name}Candidate")
+            .WithSummary($"Checks that {name} answers with the address and API key in the body without saving them. Leaving the key out reuses the saved key, but only for the saved address.")
+            .Produces<ArrTestResult>()
+            .ProducesProblem(StatusCodes.Status400BadRequest);
 
         RouteGroupBuilder group = v1.MapGroup($"/{route}").WithTags(name);
 
@@ -117,6 +122,36 @@ public static class ArrEndpoints
             .Produces<IReadOnlyList<ArrTag>>()
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status502BadGateway);
+    }
+
+    private static async Task<(Uri? Url, string? ApiKey, IResult? Problem)> ValidateConnectionAsync(ArrService service, ArrSettingsUpdate? update, ArrConnectionStore store, CancellationToken ct)
+    {
+        if (update is null || !ArrSettings.TryNormalizeUrl(update.Url, out Uri url))
+        {
+            return (null, null, Problem("The address must be a full http or https URL without a username, query or fragment."));
+        }
+
+        ArrSettingsView current = await store.GetViewAsync(service, ct);
+        bool sameUrl = ArrSettings.TryNormalizeUrl(current.Url, out Uri saved) && saved == url;
+        string? apiKey = string.IsNullOrWhiteSpace(update.ApiKey) ? null : update.ApiKey.Trim();
+        if (apiKey is { Length: > MaxApiKeyLength })
+        {
+            return (null, null, Problem($"API keys are limited to {MaxApiKeyLength} characters."));
+        }
+
+        if (apiKey is not null && apiKey.Any(char.IsControl))
+        {
+            return (null, null, Problem("The API key contains characters that are not allowed."));
+        }
+
+        if (apiKey is null && !(current.HasApiKey && sameUrl))
+        {
+            return (null, null, Problem(current.HasApiKey
+                ? "Enter the API key again when changing the address."
+                : "An API key is required."));
+        }
+
+        return (url, apiKey, null);
     }
 
     private static IResult Problem(string title) =>

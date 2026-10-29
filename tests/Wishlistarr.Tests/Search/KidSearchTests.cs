@@ -665,6 +665,8 @@ public sealed class KidSearchTests
 
         public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => throw new NotSupportedException();
 
+        public Task<bool> TestApiKeyAsync(string apiKey, CancellationToken ct = default) => throw new NotSupportedException();
+
         public Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => Task.FromResult(new TmdbDetails(id, $"Movie {id}", null, null, null, null, null, null, null, null, null, null, null, 0));
 
         public Task<TmdbCredits> GetCreditsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();

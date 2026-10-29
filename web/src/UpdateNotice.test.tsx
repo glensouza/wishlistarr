@@ -52,6 +52,8 @@ function stubFetch(handler: (path: string, method: string) => unknown) {
     'fetch',
     vi.fn(async (path: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
+      if (path === '/api/v1/setup')
+        return Response.json({ completed: true, showGuide: false })
       if (path === '/api/v1/auth/antiforgery') {
         return Response.json({ token: 'tok', headerName: 'X-CSRF-TOKEN' })
       }

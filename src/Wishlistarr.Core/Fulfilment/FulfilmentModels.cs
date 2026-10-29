@@ -62,6 +62,8 @@ public interface IArrBackend
 
     Task<ArrTestResult> TestAsync(CancellationToken ct = default);
 
+    Task<ArrTestResult> TestAsync(ArrConnection connection, CancellationToken ct = default);
+
     Task<IReadOnlyList<ArrQualityProfile>> GetQualityProfilesAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<ArrRootFolder>> GetRootFoldersAsync(CancellationToken ct = default);

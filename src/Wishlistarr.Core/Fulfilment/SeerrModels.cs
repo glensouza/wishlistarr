@@ -90,6 +90,8 @@ public interface ISeerrBackend
 {
     Task<SeerrTestResult> TestAsync(CancellationToken ct = default);
 
+    Task<SeerrTestResult> TestAsync(SeerrConnection connection, CancellationToken ct = default);
+
     Task<SeerrSubmission> SubmitAsync(SeerrSubmitRequest request, CancellationToken ct = default);
 
     Task<SeerrTrackedRequest> GetRequestAsync(int requestId, CancellationToken ct = default);

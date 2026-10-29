@@ -12,6 +12,8 @@ Until a parent account exists, `GET /api/v1/auth/status` reports `setupRequired:
 
 Setup is first come, first served: until the parent creates the account, anyone who can reach Wishlistarr can claim it. Complete setup right after the first start, before exposing the app to other devices.
 
+Guided setup checks Plex, TMDB, and either Seerr or both Sonarr and Radarr, then creates or selects a kid profile and checks its Plex restrictions (see [plex-restrictions.md](plex-restrictions.md)). Each new address or key is tested before it is saved. If the test fails, nothing is saved and the form keeps what was entered; saving the same values again without changes saves them anyway. Saved keys are never displayed. The guide opens on its own after a parent signs in only until it is finished or exited once, and never on an installation that already has Plex, TMDB and a request service saved. After that, the parent can run it again from Settings. If the setup status cannot be loaded, the other settings still show, with a notice and a retry for the guide. Finishing rechecks the saved connections and the selected profile's movie and TV restrictions. The setup status, dismiss and completion endpoints require parent authorization and, for signed-in browsers, the antiforgery header on changes.
+
 Usernames are 1 to 100 characters and compared case-insensitively. Passwords are 10 to 256 characters (longer login attempts are rejected before hashing) and stored with the ASP.NET Core Identity password hasher (PBKDF2 with HMAC-SHA512, salted).
 
 ## Parent sessions
