@@ -11,13 +11,15 @@ Wishlistarr can fulfil approved requests by adding titles directly to Sonarr (TV
 ```
 
 - `url` must be an `http` or `https` address with no username, query or fragment. A URL base such as `https://host/sonarr` is fine.
-- The API key is stored encrypted and is never returned or logged. Leave `apiKey` out to keep the saved one; changing the address requires entering the key again.
+- The API key is stored encrypted and is never returned or logged. Leave `apiKey` out to keep the saved one; changing the address requires entering the key again. Keys containing control characters are rejected.
 - `GET /api/v1/settings/sonarr` returns the saved values with `hasApiKey` instead of the key. `DELETE` forgets the connection.
 - The `sonarr.*` and `radarr.*` settings cannot be written through the generic settings endpoint.
 
 ## Test button
 
 `POST /api/v1/settings/sonarr/test` always answers `200` with `{ "valid", "message", "version" }`. The message says what is wrong: not configured, the API key was rejected, the address could not be reached, the address answered 404 (check the URL base), or the address is running a different application.
+
+`POST /api/v1/settings/sonarr/test-candidate` (and the same under `radarr`) checks `{ "url", "apiKey" }` without saving it and answers the same way, or `400` when the values would not be accepted for saving. Leaving `apiKey` out reuses the saved key, but only when the address is the saved one, so a saved key is never sent to a new address.
 
 ## Choosing options
 

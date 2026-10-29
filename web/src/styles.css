@@ -954,3 +954,21 @@ fieldset label:has(input[type='checkbox']) {
 .button-deny:hover:not(:disabled) {
   background: var(--color-surface);
 }
+
+.setup-guide {
+  max-width: 48rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setup-guide fieldset {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.setup-guide input,
+.setup-guide select {
+  max-width: 100%;
+  min-width: 0;
+}

@@ -498,6 +498,9 @@ public sealed partial class RequestQueue(
         public Task<bool> TestApiKeyAsync(CancellationToken ct = default) =>
             this.RunAsync(inner.TestApiKeyAsync, ct);
 
+        public Task<bool> TestApiKeyAsync(string apiKey, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.TestApiKeyAsync(apiKey, token), ct);
+
         public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) =>
             this.RunAsync(token => inner.SearchAsync(query, type, page, language, token), ct);
 

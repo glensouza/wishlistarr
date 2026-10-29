@@ -77,6 +77,17 @@ public sealed class ArrConnectionStore(IAppSettings settings)
         return new ArrConnection(url, key, view.QualityProfileId, view.RootFolderPath, view.TagIds);
     }
 
+    public async Task<ArrConnection?> CandidateAsync(ArrService service, Uri url, string? apiKey, CancellationToken ct = default)
+    {
+        if (apiKey is null)
+        {
+            ArrConnection? saved = await this.GetAsync(service, ct);
+            apiKey = saved?.Url == url ? saved.ApiKey : null;
+        }
+
+        return string.IsNullOrEmpty(apiKey) ? null : new ArrConnection(url, apiKey, null, null, []);
+    }
+
     public async Task SaveAsync(
         ArrService service,
         Uri url,

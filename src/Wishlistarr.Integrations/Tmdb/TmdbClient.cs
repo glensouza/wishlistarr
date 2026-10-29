@@ -14,9 +14,11 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
     private static readonly TimeSpan DetailLifetime = TimeSpan.FromHours(12);
     private static readonly TimeSpan CertificationLifetime = TimeSpan.FromDays(7);
 
-    public async Task<bool> TestApiKeyAsync(CancellationToken ct = default)
+    public async Task<bool> TestApiKeyAsync(CancellationToken ct = default) =>
+        await this.TestApiKeyAsync(await this.RequireKeyAsync(ct), ct);
+
+    public async Task<bool> TestApiKeyAsync(string key, CancellationToken ct = default)
     {
-        string key = await this.RequireKeyAsync(ct);
         using HttpRequestMessage request = CreateRequest("configuration", [], key);
         using HttpResponseMessage response = await http.SendAsync(request, ct);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)

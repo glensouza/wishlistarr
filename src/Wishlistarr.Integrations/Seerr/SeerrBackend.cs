@@ -27,9 +27,11 @@ public sealed class SeerrBackend(SeerrClient client, SeerrConnectionStore store,
 
     public static TimeSpan FallbackLifetime { get; } = TimeSpan.FromMinutes(1);
 
-    public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default)
+    public async Task<SeerrTestResult> TestAsync(CancellationToken ct = default) =>
+        await this.TestAsync(await this.RequireAsync(ct), ct);
+
+    public async Task<SeerrTestResult> TestAsync(SeerrConnection connection, CancellationToken ct = default)
     {
-        SeerrConnection connection = await this.RequireAsync(ct);
         this.cachedFlavour = null;
         JsonNode? status = await client.SendAsync(connection, HttpMethod.Get, "api/v1/status", null, ct);
         string? version = Text(status?["version"]) ?? Text(status?["commitTag"]);

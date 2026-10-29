@@ -127,6 +127,8 @@ public sealed class FakeTmdbFinder : ITmdbClient
 
     public Task<bool> TestApiKeyAsync(CancellationToken ct = default) => throw new NotSupportedException();
 
+    public Task<bool> TestApiKeyAsync(string apiKey, CancellationToken ct = default) => throw new NotSupportedException();
+
     public Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
     public Task<IReadOnlyList<TmdbListedGenre>> GetGenresAsync(string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();

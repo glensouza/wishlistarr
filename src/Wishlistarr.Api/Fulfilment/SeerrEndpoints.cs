@@ -18,37 +18,13 @@ public static class SeerrEndpoints
 
         v1.MapPut("/settings/seerr", async (SeerrSettingsUpdate? update, SeerrConnectionStore store, CancellationToken ct) =>
         {
-            if (update is null || !SeerrSettings.TryNormalizeUrl(update.Url, out Uri url))
+            (Uri? url, string? apiKey, IResult? problem) = await ValidateAsync(update, store, ct);
+            if (problem is not null)
             {
-                return Problem("The address must be a full http or https URL without a username, query or fragment.");
+                return problem;
             }
 
-            SeerrSettingsView current = await store.GetViewAsync(ct);
-            bool sameUrl = SeerrSettings.TryNormalizeUrl(current.Url, out Uri saved) && saved == url;
-            string? apiKey = string.IsNullOrWhiteSpace(update.ApiKey) ? null : update.ApiKey.Trim();
-            if (apiKey is { Length: > MaxApiKeyLength })
-            {
-                return Problem($"API keys are limited to {MaxApiKeyLength} characters.");
-            }
-
-            if (apiKey is not null && apiKey.Any(char.IsControl))
-            {
-                return Problem("The API key contains characters that are not allowed.");
-            }
-
-            if (apiKey is null && !(current.HasApiKey && sameUrl))
-            {
-                return Problem(current.HasApiKey
-                    ? "Enter the API key again when changing the address."
-                    : "An API key is required.");
-            }
-
-            if (update.UserId <= 0)
-            {
-                return Problem("The Seerr user id must be a positive number.");
-            }
-
-            await store.SaveAsync(url, apiKey, update.UserId, ct);
+            await store.SaveAsync(url!, apiKey, update!.UserId, ct);
             return Results.Ok(await store.GetViewAsync(ct));
         })
             .WithTags("Settings")
@@ -73,6 +49,27 @@ public static class SeerrEndpoints
             .WithName("TestSeerrConnection")
             .WithSummary("Checks the saved Seerr address and API key, and warns for each kind the user cannot request or that will wait for approval.")
             .Produces<SeerrTestResult>()
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
+
+        v1.MapPost("/settings/seerr/test-candidate", async (SeerrSettingsUpdate? candidate, ISeerrBackend seerr, SeerrConnectionStore store, CancellationToken ct) =>
+        {
+            (Uri? url, string? apiKey, IResult? problem) = await ValidateAsync(candidate, store, ct);
+            if (problem is not null)
+            {
+                return problem;
+            }
+
+            SeerrConnection? connection = await store.CandidateAsync(url!, apiKey, candidate!.UserId, ct);
+            return connection is null
+                ? Problem("An API key is required.")
+                : await RunAsync(() => seerr.TestAsync(connection, ct));
+        })
+            .WithTags("Settings")
+            .WithName("TestSeerrCandidate")
+            .WithSummary("Checks the address, API key and user id in the body without saving them, with the same rules and warnings as the saved test. Leaving the key out reuses the saved key, but only for the saved address.")
+            .Produces<SeerrTestResult>()
+            .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status502BadGateway);
 
@@ -103,6 +100,41 @@ public static class SeerrEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status502BadGateway);
+    }
+
+    private static async Task<(Uri? Url, string? ApiKey, IResult? Problem)> ValidateAsync(SeerrSettingsUpdate? update, SeerrConnectionStore store, CancellationToken ct)
+    {
+        if (update is null || !SeerrSettings.TryNormalizeUrl(update.Url, out Uri url))
+        {
+            return (null, null, Problem("The address must be a full http or https URL without a username, query or fragment."));
+        }
+
+        SeerrSettingsView current = await store.GetViewAsync(ct);
+        bool sameUrl = SeerrSettings.TryNormalizeUrl(current.Url, out Uri saved) && saved == url;
+        string? apiKey = string.IsNullOrWhiteSpace(update.ApiKey) ? null : update.ApiKey.Trim();
+        if (apiKey is { Length: > MaxApiKeyLength })
+        {
+            return (null, null, Problem($"API keys are limited to {MaxApiKeyLength} characters."));
+        }
+
+        if (apiKey is not null && apiKey.Any(char.IsControl))
+        {
+            return (null, null, Problem("The API key contains characters that are not allowed."));
+        }
+
+        if (apiKey is null && !(current.HasApiKey && sameUrl))
+        {
+            return (null, null, Problem(current.HasApiKey
+                ? "Enter the API key again when changing the address."
+                : "An API key is required."));
+        }
+
+        if (update.UserId <= 0)
+        {
+            return (null, null, Problem("The Seerr user id must be a positive number."));
+        }
+
+        return (url, apiKey, null);
     }
 
     private static IResult Problem(string title) =>

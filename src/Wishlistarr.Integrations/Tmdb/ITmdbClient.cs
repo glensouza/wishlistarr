@@ -6,6 +6,8 @@ public interface ITmdbClient
 {
     Task<bool> TestApiKeyAsync(CancellationToken ct = default);
 
+    Task<bool> TestApiKeyAsync(string apiKey, CancellationToken ct = default);
+
     Task<TmdbPage<TmdbSearchResult>> SearchAsync(string query, TmdbMediaType? type = null, int page = 1, string language = "en-US", CancellationToken ct = default);
 
     Task<TmdbDetails> GetDetailsAsync(TmdbMediaType type, int id, string language = "en-US", CancellationToken ct = default);

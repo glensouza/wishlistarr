@@ -1,4 +1,95 @@
 export const en = {
+  'setup.title': 'Set up Wishlistarr',
+  'setup.settings': 'Settings',
+  'setup.rerun': 'Run guided setup again',
+  'setup.steps': 'Setup steps',
+  'setup.plex': 'Connect Plex',
+  'setup.tmdb': 'Connect TMDB',
+  'setup.requests': 'Connect a request service',
+  'setup.kid': 'Create a kid profile',
+  'setup.restrictions': 'Check Plex restrictions',
+  'setup.loading': 'Loading setup…',
+  'setup.loadFailed':
+    'Setup could not be loaded. Check your connection and try again.',
+  'setup.retry': 'Try again',
+  'setup.back': 'Back',
+  'setup.exit': 'Exit guided setup',
+  'setup.next': 'Continue',
+  'setup.choose': 'Choose one',
+  'setup.checking': 'Checking…',
+  'setup.saveFailed':
+    'Your changes could not be saved. Check your connection and try again.',
+  'setup.testFailed':
+    'The connection could not be checked. Check the address and key, then try again.',
+  'setup.testPassed': 'The connection works and is saved.',
+  'setup.saveAnyway':
+    'Nothing was saved. Correct the details and save again, or select save again without changing anything to keep these details anyway.',
+  'setup.savedUntested':
+    'Saved without a passing connection test. Continue becomes available after a successful test.',
+  'setup.test': 'Test connection',
+  'setup.saveTest': 'Save and test connection',
+  'setup.plexHint':
+    'Sign in to Plex in a separate tab, approve access, then return here to choose your server. Your Plex password stays with Plex.',
+  'setup.plexFailed':
+    'Plex could not be connected. Try linking again, then choose a reachable server.',
+  'setup.linkPlex': 'Link Plex account',
+  'setup.approvePlex':
+    'Copy this address into a new browser tab to approve Plex access:',
+  'setup.checkLink': 'Check Plex sign-in',
+  'setup.linkPending':
+    'Plex has not approved access yet. Complete sign-in in the Plex tab, then check again.',
+  'setup.linkExpired':
+    'This Plex sign-in has expired. Link the account again to start a new sign-in.',
+  'setup.server': 'Plex server',
+  'setup.refreshServers': 'Find Plex servers again',
+  'setup.noServers':
+    'No Plex servers were found. Check that this account owns or can access a server, then find servers again.',
+  'setup.tmdbHint':
+    'TMDB supplies title information and artwork. Enter your own API key or API Read Access Token.',
+  'setup.getTmdbKey': 'Get a TMDB key',
+  'setup.requestHint':
+    'Choose Seerr (also supports Overseerr and Jellyseerr), or connect both Sonarr for TV and Radarr for movies.',
+  'setup.requestMode': 'Request service',
+  'setup.seerr': 'Seerr',
+  'setup.arr': 'Sonarr and Radarr',
+  'setup.sonarr': 'Sonarr',
+  'setup.radarr': 'Radarr',
+  'setup.seerrHint':
+    'Copy the API key from Seerr Settings → General. Enter the numeric ID of the Seerr user requests should belong to. Permission and approval warnings are shown after testing.',
+  'setup.arrHint':
+    'Copy the API key from Settings → General. Save and test once to load quality profiles and root folders, then choose both and test again.',
+  'setup.address': 'Service address',
+  'setup.apiKey': 'API key or read access token',
+  'setup.secretSaved':
+    'A key is saved securely. Leave this field empty to keep it. Saved keys are never displayed.',
+  'setup.seerrUser': 'Seerr user ID',
+  'setup.quality': 'Quality profile',
+  'setup.rootFolder': 'Root folder',
+  'setup.chooseOptions':
+    'Choose an available quality profile and root folder, then save and test again. If there are no options, create them in the service first.',
+  'setup.warnings': 'Request service warnings',
+  'setup.kidHint':
+    'Create the first kid profile, or choose an existing one with a Plex user. The label defaults to the profile name. Age limits and PIN are optional; requests need parent approval.',
+  'setup.existingKid': 'Existing kid profile',
+  'setup.newKid': 'Create a new profile',
+  'setup.createKid': 'Save kid profile and continue',
+  'setup.profilesFailed':
+    'Kid profiles could not be loaded. Try again before creating a profile.',
+  'setup.restrictionsHint':
+    'In Plex Settings → Users and Sharing, edit the kid’s user. For both movies and TV, set the allowed content ratings for the kid’s age; this is the usual setup. You can also add this profile’s label under Allow only for titles you approve. A rating limit, the label, or both counts for each type. Custom rating and label restrictions need Plex Pass on the admin account; built-in managed-user restriction profiles are available without it. Managed users may need restriction profile None before editing custom restrictions. Wishlistarr reads these restrictions but does not change them.',
+  'setup.restrictionsWait':
+    'Plex changes may take a moment to appear. Checks can reuse a result for up to 60 seconds. Wait a minute after changing restrictions, then check again.',
+  'setup.profileLabel': 'Profile: {name}. Plex label: {label}.',
+  'setup.checkRestrictions': 'Test Plex restrictions',
+  'setup.restrictionsFailed':
+    'Plex restrictions could not be confirmed for both movies and TV. For each, set allowed content ratings, allow this profile’s label, or both, then test again.',
+  'setup.restrictionsPassed':
+    'Plex restrictions are confirmed for movies and TV.',
+  'setup.restrictionConfirmed': '{type}: restrictions confirmed.',
+  'setup.restrictionUnconfirmed': '{type}: restrictions not confirmed.',
+  'setup.finish': 'Finish setup',
+  'setup.finishFailed':
+    'Setup could not be completed. Check your connection and try again.',
   'controls.title': 'Content controls',
   'controls.open': 'Manage content controls',
   'controls.close': 'Close content controls',

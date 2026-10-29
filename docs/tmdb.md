@@ -4,7 +4,7 @@ Wishlistarr reads titles, ratings and artwork from [The Movie Database](https://
 
 ## Configuration
 
-Store the key in the `tmdb.api_key` setting with `PUT /api/v1/settings/tmdb.api_key`. It is always stored encrypted, whatever `isSecret` says, and is never returned. `POST /api/v1/settings/tmdb/test` checks the stored key against TMDB and returns `{ "valid", "message" }`. Both endpoints are parent only.
+Store the key in the `tmdb.api_key` setting with `PUT /api/v1/settings/tmdb.api_key`. It is always stored encrypted, whatever `isSecret` says, and is never returned. `POST /api/v1/settings/tmdb/test` checks the stored key against TMDB and returns `{ "valid", "message" }`. `POST /api/v1/settings/tmdb/test-candidate` with `{ "apiKey" }` checks a key without saving it and answers the same way; the key is never returned or logged. All three endpoints are parent only.
 
 ## Behavior
 
