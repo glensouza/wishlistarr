@@ -1,5 +1,7 @@
 # Library index
 
+Parents can preview and label the existing library in bulk with [library backfill labels](library-backfill.md).
+
 Wishlistarr keeps a local copy of the movies and shows on the selected Plex server so it can tell instantly whether a title is available, without asking Plex each time. Music and photo libraries are not indexed.
 
 ## What is stored

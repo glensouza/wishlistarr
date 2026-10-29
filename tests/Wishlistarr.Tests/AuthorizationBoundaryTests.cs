@@ -72,6 +72,12 @@ public sealed partial class AuthorizationBoundaryTests(AuthApiFactory factory) :
         Assert.Contains(("POST", "/api/v1/requests/retry"), routes);
         Assert.Contains(("GET", "/api/v1/labels/guardian/reports"), routes);
         Assert.Contains(("GET", "/api/v1/labels/guardian/reports/x"), routes);
+        Assert.Contains(("GET", "/api/v1/labels/backfill/preview"), routes);
+        Assert.Contains(("GET", "/api/v1/labels/backfill/batches"), routes);
+        Assert.Contains(("POST", "/api/v1/labels/backfill/batches"), routes);
+        Assert.Contains(("GET", "/api/v1/labels/backfill/batches/x"), routes);
+        Assert.Contains(("POST", "/api/v1/labels/backfill/batches/x/resume"), routes);
+        Assert.Contains(("POST", "/api/v1/labels/backfill/batches/x/undo"), routes);
         Assert.Empty(leaks);
     }
 

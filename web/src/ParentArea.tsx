@@ -19,6 +19,7 @@ import UpdateNotice from './UpdateNotice'
 import ParentHome from './ParentHome'
 import RequestHistoryPanel from './RequestHistoryPanel'
 import NotificationSettings from './NotificationSettings'
+import LibraryBackfillAdmin from './LibraryBackfillAdmin'
 
 export default function ParentArea() {
   const t = useT()
@@ -58,6 +59,7 @@ export default function ParentArea() {
           <RequestsAdmin />
           <KidProfilesAdmin />
           <ContentControls />
+          <LibraryBackfillAdmin />
           <KidDevicesAdmin />
           <TrailerSetting />
           <NotificationSettings />
