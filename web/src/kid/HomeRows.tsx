@@ -28,6 +28,7 @@ export default function HomeRows() {
   }, [retry])
 
   function rowTitle(row: HomeRow) {
+    if (row.name) return row.name
     if (row.id === 'popular') return t('home.rowPopular')
     if (row.id === 'library') return t('home.rowLibrary')
     if (row.genreId === animationGenreId) return t('home.genreAnimation')

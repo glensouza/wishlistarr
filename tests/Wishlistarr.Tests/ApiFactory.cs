@@ -5,6 +5,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Labels;
+using Wishlistarr.Api.Lists;
 using Wishlistarr.Api.Security;
 using Wishlistarr.Api.Settings;
 using Wishlistarr.Api.Updates;
@@ -59,6 +60,7 @@ public class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting($"Jobs:Schedules:{DatabaseBackupJob.JobName}:Enabled", "false");
         builder.UseSetting($"Jobs:Schedules:{UpdateCheckJob.JobName}:Enabled", "false");
         builder.UseSetting($"Jobs:Schedules:{LabelGuardianJob.JobName}:Enabled", "false");
+        builder.UseSetting($"Jobs:Schedules:{DiscoveryLists.JobName}:Enabled", "false");
         builder.ConfigureTestServices(services =>
         {
             services.Configure<PlexOptions>(options => options.PlexTvBaseAddress = new Uri("http://127.0.0.1:9/"));

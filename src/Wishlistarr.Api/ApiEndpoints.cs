@@ -3,6 +3,7 @@ using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
+using Wishlistarr.Api.Lists;
 using Wishlistarr.Api.MediaServers;
 using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
@@ -47,6 +48,7 @@ public static class ApiEndpoints
         v1.MapWebhookSettings();
         v1.MapObservability();
         v1.MapNotificationSettings();
+        v1.MapDiscoveryLists();
 
         v1.MapGet("/system/status", (SystemStatus status, CancellationToken ct) => status.GetAsync(ct))
             .WithTags("System")

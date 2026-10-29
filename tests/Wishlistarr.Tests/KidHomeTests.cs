@@ -6,7 +6,10 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
+using Wishlistarr.Api.Lists;
+using Wishlistarr.Api.Settings;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
@@ -57,6 +60,187 @@ public sealed class KidHomeTests
 
     private static List<string> RowIds(JsonElement body) =>
         [.. body.GetProperty("rows").EnumerateArray().Select(row => row.GetProperty("id").GetString()!)];
+
+    [Fact]
+    public async Task Discovery_settings_validate_input_and_do_not_return_secrets()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        HttpResponseMessage invalid = await parent.PutAsJsonAsync("/api/v1/settings/discovery-lists", new
+        {
+            lists = new[] { new { provider = "other", listId = 42, name = "Picks" } },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        HttpResponseMessage saved = await parent.PutAsJsonAsync("/api/v1/settings/discovery-lists", new
+        {
+            lists = Array.Empty<object>(),
+            traktKey = "demo-key",
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        string result = await parent.GetStringAsync("/api/v1/settings/discovery-lists");
+        Assert.DoesNotContain("demo-key", result);
+        Assert.True(JsonDocument.Parse(result).RootElement.GetProperty("hasTraktKey").GetBoolean());
+        using IServiceScope scope = factory.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        Assert.DoesNotContain("demo-key", (await db.Settings.SingleAsync(setting => setting.Key == "system.discovery-lists.trakt-key")).Value);
+    }
+
+    [Fact]
+    public async Task Refreshed_list_rows_only_show_titles_allowed_by_the_profile()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        factory.Tmdb.SetBody("/3/movie/800", """{"id":800,"title":"Tiny Tale","genres":[{"id":16}],"original_language":"en"}""");
+        factory.Tmdb.SetBody("/3/movie/801", """{"id":801,"title":"Night Terror","genres":[{"id":27}],"original_language":"en"}""");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 6, homeRows: []);
+        using IServiceScope scope = factory.Services.CreateScope();
+        ListHttpFactory provider = new();
+        DiscoveryLists lists = new(scope.ServiceProvider.GetRequiredService<SettingsStore>(), provider, factory.Services.GetRequiredService<DiscoveryListGate>(), factory.Clock);
+        DiscoveryList[] sources = [new("trakt", 42, "Family picks"), new("mdblist-external", 43, "Imported picks")];
+        Assert.True(await lists.SaveAsync(new DiscoveryListSettings(sources, "test-key", "test-key"), default));
+        await lists.RunAsync(default);
+
+        JsonElement home = await kid.GetFromJsonAsync<JsonElement>(HomePath);
+        JsonElement row = home.GetProperty("rows")[0];
+        Assert.Equal("Family picks", row.GetProperty("name").GetString());
+        Assert.Equal([800], row.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("tmdbId").GetInt32()));
+        JsonElement imported = home.GetProperty("rows")[1];
+        Assert.Equal("Imported picks", imported.GetProperty("name").GetString());
+        Assert.Equal([800], imported.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("tmdbId").GetInt32()));
+        Assert.Equal(TimeSpan.FromHours(6), factory.Services.GetRequiredService<JobRunner>().Find(DiscoveryLists.JobName)!.DefaultInterval);
+        Assert.Equal(HttpStatusCode.Forbidden, (await kid.PutAsJsonAsync("/api/v1/settings/discovery-lists", new { lists = Array.Empty<object>() })).StatusCode);
+
+        provider.Body = """[{"type":"movie","movie":{"ids":{"tmdb":801}}}]""";
+        provider.MdbBody = """{"movies":[{"id":801,"rank":1}],"shows":[]}""";
+        await lists.RunAsync(default);
+        JsonElement refreshed = await kid.GetFromJsonAsync<JsonElement>(HomePath);
+        Assert.Empty(refreshed.GetProperty("rows").EnumerateArray());
+        provider.Status = HttpStatusCode.ServiceUnavailable;
+        Assert.True(await lists.SaveAsync(new DiscoveryListSettings(sources, null, null), default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => lists.RunAsync(default));
+        Assert.Equal(801, (await lists.SnapshotsAsync(default))[0].Items[0].TmdbId);
+    }
+
+    private sealed class ListHttpFactory : IHttpClientFactory
+    {
+        public string Body { get; set; } = """[{"type":"movie","movie":{"ids":{"tmdb":800}}},{"type":"movie","movie":{"ids":{"tmdb":801}}}]""";
+        public string MdbBody { get; set; } = """{"movies":[{"id":800,"rank":1},{"id":801,"rank":2}],"shows":[]}""";
+        public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
+        public HttpClient CreateClient(string name) => new(new ListHandler(this));
+
+        private sealed class ListHandler(ListHttpFactory source) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(
+                new HttpResponseMessage(source.Status) { Content = new StringContent(request.RequestUri!.Host == "api.mdblist.com" ? source.MdbBody : source.Body) });
+        }
+    }
+
+    [Fact]
+    public async Task Renaming_during_a_refresh_keeps_the_previous_snapshot_and_discards_the_stale_result()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        using IServiceScope first = factory.Services.CreateScope();
+        using IServiceScope second = factory.Services.CreateScope();
+        DiscoveryListGate gate = factory.Services.GetRequiredService<DiscoveryListGate>();
+        ListHttpFactory initial = new();
+        DiscoveryLists lists = new(first.ServiceProvider.GetRequiredService<SettingsStore>(), initial, gate, factory.Clock);
+        DiscoveryList old = new("trakt", 42, "Old name");
+        Assert.True(await lists.SaveAsync(new DiscoveryListSettings([old], "test-key", null), default));
+        await lists.RunAsync(default);
+        BlockingListFactory blocked = new();
+        DiscoveryLists running = new(first.ServiceProvider.GetRequiredService<SettingsStore>(), blocked, gate, factory.Clock);
+        DiscoveryLists editor = new(second.ServiceProvider.GetRequiredService<SettingsStore>(), initial, gate, factory.Clock);
+        Task refresh = running.RunAsync(default);
+        await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        DiscoveryList renamed = old with { Name = "New name" };
+        Assert.True(await editor.SaveAsync(new DiscoveryListSettings([renamed], null, null), default));
+        blocked.Release.TrySetResult();
+        await refresh;
+        DiscoveryListSnapshot snapshot = Assert.Single(await editor.SnapshotsAsync(default));
+        Assert.Equal("New name", snapshot.Source.Name);
+        Assert.Equal(800, snapshot.Items[0].TmdbId);
+        initial.Status = HttpStatusCode.ServiceUnavailable;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => editor.RunAsync(default));
+        snapshot = Assert.Single(await editor.SnapshotsAsync(default));
+        Assert.Equal("New name", snapshot.Source.Name);
+        Assert.Equal(800, snapshot.Items[0].TmdbId);
+    }
+
+    private sealed class BlockingListFactory : IHttpClientFactory
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public HttpClient CreateClient(string name) => new(new Handler(this));
+
+        private sealed class Handler(BlockingListFactory source) : HttpMessageHandler
+        {
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                source.Started.TrySetResult();
+                await source.Release.Task.WaitAsync(cancellationToken);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""[{"type":"movie","movie":{"ids":{"tmdb":999}}}]""") };
+            }
+        }
+    }
+
+    [Fact]
+    public async Task A_late_refresh_cannot_replace_a_newer_refresh()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        using IServiceScope first = factory.Services.CreateScope();
+        using IServiceScope second = factory.Services.CreateScope();
+        DiscoveryListGate gate = factory.Services.GetRequiredService<DiscoveryListGate>();
+        BlockingListFactory blocked = new();
+        DiscoveryLists slow = new(first.ServiceProvider.GetRequiredService<SettingsStore>(), blocked, gate, factory.Clock);
+        DiscoveryLists fast = new(second.ServiceProvider.GetRequiredService<SettingsStore>(), new ListHttpFactory(), gate, factory.Clock);
+        Assert.True(await slow.SaveAsync(new DiscoveryListSettings([new("trakt", 42, "Picks")], "test-key", null), default));
+        Task older = slow.RunAsync(default);
+        await blocked.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await fast.RunAsync(default);
+        blocked.Release.TrySetResult();
+        await older;
+        Assert.Equal(800, Assert.Single(await fast.SnapshotsAsync(default)).Items[0].TmdbId);
+    }
+
+    [Fact]
+    public async Task Rate_limit_cools_both_mdblist_namespaces_until_retry_after()
+    {
+        using KidRequestApiFactory factory = PolicyFactory();
+        using IServiceScope scope = factory.Services.CreateScope();
+        RateLimitedListFactory provider = new();
+        DiscoveryLists lists = new(scope.ServiceProvider.GetRequiredService<SettingsStore>(), provider,
+            factory.Services.GetRequiredService<DiscoveryListGate>(), factory.Clock);
+        DiscoveryList[] sources = [new("mdblist", 42, "One"), new("mdblist-external", 43, "Two")];
+        Assert.True(await lists.SaveAsync(new DiscoveryListSettings(sources, null, "test-key"), default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => lists.RunAsync(default));
+        Assert.Equal(1, provider.Calls);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => lists.RunAsync(default));
+        Assert.Equal(1, provider.Calls);
+        factory.Clock.Advance(TimeSpan.FromSeconds(120));
+        await lists.RunAsync(default);
+        Assert.Equal(3, provider.Calls);
+        Assert.Equal(2, (await lists.SnapshotsAsync(default)).Count);
+    }
+
+    private sealed class RateLimitedListFactory : IHttpClientFactory
+    {
+        public int Calls { get; private set; }
+        public HttpClient CreateClient(string name) => new(new Handler(this));
+
+        private sealed class Handler(RateLimitedListFactory source) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                source.Calls++;
+                if (source.Calls == 1)
+                {
+                    HttpResponseMessage limited = new(HttpStatusCode.TooManyRequests);
+                    limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(120));
+                    return Task.FromResult(limited);
+                }
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"movies":[],"shows":[]}""") });
+            }
+        }
+    }
 
     [Fact]
     public async Task Rows_only_contain_titles_the_profile_policy_allows()
@@ -674,6 +858,7 @@ public sealed class KidHomeTests
             scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>(),
             tmdb,
             new KidContentPipeline(tmdb, [], time, NullLogger<KidContentPipeline>.Instance, scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>()),
+            scope.ServiceProvider.GetRequiredService<DiscoveryLists>(),
             index is null ? [] : [index],
             time,
             NullLogger<KidHome>.Instance);

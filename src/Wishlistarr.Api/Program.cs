@@ -13,6 +13,7 @@ using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
+using Wishlistarr.Api.Lists;
 using Wishlistarr.Api.Notifications;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Api.Search;
@@ -119,6 +120,11 @@ builder.Services.AddScoped<PlexEnforcement>();
 builder.Services.AddLibraryIndex();
 builder.Services.AddScoped<KidContentPipeline>();
 builder.Services.AddScoped<KidHome>();
+builder.Services.AddSingleton<DiscoveryListGate>();
+builder.Services.AddBackgroundJob<DiscoveryLists>(DiscoveryLists.JobName, "Refreshes discovery lists.", TimeSpan.FromHours(6));
+builder.Services.AddHttpClient("discovery-lists", client => client.Timeout = TimeSpan.FromSeconds(10))
+    .RemoveAllLoggers()
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.AddScoped<KidWishlist>();
 builder.Services.AddScoped<KidSearch>();
