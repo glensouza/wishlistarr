@@ -187,7 +187,9 @@ public sealed class KidWishlistTests
     {
         using KidRequestApiFactory factory = new();
         await factory.SetTimeZoneAsync("UTC");
-        factory.SetClock(new DateTimeOffset(2026, 10, 21, 15, 0, 0, TimeSpan.Zero));
+        // The HTTP cookie container uses the real clock, so a fixed historical date eventually expires the kid cookies before they can be sent.
+        DateTimeOffset wednesday = AllowanceWeek.NextStart(factory.Clock.GetUtcNow(), TimeZoneInfo.Utc).AddDays(2).AddHours(15);
+        factory.SetClock(wednesday);
         (HttpClient ada, int adaId) = await factory.SignInKidAsync(weeklyAllowance: 2);
         (HttpClient beau, int beauId) = await factory.SignInKidAsync("Beau", weeklyAllowance: 1);
         await AddRequestAsync(factory, adaId, 750, "Counts One");
@@ -195,19 +197,18 @@ public sealed class KidWishlistTests
         await AddRequestAsync(factory, adaId, 752, "Already Here", counts: false);
         await AddRequestAsync(factory, beauId, 753, "Beaus Wish");
 
-        JsonElement usedUp = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement usedUp = await ada.GetFromJsonAsync<JsonElement>(WishlistPath);
         Assert.Equal(0, usedUp.GetProperty("remaining").GetInt32());
         Assert.Equal(
             AllowanceWeek.NextStart(factory.Clock.GetUtcNow(), TimeZoneInfo.Utc),
             usedUp.GetProperty("resetsAt").GetDateTimeOffset());
-        JsonElement beauUsed = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement beauUsed = await beau.GetFromJsonAsync<JsonElement>(WishlistPath);
         Assert.Equal(0, beauUsed.GetProperty("remaining").GetInt32());
 
-        // Monday 26 October is the next allowance week and is still inside the seven-day kid session.
-        factory.SetClock(new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.Zero));
-        JsonElement nextWeek = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
+        factory.SetClock(AllowanceWeek.NextStart(wednesday, TimeZoneInfo.Utc));
+        JsonElement nextWeek = await ada.GetFromJsonAsync<JsonElement>(WishlistPath);
         Assert.Equal(2, nextWeek.GetProperty("remaining").GetInt32());
-        JsonElement beauNext = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement beauNext = await beau.GetFromJsonAsync<JsonElement>(WishlistPath);
         Assert.Equal(1, beauNext.GetProperty("remaining").GetInt32());
     }
 

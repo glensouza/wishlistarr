@@ -105,6 +105,16 @@ builder.Services.AddOptions<ApprovalOptions>()
     .Validate(options => options.IsValid(), "The Approval configuration section is invalid.")
     .ValidateOnStart();
 builder.Services.AddScoped<RequestLabeling>();
+builder.Services.AddScoped<RequestArrival>();
+builder.Services.AddBackgroundJob<RequestArrivalJob>(
+    RequestArrivalJob.JobName,
+    "Checks dispatched requests in Plex and applies the requesting profile's label.",
+    TimeSpan.FromMinutes(5));
+foreach (WebhookSource source in Enum.GetValues<WebhookSource>())
+{
+    builder.Services.AddScoped<IWebhookHandler>(provider => new RequestArrivalWebhookHandler(source, provider.GetRequiredService<JobRunner>()));
+}
+
 builder.Services.AddScoped<RequestDispatch>();
 builder.Services.AddBackgroundJob<RequestDispatchJob>(
     RequestDispatchJob.JobName,

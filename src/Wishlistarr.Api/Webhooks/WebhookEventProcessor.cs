@@ -38,7 +38,7 @@ public sealed class WebhookEventProcessor(
         ILookup<string, IWebhookHandler> bySource = handlers.ToLookup(handler => handler.Source.Route(), StringComparer.Ordinal);
         while (true)
         {
-            List<WebhookEvent> pending = await db.WebhookEvents
+            List<WebhookEvent> pending = await db.WebhookEvents.AsNoTracking()
                 .Where(item => item.ProcessedAt == null)
                 .OrderBy(item => item.Id)
                 .Take(BatchSize)
@@ -61,11 +61,13 @@ public sealed class WebhookEventProcessor(
                 {
                     logger.LogError(exception, "Handling a {Source} webhook event failed.", item.Source);
                 }
-
-                item.ProcessedAt = time.GetUtcNow();
             }
 
-            await db.SaveChangesAsync(ct);
+            // Library refresh handlers clear tracking as they index batches, so acknowledgment cannot depend on tracked events.
+            long[] processedIds = [.. pending.Select(item => item.Id)];
+            DateTimeOffset processedAt = time.GetUtcNow();
+            await db.WebhookEvents.Where(item => processedIds.Contains(item.Id))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ProcessedAt, processedAt), ct);
         }
 
         await this.RemoveExpiredAsync(ct);
