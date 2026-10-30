@@ -39,6 +39,7 @@ export type QueueReason = {
 }
 
 export type QueueItem = {
+  seasons?: { number: number }[]
   id: number
   kidProfileId: number
   kidName: string
@@ -126,7 +127,15 @@ function isItem(value: unknown): value is QueueItem {
     isNullableString(value.trailerKey) &&
     isReason(value.reason) &&
     Array.isArray(value.gaps) &&
-    value.gaps.every(isGap)
+    value.gaps.every(isGap) &&
+    (value.seasons === undefined ||
+      (Array.isArray(value.seasons) &&
+        value.seasons.every(
+          (season) =>
+            isRecord(season) &&
+            Number.isInteger(season.number) &&
+            Number(season.number) >= 0,
+        )))
   )
 }
 

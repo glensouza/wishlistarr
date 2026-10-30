@@ -155,6 +155,49 @@ public sealed class ArrBackendTests
         Assert.Equal(3, search.Body["seasonNumber"]!.GetValue<int>());
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Sonarr_refuses_partial_season_acceptance_until_its_metadata_catches_up(bool existing, bool staleStoredSeries)
+    {
+        await using ArrHarness harness = await ArrHarness.CreateAsync(ArrService.Sonarr);
+        JsonObject? stored = existing ? harness.Server.SeedSeries(monitored: true, 1) : null;
+        if (staleStoredSeries)
+        {
+            stored!["seasons"]!.AsArray().RemoveAt(3);
+        }
+        else
+        {
+            harness.Server.LookupSeasons = [0, 1, 2];
+        }
+
+        FulfilmentRequest request = new(MediaKind.Show, FakeArrServer.ShowTmdbId, [1, 3]);
+        await Assert.ThrowsAsync<ArrException>(() => harness.Backend.FulfilAsync(request));
+        Assert.Empty(harness.Server.Sent("POST", "/api/v3/series"));
+        Assert.Empty(harness.Server.Sent("POST", "/api/v3/command"));
+        if (stored is not null)
+        {
+            int id = stored["id"]!.GetValue<int>();
+            Assert.Empty(harness.Server.Sent("PUT", $"/api/v3/series/{id}"));
+        }
+
+        harness.Server.LookupSeasons = null;
+        if (staleStoredSeries)
+        {
+            stored!["seasons"]!.AsArray().Add(new JsonObject { ["seasonNumber"] = 3, ["monitored"] = false });
+        }
+
+        await harness.Backend.FulfilAsync(request);
+        JsonObject accepted = Assert.Single(harness.Server.Library);
+        Assert.Equal([1, 3], accepted["seasons"]!.AsArray().Where(season => season!["monitored"]!.GetValue<bool>())
+            .Select(season => season!["seasonNumber"]!.GetValue<int>()));
+        if (existing)
+        {
+            Assert.Equal([1, 3], harness.Server.Sent("POST", "/api/v3/command").Select(search => search.Body!["seasonNumber"]!.GetValue<int>()));
+        }
+    }
+
     [Fact]
     public async Task Sonarr_never_adds_the_same_show_twice()
     {

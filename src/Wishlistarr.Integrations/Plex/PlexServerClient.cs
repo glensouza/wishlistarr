@@ -59,6 +59,9 @@ internal sealed class PlexServerClient(IHttpClientFactory factory, IOptions<Plex
                 + (guid is null ? string.Empty : $"&guid={Uri.EscapeDataString(guid)}"),
             ct);
 
+    public Task<PlexContainer> GetChildrenAsync(PlexServerContext server, string ratingKey, int start, int size, CancellationToken ct) =>
+        this.GetAsync(server, $"library/metadata/{Uri.EscapeDataString(ratingKey)}/children?excludeAllLeaves=1&X-Plex-Container-Start={Number(start)}&X-Plex-Container-Size={Number(size)}", ct);
+
     public async Task<PlexMetadata?> GetMetadataAsync(PlexServerContext server, string ratingKey, CancellationToken ct)
     {
         using HttpRequestMessage request = this.Create(HttpMethod.Get, server, $"library/metadata/{Uri.EscapeDataString(ratingKey)}?includeGuids=1");

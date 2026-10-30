@@ -19,6 +19,37 @@ namespace Wishlistarr.Tests.Requests;
 
 public sealed class RequestDispatchTests
 {
+    [Theory]
+    [InlineData("arr")]
+    [InlineData("seerr")]
+    public async Task A_season_request_only_dispatches_the_selected_seasons(string mode)
+    {
+        using DispatchApiFactory factory = new();
+        (_, int profile) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.ConfiguredParentAsync(mode);
+        int id;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            int tmdbId = mode == "arr" ? DispatchApiFactory.ShowId : FakeSeerrServer.ShowTmdbId;
+            RequestResult made = await scope.ServiceProvider.GetRequiredService<MediaRequests>().CreateAsync(
+                profile, new TitleKey(MediaKind.Show, tmdbId), "Fixture show", RequestActor.Kid(profile, "Ada"), seasons: [2]);
+            id = made.Request!.Id;
+        }
+
+        await factory.ApproveAsync(parent, id);
+        await factory.WaitForDispatchAsync(id);
+        if (mode == "seerr")
+        {
+            FakeSeerrServer.RecordedRequest post = Assert.Single(factory.Seerr.Sent("POST", "/api/v1/request"));
+            Assert.Equal([2], post.Body!["seasons"]!.AsArray().Select(season => season!.GetValue<int>()));
+        }
+        else
+        {
+            JsonObject show = Assert.Single(factory.Sonarr.Library);
+            Assert.Equal([2], show["seasons"]!.AsArray().Where(season => season!["monitored"]!.GetValue<bool>()).Select(season => season!["seasonNumber"]!.GetValue<int>()));
+        }
+    }
+
     [Fact]
     public async Task An_approved_movie_is_sent_to_seerr_as_the_configured_user()
     {

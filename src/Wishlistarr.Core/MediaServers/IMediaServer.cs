@@ -15,5 +15,9 @@ public interface IMediaServer
 
     Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default);
 
+    Task<IReadOnlyList<MediaSeason>> GetSeasonsAsync(string showId, CancellationToken ct = default);
+
     Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default);
 }
+
+public sealed record MediaSeason(int Number, int EpisodeCount);

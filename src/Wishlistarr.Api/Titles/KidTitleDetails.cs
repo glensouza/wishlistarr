@@ -26,7 +26,7 @@ public sealed record KidCastMember(string Name, string? Character, string? Profi
 
 public sealed record KidSeason(int Number, string? Name, string? Overview, string? PosterUrl, int EpisodeCount, string? Year);
 
-public sealed record KidTitleRequest(RequestState State, int RequestCount);
+public sealed record KidTitleRequest(RequestState State, int RequestCount, IReadOnlyList<RequestSeasonResponse> Seasons);
 
 public sealed record KidTitleResponse(
     MediaKind Kind,
@@ -90,7 +90,7 @@ public sealed partial class KidTitleDetails(
         {
             rating = null;
         }
-        MediaRequest? open = await db.MediaRequests.AsNoTracking()
+        MediaRequest? open = await db.MediaRequests.AsNoTracking().Include(request => request.Seasons)
             .Where(request => request.KidProfileId == profile.Id
                 && request.Kind == kind
                 && request.TmdbId == tmdbId
@@ -115,7 +115,7 @@ public sealed partial class KidTitleDetails(
                 trailer,
                 cast,
                 Seasons(details, masked),
-                open is null ? null : new KidTitleRequest(open.State, open.RequestCount)));
+                open is null ? null : new KidTitleRequest(open.State, open.RequestCount, RequestSeasonResponse.From(open))));
     }
 
     private async Task<IReadOnlyList<KidCastMember>> CastAsync(TmdbMediaType type, int tmdbId, MediaKind kind, CancellationToken ct)

@@ -18,7 +18,7 @@ public static class RequestEndpoints
     {
         RouteGroupBuilder requests = parent.MapGroup("/requests").WithTags("Requests");
 
-        requests.MapGet("/", async (string? state, int? limit, int? offset, WishlistarrDbContext db, RequestTitles titles, RequestAccess access, CancellationToken ct) =>
+        requests.MapGet("/", async (string? state, bool? includeMonitoring, int? limit, int? offset, WishlistarrDbContext db, RequestTitles titles, RequestAccess access, CancellationToken ct) =>
         {
             if (!TryState(state, out RequestState? parsed))
             {
@@ -30,8 +30,8 @@ public static class RequestEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: pageError);
             }
 
-            IQueryable<ListedRequest> matching = db.MediaRequests.AsNoTracking()
-                .Where(request => parsed == null || request.State == parsed)
+            IQueryable<ListedRequest> matching = db.MediaRequests.AsNoTracking().Include(request => request.Seasons)
+                .Where(request => parsed == null || request.State == parsed || (includeMonitoring == true && parsed == RequestState.Labeled && request.State == RequestState.Monitoring))
                 .Join(
                     db.KidProfiles.AsNoTracking(),
                     request => request.KidProfileId,
@@ -83,7 +83,8 @@ public static class RequestEndpoints
                     revocable.Contains(request.Id),
                     mayRemain.Contains(request.Id) || (request.State == RequestState.Available && revocable.Contains(request.Id)),
                     failures.TryGetValue(request.Id, out MediaRequestEvent? failure) && RequestDispatch.IsRetryable(failure),
-                    failure is not null && RequestDispatch.IsRetryable(failure) ? RequestDispatch.FailureCode(failure) : null));
+                    failure is not null && RequestDispatch.IsRetryable(failure) ? RequestDispatch.FailureCode(failure) : null,
+                    RequestSeasonResponse.From(request)));
             }
 
             return Results.Ok(new ParentRequestPage(body, total, take, skip, unfinished));
@@ -378,4 +379,5 @@ public sealed record ParentRequestResponse(
     bool CanRevoke,
     bool LabelMayRemain,
     bool CanRetry,
-    string? DispatchFailure);
+    string? DispatchFailure,
+    IReadOnlyList<RequestSeasonResponse> Seasons);

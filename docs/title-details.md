@@ -33,7 +33,7 @@ A missing or archived profile answers `403`. TMDB answering anything other than 
 
 ## Seasons
 
-The kid can select a season. The screen says that access is for the whole show, not one season. The selection stays in the browser and is not sent with the request. A show with no seasons still shows that note.
+The kid can select a season. The screen sends that season number with the request to control downloads, and explains that Plex access includes the whole show and future seasons. Per-season request observations show when episodes are missing, partially available, available or still being checked. An already approved show in `Monitoring` or `Labeled` can ask for another listed season; an explicit season selection already requested is disabled. A show with no seasons still shows the access note and requests all regular seasons. See [TV seasons and show access](requests.md#tv-seasons-and-show-access).
 
 ## YouTube trailers
 

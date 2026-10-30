@@ -147,10 +147,7 @@ public sealed class SonarrBackend(ArrClient client, ArrConnectionStore store) : 
         }
 
         IReadOnlyList<int> seasons = request.Seasons.Count > 0 ? request.Seasons : SonarrMapper.AllSeasons(lookup);
-        if (SonarrMapper.MatchedSeasons(lookup, seasons).Count == 0)
-        {
-            throw new ArrException("Sonarr does not list any of the requested seasons.");
-        }
+        RequireSeasons(lookup, seasons);
 
         if (await this.FindSeriesAsync(connection, tvdbId, ct) is { } present)
         {
@@ -184,13 +181,14 @@ public sealed class SonarrBackend(ArrClient client, ArrConnectionStore store) : 
         JsonObject series,
         CancellationToken ct)
     {
+        RequireSeasons(series, seasons);
         int seriesId = ArrJson.Int(series["id"])!.Value;
         if (SonarrMapper.ApplyToExisting(series, tagIds, seasons))
         {
             await this.SendAsync(connection, HttpMethod.Put, $"api/v3/series/{Number(seriesId)}", series, ct);
         }
 
-        foreach (int season in SonarrMapper.MatchedSeasons(series, seasons))
+        foreach (int season in seasons.Distinct().Order())
         {
             await this.SendAsync(
                 connection,
@@ -201,6 +199,15 @@ public sealed class SonarrBackend(ArrClient client, ArrConnectionStore store) : 
         }
 
         return new FulfilmentResult(FulfilmentOutcome.Reused, seriesId);
+    }
+
+    private static void RequireSeasons(JsonObject series, IReadOnlyList<int> seasons)
+    {
+        IReadOnlyList<int> listed = SonarrMapper.MatchedSeasons(series, seasons);
+        if (seasons.Count == 0 || seasons.Except(listed).Any())
+        {
+            throw new ArrException("Sonarr does not list all of the requested seasons yet.");
+        }
     }
 
     private async Task<JsonObject> LookupAsync(ArrConnection connection, int tmdbId, CancellationToken ct)

@@ -154,9 +154,10 @@ public sealed partial class RequestLabeling(
             return new RequestLabelResult(new RequestResult(RequestOutcome.Unchanged, current, failure), false);
         }
 
+        RequestState success = current.Kind == MediaKind.Show ? RequestState.Monitoring : RequestState.Labeled;
         RequestResult moved = await requests.TransitionAsync(
             requestId,
-            failure is null ? RequestState.Labeled : RequestState.Failed,
+            failure is null ? success : RequestState.Failed,
             actor,
             failure,
             CancellationToken.None,

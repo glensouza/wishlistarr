@@ -72,6 +72,8 @@ public sealed class LibraryLookupTests
 
         public Task<IReadOnlyList<MediaItem>> FindByGuidAsync(string guid, CancellationToken ct = default) => throw new NotSupportedException();
 
+        public Task<IReadOnlyList<MediaSeason>> GetSeasonsAsync(string showId, CancellationToken ct = default) => throw new NotSupportedException();
+
         public Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default) =>

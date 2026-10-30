@@ -1182,3 +1182,15 @@ it('loads more from the control when a page is empty but requests remain', async
   expect(screen.queryByText('Nothing is waiting for approval.')).toBeNull()
   expect(screen.getByText(/1 more are waiting/)).toBeTruthy()
 })
+
+it('warns that approving a season grants the whole show including future seasons', async () => {
+  homeData([{ ...ada, kind: 'show', seasons: [{ number: 2 }] }])
+  render(<ParentHome />)
+  expect(
+    await screen.findByText(
+      'Approving grants access to the whole show in Plex, including all current and future seasons. Season requests only control downloads.',
+    ),
+  ).toBeTruthy()
+  expect(screen.getByText('Season 2')).toBeTruthy()
+  expect(screen.getByRole('button', { name: /Approve/ })).toBeTruthy()
+})

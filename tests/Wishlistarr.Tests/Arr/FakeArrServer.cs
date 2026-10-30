@@ -44,6 +44,8 @@ public sealed class FakeArrServer : IAsyncDisposable
 
     public bool HideNextLookup { get; set; }
 
+    public IReadOnlyList<int>? LookupSeasons { get; set; }
+
     public IReadOnlyList<RecordedRequest> Requests => [.. this.requests];
 
     public IReadOnlyList<JsonObject> Library => [.. this.library];
@@ -206,7 +208,13 @@ public sealed class FakeArrServer : IAsyncDisposable
         else if (path == "/api/v3/series/lookup" && this.Service == ArrService.Sonarr)
         {
             string term = request.Query.GetValueOrDefault("term", string.Empty);
-            JsonArray results = term == $"tmdb:{ShowTmdbId}" ? [ShowTemplate()] : [];
+            JsonObject show = ShowTemplate();
+            if (this.LookupSeasons is { } seasons)
+            {
+                show["seasons"] = new JsonArray([.. seasons.Select(number => (JsonNode)Season(number))]);
+            }
+
+            JsonArray results = term == $"tmdb:{ShowTmdbId}" ? [show] : [];
             await WriteAsync(context, results);
         }
         else if (path == "/api/v3/movie/lookup/tmdb" && this.Service == ArrService.Radarr)
