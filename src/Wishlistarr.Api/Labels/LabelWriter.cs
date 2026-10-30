@@ -89,7 +89,13 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             : result.Outcome == LabelWriteOutcome.NotPresent && !owned ? result with { Outcome = LabelWriteOutcome.NotOwned } : result;
     }
 
-    public async Task<LabelWriteResult> AddAsync(string itemId, string label, int kidProfileId, string source, CancellationToken ct = default)
+    public async Task<LabelWriteResult> AddAsync(
+        string itemId,
+        string label,
+        int kidProfileId,
+        string source,
+        CancellationToken ct = default,
+        MediaItemLabels? expectedIdentity = null)
     {
         if (PlexLabelRules.Validate(label) is string error)
         {
@@ -133,7 +139,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             (_, _) => Task.CompletedTask,
             LabelWriteOutcome.Added,
             LabelWriteOutcome.AlreadyPresent,
-            ct);
+            ct,
+            expectedIdentity: expectedIdentity);
     }
 
     public async Task<LabelWriteResult> RemoveAsync(string itemId, string label, CancellationToken ct = default)
@@ -242,7 +249,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         CancellationToken ct,
         string? expectedServerId = null,
         string? expectedGuid = null,
-        bool keepReservationOnFailure = false)
+        bool keepReservationOnFailure = false,
+        MediaItemLabels? expectedIdentity = null)
     {
         MediaItemLabels? target = await server.GetLabelsAsync(itemId, ct);
         if (target is null || (expectedServerId is not null && (target.ServerId != expectedServerId || target.Guid != expectedGuid)))
@@ -257,6 +265,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
         // Copies with the same guid share one ledger row, so their ownership checks and reservations must also share a lock.
         using IDisposable held = await locks.AcquireAsync($"{target.ServerId}/{target.Guid}", ct);
+        CheckIdentity(target, expectedIdentity);
         Func<Task>? release = null;
         for (int attempt = 0; attempt < MaxAttempts; attempt++)
         {
@@ -266,6 +275,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 return new LabelWriteResult(LabelWriteOutcome.ItemNotFound);
             }
 
+            CheckIdentity(current, expectedIdentity);
             if (await plan(current, ct) is not IReadOnlyList<string> labels)
             {
                 return new LabelWriteResult(unchanged, current);
@@ -273,6 +283,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
             // Plex has no conditional write, so a second read narrows the window in which an edit made elsewhere could be overwritten.
             MediaItemLabels? confirm = await server.GetLabelsAsync(target.Id, ct);
+            if (confirm is not null) CheckIdentity(confirm, expectedIdentity);
             if (confirm is null || confirm.ServerId != target.ServerId || confirm.Guid != target.Guid || !confirm.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
             {
                 continue;
@@ -282,6 +293,22 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             release ??= await reserve(current);
             try
             {
+                if (expectedIdentity is not null)
+                {
+                    // Reserving ownership awaits the database, so confirm the identity again after it and immediately before writing.
+                    MediaItemLabels? final = await server.GetLabelsAsync(target.Id, ct);
+                    if (final is null)
+                    {
+                        throw new MediaServerException("The Plex item is no longer available.");
+                    }
+
+                    CheckIdentity(final, expectedIdentity);
+                    if (!final.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
+                    {
+                        throw new MediaServerException("The Plex labels changed before they could be written.");
+                    }
+                }
+
                 await server.SetLabelsAsync(current, labels, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -291,6 +318,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             }
 
             MediaItemLabels? written = await server.GetLabelsAsync(target.Id, ct);
+            if (written is not null) CheckIdentity(written, expectedIdentity);
             if (written is not null && written.ServerId == target.ServerId && written.Guid == target.Guid && written.Locked && verify(written))
             {
                 await record(written, ct);
@@ -313,6 +341,27 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         // A batched caller can outlive a grant made in another scope; reload instead of trusting the context's tracked copy.
         await db.Entry(owned).ReloadAsync(ct);
         return db.Entry(owned).State == EntityState.Detached ? null : owned;
+    }
+
+    private static void CheckIdentity(MediaItemLabels current, MediaItemLabels? expected)
+    {
+        if (expected is null)
+        {
+            return;
+        }
+
+        bool same = current.ServerId == expected.ServerId
+            && current.Id == expected.Id
+            && current.Guid == expected.Guid
+            && current.Kind == expected.Kind
+            && current.LibraryId == expected.LibraryId
+            && current.ExternalIds.Any(expected.ExternalIds.Contains)
+            && current.ExternalIds.GroupBy(id => id.Source)
+                .All(group => group.Any(expected.ExternalIds.Contains) || expected.ExternalIds.All(id => id.Source != group.Key));
+        if (!same)
+        {
+            throw new MediaServerException("The Plex item changed before its label could be verified.");
+        }
     }
 
     private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source, Action? reserveItem = null)

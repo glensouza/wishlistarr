@@ -71,6 +71,44 @@ public sealed partial class LibraryRefresh(
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task RetryUnresolvedAsync(CancellationToken ct)
+    {
+        using IDisposable held = await gate.EnterAsync(ct);
+        string? serverId = await scanner.GetServerIdAsync(ct);
+        if (serverId is null)
+        {
+            return;
+        }
+
+        // Failed lookups do not change Plex's timestamp, so the incremental cursor cannot decide which mappings to retry.
+        int after = 0;
+        while (true)
+        {
+            var unresolved = await db.LibraryItems.AsNoTracking()
+                .Where(item => item.Id > after && item.ServerId == serverId && item.TitleId == null
+                    && !item.ExternalIds.Any(id => id.Source == LibraryIdSource.Tmdb)
+                    && item.ExternalIds.Any(id => id.Source == LibraryIdSource.Tvdb || id.Source == LibraryIdSource.Imdb))
+                .OrderBy(item => item.Id)
+                .Select(item => new { item.Id, item.RatingKey })
+                .Take(BatchSize)
+                .ToListAsync(ct);
+            if (unresolved.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var item in unresolved)
+            {
+                after = item.Id;
+                LibrarySnapshot? snapshot = await scanner.GetEntryAsync(item.RatingKey, ct);
+                if (snapshot?.ServerId == serverId)
+                {
+                    await this.UpsertAsync(serverId, [snapshot.Entry], ct);
+                }
+            }
+        }
+    }
+
     public async Task<bool> TryItemAsync(string ratingKey, CancellationToken ct)
     {
         if (gate.TryEnter() is not IDisposable held)

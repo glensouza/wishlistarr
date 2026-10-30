@@ -211,9 +211,10 @@ public sealed partial class FakePlexServer : IAsyncDisposable
             {
                 item["guid"] = current.Guid;
                 item["title"] = current.Title;
-                if (current.GuidIds.Count > 0)
+                item["Guid"] = RenderGuids(current);
+                if (current.UpdatedAtUnix is long updatedAt)
                 {
-                    item["Guid"] = RenderGuids(current);
+                    item["updatedAt"] = updatedAt;
                 }
             }
         }
@@ -373,6 +374,11 @@ public sealed partial class FakePlexServer : IAsyncDisposable
             ["title"] = item.Title,
             ["librarySectionID"] = item.Section,
         };
+        if (item.UpdatedAtUnix is long updatedAt)
+        {
+            metadata["updatedAt"] = updatedAt;
+        }
+
         if (item.ParentRatingKey is not null)
         {
             metadata["parentRatingKey"] = item.ParentRatingKey;
@@ -544,6 +550,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         public string? GrandparentRatingKey { get; init; }
 
         public IReadOnlyList<string> GuidIds { get; init; } = [];
+
+        public long? UpdatedAtUnix { get; set; }
 
         public IReadOnlyList<string> Labels => this.Snapshot().Labels;
 
