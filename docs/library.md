@@ -14,7 +14,7 @@ Anything derived from TMDB carries a `FetchedAt` timestamp. Today that is the TM
 
 ## Legacy agent items
 
-Items matched by a legacy Plex agent often have only a TVDB or IMDb id. During a refresh, an item without a TMDB id is resolved through TMDB's find endpoint, trying TVDB first and then IMDb, and the result is stored with its `FetchedAt`. A resolved id is kept until Plex reports a different TVDB or IMDb id for the item or starts reporting a TMDB id itself. Items that cannot be resolved stay in the index without a title and are retried at the next full refresh, or sooner if Plex changes them. If no TMDB API key is configured, resolution is skipped for that run.
+Items matched by a legacy Plex agent often have only a TVDB or IMDb id. During a refresh, an item without a TMDB id is resolved through TMDB's find endpoint, trying TVDB first and then IMDb, and the result is stored with its `FetchedAt`. A resolved id is kept until Plex reports a different TVDB or IMDb id for the item or starts reporting a TMDB id itself. Items that cannot be resolved stay in the index without a title and are retried at the next full refresh, or sooner if Plex changes them. While dispatched requests are waiting, the [arrival job](requests.md#arrival-and-labeling) also reloads unresolved legacy items and retries their mappings every five minutes, independently of Plex's timestamps. If no TMDB API key is configured, resolution is skipped for that run.
 
 ## Refreshing
 

@@ -58,7 +58,8 @@ public sealed partial class RequestLabeling(
         IReadOnlyList<MediaItem> matches,
         KidProfile profile,
         RequestActor actor,
-        string source = LabelSource)
+        string source = LabelSource,
+        IReadOnlyDictionary<string, MediaItemLabels>? expectedItems = null)
     {
         MediaRequest? current = await requests.GetAsync(requestId, CancellationToken.None);
         if (current is not { State: RequestState.Available })
@@ -82,7 +83,8 @@ public sealed partial class RequestLabeling(
             int labeled = 0;
             foreach (MediaItem match in matches)
             {
-                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct);
+                LabelWriteResult written = await labels.AddAsync(
+                    match.Id, profile.PlexLabel, profile.Id, source, ct, expectedItems is null ? null : expectedItems[match.Id]);
                 if (written.Outcome == LabelWriteOutcome.Added)
                 {
                     added.Add(match.Id);
