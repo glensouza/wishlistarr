@@ -25,6 +25,7 @@ const stateKey: Record<ParentRequest['state'], MessageKey> = {
   fulfilling: 'requests.fulfilling',
   available: 'requests.available',
   labeled: 'requests.labeled',
+  monitoring: 'requests.monitoring',
   failed: 'requests.failed',
   revoked: 'requests.revoked',
 }
@@ -432,6 +433,7 @@ export default function RequestsAdmin() {
                   })}
                 </span>
                 <span>{t(stateKey[row.state])}</span>
+                {row.kind === 'show' && <p>{t('requests.showAccess')}</p>}
                 <button
                   type="button"
                   disabled={busy}
@@ -488,6 +490,22 @@ export default function RequestsAdmin() {
                     name: row.kidName,
                   })}
                 </span>
+                <span>{t(stateKey[row.state])}</span>
+                {row.seasons?.map((season) => (
+                  <p key={season.number}>
+                    {t('details.seasonName', { number: season.number })}:{' '}
+                    {t(
+                      (
+                        {
+                          unknown: 'details.seasonUnknown',
+                          missing: 'details.seasonMissing',
+                          partial: 'details.seasonPartial',
+                          available: 'details.seasonAvailable',
+                        } as const
+                      )[season.availability],
+                    )}
+                  </p>
+                ))}
                 <button
                   type="button"
                   disabled={busy}
@@ -537,6 +555,7 @@ export default function RequestsAdmin() {
                     })}
                   </span>
                   <span>{t(stateKey[row.state])}</span>
+                  {row.kind === 'show' && <p>{t('requests.showAccess')}</p>}
                   {row.labelMayRemain && (
                     <span>
                       {t(

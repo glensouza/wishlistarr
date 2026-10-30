@@ -38,6 +38,7 @@ export type SearchPage = {
 }
 
 export type RequestedTitle = {
+  seasons?: RequestSeason[]
   id: number
   state: string
   requestCount: number
@@ -73,10 +74,15 @@ export const searchTitles = (
 export async function requestTitle(
   kind: SearchItem['kind'],
   tmdbId: number,
+  seasons?: number[],
 ): Promise<RequestedTitle> {
   const { status, body } = await requestWithStatus<
     Omit<RequestedTitle, 'alreadyAsked'>
-  >('POST', '/api/v1/kid/requests', { kind, tmdbId })
+  >('POST', '/api/v1/kid/requests', {
+    kind,
+    tmdbId,
+    ...(seasons ? { seasons } : {}),
+  })
   return { ...body, alreadyAsked: status !== 201 }
 }
 
@@ -111,6 +117,13 @@ export type TitleCastMember = {
   profileUrl: string | null
 }
 
+export type RequestSeason = {
+  requested: boolean
+  number: number
+  availability: 'unknown' | 'missing' | 'partial' | 'available'
+  availableEpisodes: number
+}
+
 export type TitleSeason = {
   number: number
   name: string | null
@@ -121,6 +134,7 @@ export type TitleSeason = {
 }
 
 export type TitleRequestState = {
+  seasons?: RequestSeason[]
   state: string
   requestCount: number
 }

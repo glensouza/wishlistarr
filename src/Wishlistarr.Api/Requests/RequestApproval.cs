@@ -202,7 +202,7 @@ public sealed partial class RequestApproval(
         RequestState state = moved.Request?.State ?? RequestState.Failed;
         return new DecisionItem(
             request.Id,
-            state == RequestState.Labeled ? DecisionStatus.Succeeded : DecisionStatus.Failed,
+            state is RequestState.Labeled or RequestState.Monitoring ? DecisionStatus.Succeeded : DecisionStatus.Failed,
             state);
     }
 
@@ -238,7 +238,7 @@ public sealed partial class RequestApproval(
     private static DecisionItem Settled(int id, RequestState state, bool approving)
     {
         bool same = approving
-            ? state is RequestState.Approved or RequestState.Fulfilling or RequestState.Available or RequestState.Labeled
+            ? state is RequestState.Approved or RequestState.Fulfilling or RequestState.Available or RequestState.Labeled or RequestState.Monitoring
             : state == RequestState.Denied;
         return new DecisionItem(id, same ? DecisionStatus.AlreadyDecided : DecisionStatus.Conflict, state);
     }

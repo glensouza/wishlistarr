@@ -118,7 +118,8 @@ public sealed partial class RequestAccess(
                 countsTowardAllowance: false,
                 ct: ct,
                 reason: GrantReason,
-                mergeExisting: false);
+                mergeExisting: false,
+                downloadRequested: false);
             if (created is not { Outcome: RequestOutcome.Created or RequestOutcome.Unchanged, Request: MediaRequest stored })
             {
                 return new GrantItem(GrantStatus.ProfileNotFound, null);
@@ -127,7 +128,7 @@ public sealed partial class RequestAccess(
             open = stored;
         }
 
-        if (open.State == RequestState.Labeled)
+        if (open.State is RequestState.Labeled or RequestState.Monitoring)
         {
             return new GrantItem(GrantStatus.AlreadyGranted, open);
         }
@@ -164,7 +165,7 @@ public sealed partial class RequestAccess(
     public async Task<IReadOnlySet<int>> RevocableAsync(IReadOnlyList<MediaRequest> rows, CancellationToken ct = default)
     {
         HashSet<int> revocable = [.. rows
-            .Where(request => request.State == RequestState.Labeled || (request.State == RequestState.Available && this.IsStuck(request)))
+            .Where(request => request.State == RequestState.Labeled || request.State == RequestState.Monitoring || (request.State == RequestState.Available && this.IsStuck(request)))
             .Select(request => request.Id)];
         List<MediaRequest> failed = [.. rows.Where(request => request.State == RequestState.Failed)];
         if (failed.Count > 0)
@@ -239,7 +240,7 @@ public sealed partial class RequestAccess(
 
         bool revocable = request.State switch
         {
-            RequestState.Labeled or RequestState.Failed => true,
+            RequestState.Labeled or RequestState.Monitoring or RequestState.Failed => true,
             RequestState.Available => this.IsStuck(request),
             _ => false,
         };
@@ -418,7 +419,7 @@ public sealed partial class RequestAccess(
         {
             return request.State switch
             {
-                RequestState.Labeled => new GrantItem(GrantStatus.AlreadyGranted, request),
+                RequestState.Labeled or RequestState.Monitoring => new GrantItem(GrantStatus.AlreadyGranted, request),
                 RequestState.Available => new GrantItem(GrantStatus.InProgress, request),
                 _ => new GrantItem(GrantStatus.Conflict, request),
             };
@@ -440,7 +441,7 @@ public sealed partial class RequestAccess(
         await transaction.CommitAsync(CancellationToken.None);
 
         RequestLabelResult labeled = await labeling.LabelLockedAsync(moved.Id, items, profile, system, GrantSource);
-        return labeled.Result is { Request.State: RequestState.Labeled, Request: MediaRequest done }
+        return labeled.Result is { Request.State: RequestState.Labeled or RequestState.Monitoring, Request: MediaRequest done }
             ? new GrantItem(GrantStatus.Granted, done, labeled.LabelNotOwned)
             : new GrantItem(GrantStatus.Unavailable, labeled.Result.Request ?? moved);
     }
@@ -490,7 +491,7 @@ public sealed partial class RequestAccess(
 
     private static GrantItem Settled(RequestResult result, MediaRequest request) => result.Request?.State switch
     {
-        RequestState.Labeled => new GrantItem(GrantStatus.AlreadyGranted, result.Request),
+        RequestState.Labeled or RequestState.Monitoring => new GrantItem(GrantStatus.AlreadyGranted, result.Request),
         null => new GrantItem(GrantStatus.Conflict, request),
         _ => new GrantItem(GrantStatus.Conflict, result.Request),
     };

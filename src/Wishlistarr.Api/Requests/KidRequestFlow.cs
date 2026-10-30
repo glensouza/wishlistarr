@@ -21,6 +21,7 @@ public enum KidRequestOutcome
     AllowanceUsed,
     TitleNotFound,
     ProfileNotFound,
+    InvalidSeasons,
 }
 
 public sealed record KidRequestResult(KidRequestOutcome Outcome, MediaRequest? Request = null, DateTimeOffset? AllowanceResetsAt = null);
@@ -34,6 +35,8 @@ public sealed partial class KidRequestFlow(
     LibraryLookup library,
     RequestLabeling labeling,
     RequestApproval approval,
+    RequestDispatch dispatch,
+    RequestLocks locks,
     SettingsStore settings,
     INotificationTrigger notifications,
     TimeProvider time,
@@ -64,7 +67,7 @@ public sealed partial class KidRequestFlow(
         }
     }
 
-    public async Task<KidRequestResult> SubmitAsync(int kidProfileId, TitleKey title, CancellationToken ct = default)
+    public async Task<KidRequestResult> SubmitAsync(int kidProfileId, TitleKey title, CancellationToken ct = default, IReadOnlyList<int>? seasons = null)
     {
         KidProfile? profile = await db.KidProfiles.AsNoTracking()
             .FirstWithContentRulesAsync(row => row.Id == kidProfileId && row.ArchivedAt == null, ct);
@@ -77,6 +80,12 @@ public sealed partial class KidRequestFlow(
         if (evaluation is null)
         {
             return new KidRequestResult(KidRequestOutcome.TitleNotFound);
+        }
+
+        if (seasons is not null && (title.Kind != MediaKind.Show || evaluation.Details?.Seasons is not { } known
+            || seasons.Any(number => known.All(season => season.SeasonNumber != number))))
+        {
+            return new KidRequestResult(KidRequestOutcome.InvalidSeasons);
         }
 
         string name = evaluation.Name;
@@ -101,47 +110,55 @@ public sealed partial class KidRequestFlow(
         bool counts = !instant;
 
         RequestResult result;
-        await using (IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct))
+        int? existingId = await db.MediaRequests.Where(request => request.KidProfileId == kidProfileId
+            && request.Kind == title.Kind && request.TmdbId == title.TmdbId
+            && request.State != RequestState.Denied && request.State != RequestState.Revoked)
+            .Select(request => (int?)request.Id).FirstOrDefaultAsync(ct);
+        using (IDisposable? held = existingId is int id ? await locks.AcquireAsync(id, ct) : null)
         {
-            if (!revokedBefore && await this.WasRevokedAsync(profile.Id, title, ct))
+            await using (IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct))
             {
-                // A parent revoked the title after the checks above, so this request waits for a parent too.
-                instant = false;
-                autoNow = false;
-                counts = true;
-            }
-
-            bool open = await db.MediaRequests.AnyAsync(
-                request => request.KidProfileId == profile.Id
-                    && request.Kind == title.Kind
-                    && request.TmdbId == title.TmdbId
-                    && request.State != RequestState.Denied
-                    && request.State != RequestState.Revoked,
-                ct);
-            if (!open && counts && profile.WeeklyAllowance is int allowance)
-            {
-                TimeZoneInfo zone = await this.GetTimeZoneAsync(ct);
-                DateTimeOffset now = time.GetUtcNow();
-                if (await this.CountThisWeekAsync(profile.Id, allowance, AllowanceWeek.StartOf(now, zone), ct) >= allowance)
+                if (!revokedBefore && await this.WasRevokedAsync(profile.Id, title, ct))
                 {
-                    return new KidRequestResult(KidRequestOutcome.AllowanceUsed, AllowanceResetsAt: AllowanceWeek.NextStart(now, zone));
+                    // A parent revoked the title after the checks above, so this request waits for a parent too.
+                    instant = false;
+                    autoNow = false;
+                    counts = true;
                 }
-            }
 
-            result = await requests.CreateAsync(
-                profile.Id,
-                title,
-                name,
-                RequestActor.Kid(profile.Id, profile.Name),
-                countsTowardAllowance: counts,
-                ct);
-            if (result.Outcome == RequestOutcome.Created && instant)
-            {
-                await requests.TransitionAsync(result.Request!.Id, RequestState.Approved, InstantLabelActor, "Allowed and already in the library.", ct);
-                await requests.TransitionAsync(result.Request.Id, RequestState.Available, InstantLabelActor, ct: ct);
-            }
+                bool open = await db.MediaRequests.AnyAsync(
+                    request => request.KidProfileId == profile.Id
+                        && request.Kind == title.Kind
+                        && request.TmdbId == title.TmdbId
+                        && request.State != RequestState.Denied
+                        && request.State != RequestState.Revoked,
+                    ct);
+                if (!open && counts && profile.WeeklyAllowance is int allowance)
+                {
+                    TimeZoneInfo zone = await this.GetTimeZoneAsync(ct);
+                    DateTimeOffset now = time.GetUtcNow();
+                    if (await this.CountThisWeekAsync(profile.Id, allowance, AllowanceWeek.StartOf(now, zone), ct) >= allowance)
+                    {
+                        return new KidRequestResult(KidRequestOutcome.AllowanceUsed, AllowanceResetsAt: AllowanceWeek.NextStart(now, zone));
+                    }
+                }
 
-            await transaction.CommitAsync(ct);
+                result = await requests.CreateAsync(
+                    profile.Id,
+                    title,
+                    name,
+                    RequestActor.Kid(profile.Id, profile.Name),
+                    countsTowardAllowance: counts,
+                    ct,
+                    seasons: seasons);
+                if (result.Outcome == RequestOutcome.Created && instant)
+                {
+                    await requests.TransitionAsync(result.Request!.Id, RequestState.Approved, InstantLabelActor, "Allowed and already in the library.", ct);
+                    await requests.TransitionAsync(result.Request.Id, RequestState.Available, InstantLabelActor, ct: ct);
+                }
+
+                await transaction.CommitAsync(ct);
+            }
         }
 
         if (result is not { Outcome: RequestOutcome.Created or RequestOutcome.Merged, Request: MediaRequest request })
@@ -151,6 +168,11 @@ public sealed partial class KidRequestFlow(
 
         if (result.Outcome == RequestOutcome.Merged)
         {
+            if (request.State is RequestState.Fulfilling or RequestState.Monitoring && request.DispatchedAt is null)
+            {
+                await dispatch.StartAsync();
+            }
+
             return new KidRequestResult(KidRequestOutcome.Merged, request);
         }
 

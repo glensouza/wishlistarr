@@ -75,6 +75,7 @@ public static class AppMetrics
         RequestState.Denied => "denied",
         RequestState.Fulfilling => "fulfilling",
         RequestState.Available => "available",
+        RequestState.Monitoring => "monitoring",
         RequestState.Labeled => "labeled",
         _ => "failed",
     };

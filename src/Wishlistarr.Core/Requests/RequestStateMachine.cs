@@ -8,6 +8,7 @@ public enum RequestState
     Fulfilling,
     Available,
     Labeled,
+    Monitoring,
     Failed,
     Revoked,
 }
@@ -30,6 +31,10 @@ public static class RequestStateMachine
         new(RequestState.Fulfilling, RequestState.Available, SystemOnly),
         new(RequestState.Fulfilling, RequestState.Failed, SystemOnly),
         new(RequestState.Available, RequestState.Labeled, SystemOnly),
+        new(RequestState.Available, RequestState.Monitoring, SystemOnly),
+        new(RequestState.Monitoring, RequestState.Labeled, SystemOnly),
+        new(RequestState.Monitoring, RequestState.Revoked, ParentOnly),
+        new(RequestState.Labeled, RequestState.Monitoring, SystemOnly),
         new(RequestState.Available, RequestState.Failed, SystemOnly),
         new(RequestState.Available, RequestState.Revoked, ParentOnly),
         new(RequestState.Labeled, RequestState.Revoked, ParentOnly),

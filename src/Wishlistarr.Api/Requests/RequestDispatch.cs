@@ -19,6 +19,7 @@ public sealed class RequestDispatchJob(RequestDispatch dispatch) : IBackgroundJo
 public sealed partial class RequestDispatch(
     WishlistarrDbContext db,
     MediaRequests requests,
+    RequestLocks locks,
     FulfilmentMode mode,
     ISeerrBackend seerr,
     ArrBackends arr,
@@ -65,7 +66,8 @@ public sealed partial class RequestDispatch(
             List<int> ids = await db.MediaRequests.AsNoTracking()
                 .Where(request => !skip.Contains(request.Id)
                     && (request.State == RequestState.Approved
-                        || (request.State == RequestState.Fulfilling && request.DispatchedAt == null)))
+                        || ((request.State == RequestState.Fulfilling || (request.State == RequestState.Monitoring && request.DownloadRequested
+                            && request.Seasons.Any(season => (request.AllSeasons || season.Requested) && season.Availability != SeasonAvailability.Available))) && request.DispatchedAt == null)))
                 .OrderBy(request => request.Id)
                 .Select(request => request.Id)
                 .Take(BatchSize)
@@ -148,6 +150,7 @@ public sealed partial class RequestDispatch(
 
     private async Task DispatchOneAsync(int id, CancellationToken ct)
     {
+        using IDisposable held = await locks.AcquireAsync(id, ct);
         MediaRequest? request = await this.LoadDispatchableAsync(id, ct);
         if (request is null)
         {
@@ -181,11 +184,16 @@ public sealed partial class RequestDispatch(
         int? externalId;
         try
         {
-            externalId = await this.SendAsync(chosen, request.Kind, request.TmdbId, ct);
+            externalId = await this.SendAsync(chosen, request.Kind, request.TmdbId, request.AllSeasons ? null : request.Seasons.Where(season => season.Requested).Select(season => season.Number).ToArray(), ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             this.LogDispatchFailed(ex, id, chosen);
+            if (request.State == RequestState.Monitoring)
+            {
+                return;
+            }
+
             await requests.TransitionAsync(
                 id,
                 RequestState.Failed,
@@ -198,32 +206,36 @@ public sealed partial class RequestDispatch(
         // The title is with the backend before this is saved. If the process stops in between, the request is still approved and the next run finds the title there instead of adding it again.
         DateTimeOffset now = time.GetUtcNow();
         await db.MediaRequests
-            .Where(row => row.Id == id && (row.State == RequestState.Approved || row.State == RequestState.Fulfilling))
+            .Where(row => row.Id == id && (row.State == RequestState.Approved || row.State == RequestState.Fulfilling || row.State == RequestState.Monitoring))
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(row => row.DispatchedAt, now)
                     .SetProperty(row => row.ExternalId, row => externalId ?? row.ExternalId)
                     .SetProperty(row => row.Version, row => row.Version + 1),
                 CancellationToken.None);
-        await requests.TransitionAsync(id, RequestState.Fulfilling, RequestActor.System(Component), ct: CancellationToken.None, expectedFrom: request.State);
+        if (request.State != RequestState.Monitoring)
+        {
+            await requests.TransitionAsync(id, RequestState.Fulfilling, RequestActor.System(Component), ct: CancellationToken.None, expectedFrom: request.State);
+        }
     }
 
     private async Task<MediaRequest?> LoadDispatchableAsync(int id, CancellationToken ct) =>
-        await db.MediaRequests.AsNoTracking().FirstOrDefaultAsync(
+        await db.MediaRequests.AsNoTracking().Include(request => request.Seasons).FirstOrDefaultAsync(
             row => row.Id == id
-                && (row.State == RequestState.Approved || (row.State == RequestState.Fulfilling && row.DispatchedAt == null)),
+                && (row.State == RequestState.Approved || ((row.State == RequestState.Fulfilling || (row.State == RequestState.Monitoring && row.DownloadRequested
+                    && row.Seasons.Any(season => (row.AllSeasons || season.Requested) && season.Availability != SeasonAvailability.Available))) && row.DispatchedAt == null)),
             ct);
 
-    private async Task<int?> SendAsync(FulfilmentBackend backend, MediaKind kind, int tmdbId, CancellationToken ct)
+    private async Task<int?> SendAsync(FulfilmentBackend backend, MediaKind kind, int tmdbId, IReadOnlyList<int>? seasons, CancellationToken ct)
     {
         if (backend == FulfilmentBackend.Seerr)
         {
-            SeerrSubmission submitted = await seerr.SubmitAsync(new SeerrSubmitRequest(kind, tmdbId, null), ct);
+            SeerrSubmission submitted = await seerr.SubmitAsync(new SeerrSubmitRequest(kind, tmdbId, seasons), ct);
             return submitted.Id;
         }
 
         ArrService service = kind == MediaKind.Show ? ArrService.Sonarr : ArrService.Radarr;
-        FulfilmentResult result = await arr.Get(service).FulfilAsync(new FulfilmentRequest(kind, tmdbId, []), ct);
+        FulfilmentResult result = await arr.Get(service).FulfilAsync(new FulfilmentRequest(kind, tmdbId, seasons ?? []), ct);
         return result.ArrId > 0 ? result.ArrId : null;
     }
 

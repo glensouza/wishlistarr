@@ -30,6 +30,7 @@ Wishlistarr can fulfil approved requests by adding titles directly to Sonarr (TV
 - The `wishlistarr` tag is created in the backend when it does not exist (matched case-insensitively) and is put on every title Wishlistarr touches.
 - A title already in Sonarr or Radarr is never added again. It is set to monitored, tagged, and searched (a season search for each requested season, or a movie search when the movie has no file yet).
 - A new show is added with the chosen profile, root folder and tags, only the requested seasons monitored, and a search when it is added.
+- Every selected season must be present in Sonarr's lookup, and also in its stored series when reusing one. If even one is missing, the attempt fails before updating the show or queuing season searches. A fresh lookup can list a newly announced season before the stored series has refreshed it. A monitored request keeps its unsent selection and retries until Sonarr's metadata catches up; it is never marked dispatched after sending only the older seasons. This follows Sonarr's separate [stored series read](https://github.com/Sonarr/Sonarr/blob/develop/src/Sonarr.Api.V3/Series/SeriesController.cs) and [season metadata refresh](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Tv/RefreshSeriesService.cs).
 - A new movie is added monitored with the chosen profile, root folder and tags, and a search when it is added.
 
 - An empty list of seasons means the whole show: every season except specials (season 0).

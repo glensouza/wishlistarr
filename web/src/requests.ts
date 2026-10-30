@@ -8,6 +8,7 @@ export type RequestState =
   | 'fulfilling'
   | 'available'
   | 'labeled'
+  | 'monitoring'
   | 'failed'
   | 'revoked'
 
@@ -25,6 +26,11 @@ export type ParentRequest = {
   canRevoke: boolean
   labelMayRemain: boolean
   canRetry: boolean
+  seasons?: {
+    number: number
+    availability: 'unknown' | 'missing' | 'partial' | 'available'
+    availableEpisodes: number
+  }[]
   dispatchFailure: 'notConfigured' | 'unavailable' | null
 }
 
@@ -62,7 +68,7 @@ export const listRequests = (
 ) =>
   request<RequestPage>(
     'GET',
-    `${base}?state=${state}&limit=${limit}&offset=${offset}`,
+    `${base}?state=${state}&limit=${limit}&offset=${offset}${state === 'labeled' ? '&includeMonitoring=true' : ''}`,
   )
 
 export const approveRequests = (ids: number[], reason: string | null) =>

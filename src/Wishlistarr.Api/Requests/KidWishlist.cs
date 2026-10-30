@@ -74,7 +74,7 @@ public sealed partial class KidWishlist(
     public static KidWishState ToWishState(RequestState state) => state switch
     {
         RequestState.Approved or RequestState.Fulfilling => KidWishState.OnTheWay,
-        RequestState.Available or RequestState.Labeled => KidWishState.Ready,
+        RequestState.Available or RequestState.Labeled or RequestState.Monitoring => KidWishState.Ready,
         RequestState.Denied => KidWishState.Denied,
         _ => KidWishState.Waiting,
     };

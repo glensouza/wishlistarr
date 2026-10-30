@@ -21,10 +21,12 @@ const requestLabels: Record<string, MessageKey> = {
   fulfilling: 'details.onTheWay',
   available: 'details.ready',
   labeled: 'details.added',
+  monitoring: 'details.monitoring',
   failed: 'details.failedRequest',
 }
 
-const askable = (state: string | null) => state === null || state === 'denied'
+const askable = (state: string | null) =>
+  state === null || state === 'denied' || state === 'revoked'
 
 function parseRoute(kind: string | undefined, rawId: string | undefined) {
   if (kind !== 'movie' && kind !== 'show') return null
@@ -122,9 +124,12 @@ function TitleScreen() {
 
   const shown = title
   const state = request?.state ?? null
+  const seasonRequests = request?.seasons ?? []
+  const canAskSeason =
+    title.kind === 'show' && (state === 'monitoring' || state === 'labeled')
   const label: MessageKey = asking
     ? 'details.asking'
-    : askable(state)
+    : askable(state) || canAskSeason
       ? 'details.ask'
       : (requestLabels[state ?? ''] ?? 'details.failedRequest')
   const seasons = title.seasons
@@ -138,16 +143,26 @@ function TitleScreen() {
     setAsking(true)
     setAskError(null)
     try {
-      const made = await requestTitle(shown.kind, shown.tmdbId)
-      setRequest({ state: made.state, requestCount: made.requestCount })
+      const made = await requestTitle(
+        shown.kind,
+        shown.tmdbId,
+        shown.kind === 'show' && selected ? [selected.number] : undefined,
+      )
+      setRequest({
+        state: made.state,
+        requestCount: made.requestCount,
+        seasons: made.seasons,
+      })
     } catch (error) {
       const status = error instanceof ApiError ? error.status : 0
       setAskError(
-        status === 422
-          ? 'details.notAllowed'
-          : status === 429
-            ? 'details.allowance'
-            : 'details.requestFailed',
+        status === 400 && shown.kind === 'show'
+          ? 'details.seasonUnavailable'
+          : status === 422
+            ? 'details.notAllowed'
+            : status === 429
+              ? 'details.allowance'
+              : 'details.requestFailed',
       )
     } finally {
       setAsking(false)
@@ -202,7 +217,18 @@ function TitleScreen() {
           <button
             type="button"
             className="title-ask"
-            disabled={asking || !askable(state)}
+            disabled={
+              asking ||
+              (!askable(state) &&
+                !(
+                  canAskSeason &&
+                  selected &&
+                  !seasonRequests.some(
+                    (season) =>
+                      season.number === selected.number && season.requested,
+                  )
+                ))
+            }
             onClick={() => void ask()}
           >
             {t(label)}
@@ -239,6 +265,26 @@ function TitleScreen() {
             <div className="season-panel">
               <Artwork src={selected.posterUrl} className="season-poster" />
               <h3>{seasonName(selected, t)}</h3>
+              {seasonRequests.find(
+                (season) => season.number === selected.number,
+              ) && (
+                <p role="status">
+                  {t(
+                    (
+                      {
+                        unknown: 'details.seasonUnknown',
+                        missing: 'details.seasonMissing',
+                        partial: 'details.seasonPartial',
+                        available: 'details.seasonAvailable',
+                      } as const
+                    )[
+                      seasonRequests.find(
+                        (season) => season.number === selected.number,
+                      )!.availability
+                    ],
+                  )}
+                </p>
+              )}
               {selected.overview && <p>{selected.overview}</p>}
               <p>
                 {selected.episodeCount === 1

@@ -4,6 +4,7 @@ using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.System;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Fulfilment;
+using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
 
@@ -37,10 +38,17 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
         bool countsTowardAllowance = false,
         CancellationToken ct = default,
         string? reason = null,
-        bool mergeExisting = true)
+        bool mergeExisting = true,
+        IReadOnlyList<int>? seasons = null,
+        bool downloadRequested = true)
     {
         ValidateActor(actor);
         ValidateReason(reason);
+        if (seasons is not null && (title.Kind != MediaKind.Show || seasons.Count is < 1 or > 200 || seasons.Any(number => number < 0) || seasons.Distinct().Count() != seasons.Count))
+        {
+            throw new ArgumentException("Choose distinct TV season numbers.", nameof(seasons));
+        }
+
         if (title.TmdbId <= 0)
         {
             throw new ArgumentException("TMDB ids are positive.", nameof(title));
@@ -92,6 +100,39 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
                 await db.Entry(existing).ReloadAsync(ct);
                 if (merged == 1)
                 {
+                    if (title.Kind == MediaKind.Show)
+                    {
+                        await db.Entry(existing).Collection(request => request.Seasons).LoadAsync(ct);
+                        bool enabledDownloads = downloadRequested && !existing.DownloadRequested;
+                        bool broadened = seasons is null && !existing.AllSeasons;
+                        int[] added = [.. (seasons ?? []).Where(number => existing.Seasons.All(season => season.Number != number || !season.Requested))];
+                        foreach (int number in added)
+                        {
+                            MediaRequestSeason? season = existing.Seasons.SingleOrDefault(season => season.Number == number);
+                            if (season is null)
+                            {
+                                existing.Seasons.Add(new MediaRequestSeason { Number = number, Requested = true });
+                            }
+                            else
+                            {
+                                season.Requested = true;
+                            }
+                        }
+
+                        if (added.Length > 0 || broadened || enabledDownloads)
+                        {
+                            existing.AllSeasons = enabledDownloads ? seasons is null : existing.AllSeasons || broadened;
+                            existing.DispatchedAt = null;
+                            existing.DownloadRequested |= downloadRequested;
+                            existing.Version++;
+                            await db.SaveChangesAsync(ct);
+                            if (existing.State == RequestState.Labeled)
+                            {
+                                return (await this.TransitionAsync(existing.Id, RequestState.Monitoring, RequestActor.System("season-request"), ct: ct)) with { Outcome = RequestOutcome.Merged };
+                            }
+                        }
+                    }
+
                     return new RequestResult(RequestOutcome.Merged, existing);
                 }
 
@@ -105,6 +146,8 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
                 TmdbId = title.TmdbId,
                 Title = titleName.Trim(),
                 TitleFetchedAt = now,
+                AllSeasons = seasons is null,
+                DownloadRequested = downloadRequested,
                 State = RequestState.Pending,
                 RequestCount = 1,
                 CountsTowardAllowance = countsTowardAllowance,
@@ -112,6 +155,11 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
                 LastRequestedAt = now,
                 StateChangedAt = now,
             };
+            if (seasons is not null)
+            {
+                created.Seasons.AddRange(seasons.Select(number => new MediaRequestSeason { Number = number, Requested = true }));
+            }
+
             MediaRequestEvent item = NewEvent(null, RequestState.Pending, actor, reason, now);
             created.Events.Add(item);
             db.MediaRequests.Add(created);
