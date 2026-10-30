@@ -885,6 +885,8 @@ public sealed class RequestApprovalTests
 
         public Task<IReadOnlyList<MediaItem>> FindByGuidAsync(string guid, CancellationToken ct = default) => inner.FindByGuidAsync(guid, ct);
 
+        public Task<IReadOnlyList<MediaSeason>> GetSeasonsAsync(string showId, CancellationToken ct = default) => inner.GetSeasonsAsync(showId, ct);
+
         public Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default) => inner.GetLabelsAsync(itemId, ct);
 
         public Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default) =>

@@ -293,6 +293,35 @@ internal sealed partial class PlexMediaServer(
             ct);
     }
 
+    public async Task<IReadOnlyList<MediaSeason>> GetSeasonsAsync(string showId, CancellationToken ct = default)
+    {
+        if (!IsValidKey(showId))
+        {
+            throw new MediaServerException("The Plex show cannot be read.");
+        }
+
+        return await this.WithServerAsync<IReadOnlyList<MediaSeason>>(
+            async (server, token) =>
+            {
+                List<MediaSeason> seasons = [];
+                int pageSize = Math.Max(1, options.Value.PageSize);
+                for (int start = 0; ; start += pageSize)
+                {
+                    PlexContainer page = await servers.GetChildrenAsync(server, showId, start, pageSize, token);
+                    IReadOnlyList<PlexMetadata> items = page.Metadata ?? [];
+                    seasons.AddRange(items.Where(item => item.Type == "season" && item.ParentRatingKey == showId && item.Index >= 0)
+                        .Select(item => new MediaSeason(item.Index!.Value, Math.Max(0, item.LeafCount ?? 0))));
+                    if (items.Count < pageSize || (page.TotalSize is int total && start + items.Count >= total))
+                    {
+                        break;
+                    }
+                }
+
+                return seasons;
+            },
+            ct);
+    }
+
     public async Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default)
     {
         if (!IsValidKey(item.Id) || !IsValidKey(item.LibraryId))

@@ -44,7 +44,7 @@ public static class KidRequestEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
             }
 
-            List<MediaRequest> rows = await db.MediaRequests.AsNoTracking()
+            List<MediaRequest> rows = await db.MediaRequests.AsNoTracking().Include(request => request.Seasons)
                 .Where(request => request.KidProfileId == profileId)
                 .OrderByDescending(request => request.Id)
                 .ToListAsync(ct);
@@ -99,10 +99,16 @@ public static class KidRequestEndpoints
                 return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first.");
             }
 
+            if (body.Seasons is { } seasons && (kind != MediaKind.Show || seasons.Count is < 1 or > 200
+                || seasons.Any(number => number < 0) || seasons.Distinct().Count() != seasons.Count))
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Choose distinct TV season numbers.");
+            }
+
             KidRequestResult result;
             try
             {
-                result = await flow.SubmitAsync(profileId, new TitleKey(kind, tmdbId), ct);
+                result = await flow.SubmitAsync(profileId, new TitleKey(kind, tmdbId), ct, body.Seasons);
             }
             catch (TmdbNotConfiguredException)
             {
@@ -127,6 +133,7 @@ public static class KidRequestEndpoints
                     title: "You've used all your requests for this week.",
                     detail: "You can ask for more when the new week starts.",
                     extensions: new Dictionary<string, object?> { ["code"] = AllowanceUsedCode, ["resetsAt"] = result.AllowanceResetsAt }),
+                KidRequestOutcome.InvalidSeasons => Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Choose seasons listed for this show."),
                 KidRequestOutcome.TitleNotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "We couldn't find that one."),
                 _ => Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first."),
             };
@@ -151,10 +158,16 @@ public static class KidRequestEndpoints
         Results.Problem(statusCode: status, title: "Requests aren't working right now.", detail: "Try again in a little while.");
 }
 
-public sealed record KidRequestBody(MediaKind? Kind, int? TmdbId);
+public sealed record KidRequestBody(MediaKind? Kind, int? TmdbId, IReadOnlyList<int>? Seasons = null);
 
-public sealed record KidRequestResponse(int Id, MediaKind Kind, int TmdbId, string Title, RequestState State, int RequestCount, string? DenialReason)
+public sealed record KidRequestResponse(int Id, MediaKind Kind, int TmdbId, string Title, RequestState State, int RequestCount, string? DenialReason, IReadOnlyList<RequestSeasonResponse> Seasons)
 {
     public static KidRequestResponse From(MediaRequest request, string title, string? denialReason) =>
-        new(request.Id, request.Kind, request.TmdbId, title, request.State, request.RequestCount, denialReason);
+        new(request.Id, request.Kind, request.TmdbId, title, request.State, request.RequestCount, denialReason, RequestSeasonResponse.From(request));
+}
+
+public sealed record RequestSeasonResponse(int Number, SeasonAvailability Availability, int AvailableEpisodes, bool Requested)
+{
+    public static IReadOnlyList<RequestSeasonResponse> From(MediaRequest request) =>
+        [.. request.Seasons.OrderBy(season => season.Number).Select(season => new RequestSeasonResponse(season.Number, season.Availability, season.AvailableEpisodes, season.Requested))];
 }

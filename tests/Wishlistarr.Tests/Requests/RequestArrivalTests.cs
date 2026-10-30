@@ -56,7 +56,7 @@ public sealed class RequestArrivalTests
 
         Arrive(factory, key, kind);
         await SendWebhookAsync(factory, parent, source, key, 2);
-        await factory.WaitForAsync(id, RequestState.Labeled);
+        await factory.WaitForAsync(id, kind == MediaKind.Show ? RequestState.Monitoring : RequestState.Labeled);
         await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
 
         OwnedLabel label = Assert.Single(await factory.GetLedgerAsync());
@@ -72,7 +72,7 @@ public sealed class RequestArrivalTests
         await SendWebhookAsync(factory, parent, source, key, 3);
         await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
         Assert.Equal(writes, factory.LabelWrites);
-        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == (kind == MediaKind.Show ? RequestState.Monitoring : RequestState.Labeled));
         Assert.Single(await factory.GetLedgerAsync());
     }
 
@@ -90,7 +90,7 @@ public sealed class RequestArrivalTests
 
         factory.Time.Advance(TimeSpan.FromMinutes(5));
         await factory.Services.GetRequiredService<JobScheduler>().RunDueAsync();
-        await factory.WaitForAsync(id, RequestState.Labeled);
+        await factory.WaitForAsync(id, kind == MediaKind.Show ? RequestState.Monitoring : RequestState.Labeled);
         await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
 
         OwnedLabel label = Assert.Single(await factory.GetLedgerAsync());
@@ -325,6 +325,11 @@ public sealed class RequestArrivalTests
 
     private static async Task<(HttpClient Parent, HttpClient Kid, int Id, string Key)> DispatchAsync(ArrivalApiFactory factory, string mode, MediaKind kind)
     {
+        if (kind == MediaKind.Show)
+        {
+            factory.Tmdb.SetBody($"/3/tv/{TmdbId(kind)}", $$"""{"id":{{TmdbId(kind)}},"name":"Fixture show","status":"Returning Series","seasons":[{"season_number":1,"episode_count":10}]}""");
+        }
+
         string key = kind == MediaKind.Movie ? "101" : "201";
         factory.Plex.DeleteItem("302");
         factory.Plex.Rematch(key, $"local://{key}", "Waiting for the download");

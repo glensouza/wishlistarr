@@ -202,12 +202,22 @@ public sealed class WishlistarrDbContext(DbContextOptions<WishlistarrDbContext> 
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<MediaRequestSeason>(entity =>
+        {
+            entity.HasKey(season => new { season.MediaRequestId, season.Number });
+            entity.Property(season => season.Availability).HasConversion<string>().HasMaxLength(16);
+            entity.HasOne(season => season.MediaRequest).WithMany(request => request.Seasons)
+                .HasForeignKey(season => season.MediaRequestId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MediaRequest>(entity =>
         {
             entity.Property(request => request.Kind).HasConversion<string>().HasMaxLength(16);
             entity.Property(request => request.State).HasConversion<string>().HasMaxLength(16);
             entity.Property(request => request.Title).HasMaxLength(300);
             entity.Property(request => request.Backend).HasConversion<string>().HasMaxLength(16);
+            entity.Property(request => request.AllSeasons).HasDefaultValue(true).HasSentinel(true);
+            entity.Property(request => request.DownloadRequested).HasDefaultValue(true).HasSentinel(true);
             entity.Property(request => request.Version).IsConcurrencyToken();
             entity.HasIndex(request => new { request.KidProfileId, request.Kind, request.TmdbId })
                 .IsUnique()

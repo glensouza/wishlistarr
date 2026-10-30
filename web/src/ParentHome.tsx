@@ -633,6 +633,16 @@ function QueueCard({
           {noteError}
         </p>
       )}
+      {item.kind === 'show' && (
+        <>
+          <p>{t('requests.showAccess')}</p>
+          {item.seasons?.map((season) => (
+            <p key={season.number}>
+              {t('details.seasonName', { number: season.number })}
+            </p>
+          ))}
+        </>
+      )}
       <div className="approval-actions">
         <button
           type="button"

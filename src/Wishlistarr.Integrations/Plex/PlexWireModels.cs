@@ -66,6 +66,12 @@ internal sealed record PlexMetadata(
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 
+    [JsonPropertyName("index")]
+    public int? Index { get; init; }
+
+    [JsonPropertyName("leafCount")]
+    public int? LeafCount { get; init; }
+
     [JsonPropertyName("updatedAt")]
     public long? UpdatedAt { get; init; }
 

@@ -99,7 +99,7 @@ public sealed class RequestTmdbDataStore(WishlistarrDbContext db, RequestTitles 
 {
     private const int ChunkSize = 200;
 
-    private static readonly RequestState[] OpenStates = [RequestState.Pending, RequestState.Approved, RequestState.Fulfilling];
+    private static readonly RequestState[] OpenStates = [RequestState.Pending, RequestState.Approved, RequestState.Fulfilling, RequestState.Monitoring];
 
     public Type EntityType => typeof(MediaRequest);
 

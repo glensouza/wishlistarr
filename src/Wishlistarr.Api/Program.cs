@@ -106,6 +106,7 @@ builder.Services.AddOptions<ApprovalOptions>()
     .ValidateOnStart();
 builder.Services.AddScoped<RequestLabeling>();
 builder.Services.AddScoped<RequestArrival>();
+builder.Services.AddScoped<RequestSeasons>();
 builder.Services.AddBackgroundJob<RequestArrivalJob>(
     RequestArrivalJob.JobName,
     "Checks dispatched requests in Plex and applies the requesting profile's label.",

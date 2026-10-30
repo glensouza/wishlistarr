@@ -122,7 +122,9 @@ public static class RequestViews
         List<MediaRequestEvent> events = await db.MediaRequestEvents.AsNoTracking()
             .Where(item => db.MediaRequests.Any(request => request.Id == item.MediaRequestId && request.KidProfileId == profileId)
                 && item.ToState != RequestState.Available
-                && item.ToState != RequestState.Fulfilling)
+                && item.ToState != RequestState.Fulfilling
+                && !(item.ToState == RequestState.Labeled && item.FromState == RequestState.Monitoring)
+                && !(item.ToState == RequestState.Monitoring && item.FromState == RequestState.Labeled))
             .OrderByDescending(item => item.Id)
             .Skip(offset)
             .Take(limit)
@@ -163,7 +165,8 @@ public static class RequestViews
         {
             RequestState.Approved => item.ActorKind == RequestActorKind.Parent ? KidHistoryAction.Approved : KidHistoryAction.AutoApproved,
             RequestState.Denied => KidHistoryAction.Denied,
-            RequestState.Labeled => KidHistoryAction.Ready,
+            RequestState.Labeled => item.FromState == RequestState.Monitoring ? null : KidHistoryAction.Ready,
+            RequestState.Monitoring => item.FromState == RequestState.Available ? KidHistoryAction.Ready : null,
             RequestState.Revoked => KidHistoryAction.Revoked,
             RequestState.Failed => KidHistoryAction.Failed,
             _ => null,

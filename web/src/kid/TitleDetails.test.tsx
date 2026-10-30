@@ -37,7 +37,16 @@ type Payload = {
   trailerKey: string | null
   cast: Cast[]
   seasons: Season[]
-  request: { state: string; requestCount: number } | null
+  request: {
+    state: string
+    requestCount: number
+    seasons?: {
+      number: number
+      availability: string
+      availableEpisodes: number
+      requested: boolean
+    }[]
+  } | null
 }
 
 type Call = { method: string; path: string; body: unknown }
@@ -392,13 +401,15 @@ it('lets a kid ask again when the open request was denied', async () => {
   expect(await screen.findByRole('button', { name: 'Ask' })).toBeTruthy()
 })
 
-it('keeps the season choice off the request', async () => {
+it('sends the chosen season with a show request', async () => {
   payload = structuredClone(show)
   const user = userEvent.setup()
   renderAt('/title/show/82728')
 
   expect(
-    await screen.findByText('Access is for the whole show, not one season.'),
+    await screen.findByText(
+      'Choose a season to request. Access in Plex is for the whole show, including future seasons.',
+    ),
   ).toBeTruthy()
   expect(screen.getByText('The first year.')).toBeTruthy()
   expect(screen.getByText('10 episodes')).toBeTruthy()
@@ -425,7 +436,11 @@ it('keeps the season choice off the request', async () => {
 
   await user.click(screen.getByRole('button', { name: 'Ask' }))
   await screen.findByRole('button', { name: 'Asked' })
-  expect(requests()[0].body).toEqual({ kind: 'show', tmdbId: 82728 })
+  expect(requests()[0].body).toEqual({
+    kind: 'show',
+    tmdbId: 82728,
+    seasons: [0],
+  })
 })
 
 it('still explains show access when a show has no seasons', async () => {
@@ -433,7 +448,9 @@ it('still explains show access when a show has no seasons', async () => {
   renderAt('/title/show/82728')
 
   expect(
-    await screen.findByText('Access is for the whole show, not one season.'),
+    await screen.findByText(
+      'Choose a season to request. Access in Plex is for the whole show, including future seasons.',
+    ),
   ).toBeTruthy()
   expect(screen.queryByRole('radio')).toBeNull()
 })
@@ -537,4 +554,57 @@ it('does not use the same words for the library badge and an almost-ready reques
   expect(await screen.findByText('Ready to watch')).toBeTruthy()
   expect(screen.getAllByText('Ready to watch')).toHaveLength(1)
   expect(screen.getByRole('button', { name: 'Almost ready' })).toBeTruthy()
+})
+
+it('shows partial season availability and lets an ongoing show request a newly announced season', async () => {
+  payload = {
+    ...show,
+    request: {
+      state: 'monitoring',
+      requestCount: 1,
+      seasons: [
+        {
+          number: 1,
+          availability: 'partial',
+          availableEpisodes: 3,
+          requested: true,
+        },
+        {
+          number: 2,
+          availability: 'missing',
+          availableEpisodes: 0,
+          requested: false,
+        },
+      ],
+    },
+  } as typeof payload
+  const user = userEvent.setup()
+  renderAt('/title/show/82728')
+  expect(await screen.findByText('Some episodes are ready')).toBeTruthy()
+  expect(
+    (screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled,
+  ).toBe(true)
+  await user.click(screen.getByRole('radio', { name: 'The puppy year' }))
+  expect(screen.getByRole('status').textContent).toBe('Not here yet')
+  await user.click(screen.getByRole('button', { name: 'Ask' }))
+  expect(requests()[0].body).toEqual({
+    kind: 'show',
+    tmdbId: 82728,
+    seasons: [2],
+  })
+})
+
+it('explains when a selected season is no longer listed', async () => {
+  payload = structuredClone(show)
+  requestStatus = 400
+  const user = userEvent.setup()
+  renderAt('/title/show/82728')
+  await user.click(await screen.findByRole('button', { name: 'Ask' }))
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'That season is no longer listed. Refresh this page and choose another.',
+  )
+  expect(
+    (screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled,
+  ).toBe(false)
 })

@@ -21,6 +21,8 @@ public sealed partial class RequestArrival(
     LibraryLookup library,
     IMediaServer server,
     MediaRequests requests,
+    RequestSeasons seasons,
+    RequestDispatch dispatch,
     RequestLabeling labeling,
     RequestLocks locks,
     ILogger<RequestArrival> logger)
@@ -76,14 +78,19 @@ public sealed partial class RequestArrival(
     }
 
     private IQueryable<MediaRequest> Pending() => db.MediaRequests.AsNoTracking()
-        .Where(request => request.DispatchedAt != null
-            && (request.State == RequestState.Approved || request.State == RequestState.Fulfilling || request.State == RequestState.Available)
+        .Where(request => (request.State == RequestState.Monitoring
+                || (request.DispatchedAt != null && (request.State == RequestState.Approved || request.State == RequestState.Fulfilling || request.State == RequestState.Available)))
             && request.KidProfile!.ArchivedAt == null);
 
     private async Task CheckOneAsync(int id, CancellationToken ct)
     {
         using IDisposable held = await locks.AcquireAsync(id, ct);
-        MediaRequest? request = await this.Pending().SingleOrDefaultAsync(row => row.Id == id, ct);
+        if (!await this.Pending().AnyAsync(row => row.Id == id, ct))
+        {
+            return;
+        }
+
+        MediaRequest? request = await requests.GetAsync(id, ct);
         if (request is null)
         {
             return;
@@ -100,6 +107,21 @@ public sealed partial class RequestArrival(
                 // Keep the resolved TMDB id as well as Plex's ids, so a later contradictory TMDB id cannot pass a legacy-only snapshot.
                 expectedItems[match.Id] = current with { ExternalIds = [.. match.ExternalIds.Concat(current.ExternalIds).Distinct()] };
             }
+        }
+
+        bool complete = request.Kind == MediaKind.Show && await seasons.RefreshAsync(request, visible, ct);
+        if (request.State == RequestState.Monitoring)
+        {
+            if (complete)
+            {
+                await requests.TransitionAsync(id, RequestState.Labeled, RequestActor.System(Component), ct: ct, expectedFrom: RequestState.Monitoring);
+            }
+            else if (request.DownloadRequested && request.DispatchedAt is null && request.Seasons.Any(season => (request.AllSeasons || season.Requested) && season.Availability != SeasonAvailability.Available))
+            {
+                await dispatch.StartAsync();
+            }
+
+            return;
         }
 
         if (visible.Count == 0)
@@ -124,7 +146,11 @@ public sealed partial class RequestArrival(
             }
         }
 
-        await labeling.LabelLockedAsync(id, visible, profile, actor, expectedItems: expectedItems);
+        RequestLabelResult labeled = await labeling.LabelLockedAsync(id, visible, profile, actor, expectedItems: expectedItems);
+        if (complete && labeled.Result.Request?.State == RequestState.Monitoring)
+        {
+            await requests.TransitionAsync(id, RequestState.Labeled, actor, ct: ct, expectedFrom: RequestState.Monitoring);
+        }
     }
 
     // An incremental refresh cannot remove deleted items, and Fix Match can keep a rating key while replacing the title.

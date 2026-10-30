@@ -45,7 +45,7 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         this.AddItem(new FakeItem("101", "movie", "plex://movie/5d7768ba96b655001fdc0408", "The Matrix", 1) { GuidIds = ["imdb://tt0133093", "tmdb://603", "tvdb://169"] });
         this.AddItem(new FakeItem("102", "movie", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 1) { GuidIds = ["imdb://tt0245429", "tmdb://129", "tvdb://212"] });
         this.AddItem(new FakeItem("201", "show", "plex://show/5d9c086c46115600200aa2fe", "Bluey", 2) { GuidIds = ["imdb://tt7678620", "tmdb://82728", "tvdb://353546"] });
-        this.AddItem(new FakeItem("2011", "season", "plex://season/602e6a7e8f4d2a002c7b5e10", "Season 1", 2) { ParentRatingKey = "201" });
+        this.AddItem(new FakeItem("2011", "season", "plex://season/602e6a7e8f4d2a002c7b5e10", "Season 1", 2) { ParentRatingKey = "201", Index = 1, LeafCount = 1 });
         this.AddItem(new FakeItem("20111", "episode", "plex://episode/5d9c11ae2df347001e3b1a52", "Magic Xylophone", 2)
         {
             ParentRatingKey = "2011",
@@ -305,6 +305,24 @@ public sealed partial class FakePlexServer : IAsyncDisposable
             return;
         }
 
+        if (path.StartsWith("/library/metadata/", StringComparison.Ordinal) && path.EndsWith("/children", StringComparison.Ordinal) && request.Method == HttpMethods.Get)
+        {
+            string parent = path["/library/metadata/".Length..^"/children".Length];
+            int start = int.TryParse(request.Query.GetValueOrDefault("X-Plex-Container-Start"), out int offset) ? offset : 0;
+            int size = int.TryParse(request.Query.GetValueOrDefault("X-Plex-Container-Size"), out int limit) ? limit : 100;
+            List<FakeItem> children = [.. this.items.Values.Where(item => item.ParentRatingKey == parent && !this.deleted.ContainsKey(item.RatingKey)).OrderBy(item => item.RatingKey)];
+            JsonArray metadata = new([.. children.Skip(start).Take(size).Select(item => (JsonNode)new JsonObject
+            {
+                ["ratingKey"] = item.RatingKey,
+                ["type"] = item.Type,
+                ["parentRatingKey"] = parent,
+                ["index"] = item.Index,
+                ["leafCount"] = item.LeafCount,
+            })]);
+            await WriteAsync(context, new JsonObject { ["MediaContainer"] = new JsonObject { ["size"] = metadata.Count, ["totalSize"] = children.Count, ["offset"] = start, ["Metadata"] = metadata } }.ToJsonString());
+            return;
+        }
+
         if (path.StartsWith("/library/metadata/", StringComparison.Ordinal) && request.Method == HttpMethods.Get)
         {
             await this.HandleMetadataAsync(context, path["/library/metadata/".Length..], request.Query.GetValueOrDefault("includeGuids") == "1");
@@ -550,6 +568,10 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         public string? GrandparentRatingKey { get; init; }
 
         public IReadOnlyList<string> GuidIds { get; init; } = [];
+
+        public int? Index { get; set; }
+
+        public int LeafCount { get; set; }
 
         public long? UpdatedAtUnix { get; set; }
 
