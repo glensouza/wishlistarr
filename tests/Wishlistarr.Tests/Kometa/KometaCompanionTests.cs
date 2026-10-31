@@ -10,6 +10,8 @@ using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Kometa;
 using Wishlistarr.Core.Kometa;
 using Wishlistarr.Data;
+using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 
 namespace Wishlistarr.Tests.Kometa;
@@ -80,6 +82,34 @@ public sealed class KometaCompanionTests(AuthApiFactory factory) : IClassFixture
     }
 
     [Fact]
+    public void Every_collection_disables_label_validation_so_missing_labels_do_not_fail_kometa()
+    {
+        string yaml = KometaCompanion.Generate([new("Ada", "wishlistarr-ada"), new("Beau", "wishlistarr-beau")]);
+
+        Assert.Equal(2, yaml.Split("validate: false", StringSplitOptions.None).Length - 1);
+        JsonNode node = YamlToJsonNode(yaml);
+        foreach (KeyValuePair<string, JsonNode?> collection in node["collections"]!.AsObject())
+        {
+            Assert.False(collection.Value!["smart_filter"]!["validate"]!.GetValue<bool>());
+        }
+    }
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("null")]
+    [InlineData("12345")]
+    [InlineData("0x1F")]
+    [InlineData(".inf")]
+    [InlineData("wishlistarr-ada")]
+    public void Names_and_labels_are_written_as_quoted_strings(string value)
+    {
+        string yaml = KometaCompanion.Generate([new(value, value)]);
+
+        Assert.Contains($"\"{value}\":", yaml, StringComparison.Ordinal);
+        Assert.Contains($"label: \"{value}\"", yaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Tricky_labels_round_trip_through_a_yaml_parser_unchanged()
     {
         List<string> tricky =
@@ -106,6 +136,13 @@ public sealed class KometaCompanionTests(AuthApiFactory factory) : IClassFixture
         }
 
         JsonNode node = YamlToJsonNode(yaml);
+        foreach (KometaProfile profile in profiles)
+        {
+            JsonNode? label = node["collections"]![profile.Name]!["smart_filter"]!["all"]!["label"];
+            Assert.Equal(JsonValueKind.String, label!.GetValueKind());
+            Assert.Equal(profile.PlexLabel, label.GetValue<string>());
+        }
+
         EvaluationResults result = Schema.Value.Evaluate(node, new EvaluationOptions { OutputFormat = OutputFormat.List });
         Assert.True(result.IsValid);
     }
@@ -176,10 +213,35 @@ public sealed class KometaCompanionTests(AuthApiFactory factory) : IClassFixture
 
     private static JsonNode YamlToJsonNode(string yaml)
     {
-        IDeserializer deserializer = new DeserializerBuilder().Build();
-        object? yamlObject = deserializer.Deserialize(new StringReader(yaml));
-        ISerializer jsonSerializer = new SerializerBuilder().JsonCompatible().Build();
-        string json = jsonSerializer.Serialize(yamlObject);
-        return JsonNode.Parse(json)!;
+        YamlStream stream = [];
+        stream.Load(new StringReader(yaml));
+        return ToJson(stream.Documents[0].RootNode)!;
+    }
+
+    private static JsonNode? ToJson(YamlNode node)
+    {
+        switch (node)
+        {
+            case YamlMappingNode mapping:
+                JsonObject obj = [];
+                foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
+                {
+                    obj[((YamlScalarNode)pair.Key).Value!] = ToJson(pair.Value);
+                }
+                return obj;
+            case YamlSequenceNode sequence:
+                return new JsonArray([.. sequence.Children.Select(ToJson)]);
+            case YamlScalarNode { Style: ScalarStyle.Plain } scalar:
+                string text = scalar.Value ?? string.Empty;
+                if (text is "" or "~" or "null") return null;
+                if (text is "true" or "false") return JsonValue.Create(text == "true");
+                if (long.TryParse(text, out long integer)) return JsonValue.Create(integer);
+                if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double number)) return JsonValue.Create(number);
+                return JsonValue.Create(text);
+            case YamlScalarNode quoted:
+                return JsonValue.Create(quoted.Value);
+            default:
+                throw new InvalidOperationException();
+        }
     }
 }
