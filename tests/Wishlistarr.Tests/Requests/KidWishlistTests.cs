@@ -187,7 +187,11 @@ public sealed class KidWishlistTests
     {
         using KidRequestApiFactory factory = new();
         await factory.SetTimeZoneAsync("UTC");
-        factory.SetClock(new DateTimeOffset(2026, 10, 21, 15, 0, 0, TimeSpan.Zero));
+        DateTimeOffset now = factory.Clock.GetUtcNow();
+        int daysUntilWednesday = ((int)DayOfWeek.Wednesday - (int)now.DayOfWeek + 7) % 7;
+        if (daysUntilWednesday == 0) daysUntilWednesday = 7;
+        DateTimeOffset wednesday = new DateTimeOffset(now.Year, now.Month, now.Day, 15, 0, 0, TimeSpan.Zero).AddDays(daysUntilWednesday);
+        factory.SetClock(wednesday);
         (HttpClient ada, int adaId) = await factory.SignInKidAsync(weeklyAllowance: 2);
         (HttpClient beau, int beauId) = await factory.SignInKidAsync("Beau", weeklyAllowance: 1);
         await AddRequestAsync(factory, adaId, 750, "Counts One");
@@ -203,8 +207,8 @@ public sealed class KidWishlistTests
         JsonElement beauUsed = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, beauUsed.GetProperty("remaining").GetInt32());
 
-        // Monday 26 October is the next allowance week and is still inside the seven-day kid session.
-        factory.SetClock(new DateTimeOffset(2026, 10, 26, 15, 0, 0, TimeSpan.Zero));
+        // The next allowance week begins on Monday and is still inside the seven-day kid session.
+        factory.SetClock(wednesday.AddDays(5));
         JsonElement nextWeek = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, nextWeek.GetProperty("remaining").GetInt32());
         JsonElement beauNext = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();

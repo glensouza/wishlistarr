@@ -2,6 +2,7 @@ using Wishlistarr.Api.Backup;
 using Wishlistarr.Api.Fulfilment;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
+using Wishlistarr.Api.Kometa;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.MediaServers;
 using Wishlistarr.Api.Notifications;
@@ -42,6 +43,7 @@ public static class ApiEndpoints
         v1.MapSeerr();
         v1.MapJobs();
         v1.MapLabelGuardian();
+        v1.MapKometa();
         v1.MapBackups();
         v1.MapUpdates();
         v1.MapWebhookSettings();
