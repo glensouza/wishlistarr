@@ -8,17 +8,21 @@ One collection per active kid profile, named after the profile, built as a smart
 
 ```yaml
 collections:
-  Ada:
+  "Ada":
     smart_filter:
       all:
-        label: wishlistarr-ada
-  Beau:
+        label: "wishlistarr-ada"
+      validate: false
+  "Beau":
     smart_filter:
       all:
-        label: wishlistarr-beau
+        label: "wishlistarr-beau"
+      validate: false
 ```
 
-Collections are sorted by profile name. Archived profiles are left out, so their collections disappear from the file the next time Kometa runs. Labels are quoted wherever YAML would otherwise read them as a boolean, a number or something else, so any label Wishlistarr accepts is written back exactly.
+Collections are sorted by profile name. Archived profiles are left out of the file; Kometa does not delete a collection that has dropped out of a file unless you configure it to, so remove old collections in Plex or with Kometa's delete options. Every name and label is written as a quoted string, so any label Wishlistarr accepts is read back exactly.
+
+`validate: false` stops Kometa failing a collection when no item in that library carries the label yet, which is normal for a new profile or a library of the other type.
 
 ## Download
 
