@@ -9,20 +9,20 @@ One collection per active kid profile, named after the profile, built as a smart
 ```yaml
 collections:
   "Ada":
+    ignore_blank_results: true
     smart_filter:
       all:
         label: "wishlistarr-ada"
-      validate: false
   "Beau":
+    ignore_blank_results: true
     smart_filter:
       all:
         label: "wishlistarr-beau"
-      validate: false
 ```
 
-Collections are sorted by profile name. Archived profiles are left out of the file; Kometa does not delete a collection that has dropped out of a file unless you configure it to, so remove old collections in Plex or with Kometa's delete options. Every name and label is written as a quoted string, so any label Wishlistarr accepts is read back exactly.
+Collections are sorted by profile name. Archived profiles are left out of the file; Kometa does not delete a collection that has dropped out of a file unless you configure it to, so remove old collections in Plex or with Kometa's delete options. Every name and label is written as a quoted string (apart from the fixed key words themselves, which are never special in YAML), so any label Wishlistarr accepts is read back exactly.
 
-`validate: false` stops Kometa failing a collection when no item in that library carries the label yet, which is normal for a new profile or a library of the other type.
+`ignore_blank_results: true` is Kometa's option for collections that may match nothing. Without it, a smart filter collection with no matching items, which is normal for a new profile or a library with no labelled items, is reported as failed.
 
 ## Download
 

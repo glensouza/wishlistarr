@@ -82,15 +82,15 @@ public sealed class KometaCompanionTests(AuthApiFactory factory) : IClassFixture
     }
 
     [Fact]
-    public void Every_collection_disables_label_validation_so_missing_labels_do_not_fail_kometa()
+    public void Every_collection_ignores_blank_results_so_unlabelled_libraries_do_not_fail_kometa()
     {
         string yaml = KometaCompanion.Generate([new("Ada", "wishlistarr-ada"), new("Beau", "wishlistarr-beau")]);
 
-        Assert.Equal(2, yaml.Split("validate: false", StringSplitOptions.None).Length - 1);
+        Assert.Equal(2, yaml.Split("ignore_blank_results: true", StringSplitOptions.None).Length - 1);
         JsonNode node = YamlToJsonNode(yaml);
         foreach (KeyValuePair<string, JsonNode?> collection in node["collections"]!.AsObject())
         {
-            Assert.False(collection.Value!["smart_filter"]!["validate"]!.GetValue<bool>());
+            Assert.True(collection.Value!["ignore_blank_results"]!.GetValue<bool>());
         }
     }
 

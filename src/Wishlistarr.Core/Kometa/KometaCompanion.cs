@@ -10,7 +10,7 @@ public sealed record KometaProfile(string Name, string PlexLabel);
 
 public static class KometaCompanion
 {
-    private static readonly HashSet<string> PlainWords = ["collections", "smart_filter", "all", "label", "validate"];
+    private static readonly HashSet<string> PlainWords = ["collections", "smart_filter", "all", "label", "ignore_blank_results"];
 
     public static string Generate(IEnumerable<KometaProfile> profiles)
     {
@@ -24,13 +24,13 @@ public static class KometaCompanion
 
             collections[profile.Name] = new Dictionary<string, object>
             {
+                ["ignore_blank_results"] = true,
                 ["smart_filter"] = new Dictionary<string, object>
                 {
                     ["all"] = new Dictionary<string, object>
                     {
                         ["label"] = profile.PlexLabel,
                     },
-                    ["validate"] = false,
                 },
             };
         }
