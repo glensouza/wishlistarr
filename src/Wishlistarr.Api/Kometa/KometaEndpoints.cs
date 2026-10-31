@@ -17,6 +17,13 @@ public static class KometaEndpoints
         kometa.MapGet("/collections.yml", async (KidProfiles profiles, HttpContext http, CancellationToken ct) =>
         {
             IReadOnlyList<KidProfile> active = await profiles.ListAsync(ct);
+            if (active.Count == 0)
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "There are no active kid profiles to build collections from.");
+            }
+
             string yaml = KometaCompanion.Generate(active.Select(profile => new KometaProfile(profile.Name, profile.PlexLabel)));
 
             http.Response.Headers.CacheControl = "no-store";
@@ -24,6 +31,7 @@ public static class KometaEndpoints
         })
             .WithName("DownloadKometaCollections")
             .WithSummary("Generates a Kometa collection file mapping active kid profiles to Plex smart label collections.")
-            .Produces(StatusCodes.Status200OK, contentType: YamlContentType);
+            .Produces(StatusCodes.Status200OK, contentType: YamlContentType)
+            .ProducesProblem(StatusCodes.Status409Conflict);
     }
 }

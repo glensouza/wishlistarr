@@ -207,8 +207,22 @@ public sealed class KometaCompanionTests(AuthApiFactory factory) : IClassFixture
         Assert.Equal(HttpStatusCode.Forbidden, asKid.StatusCode);
 
         HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        HttpResponseMessage created = await parent.PostAsJsonAsync("/api/v1/kid-profiles", new { name = $"Auth-{Guid.NewGuid():N}"[..14], avatar = "bear" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         HttpResponseMessage asParent = await parent.GetAsync(DownloadPath);
         Assert.Equal(HttpStatusCode.OK, asParent.StatusCode);
+    }
+
+    [Fact]
+    public async Task Endpoint_answers_conflict_instead_of_a_file_kometa_cannot_load_when_there_are_no_profiles()
+    {
+        using AuthApiFactory empty = new();
+        await empty.EnsureParentAsync();
+        HttpClient parent = await empty.CreateAuthorizedClientAsync();
+
+        HttpResponseMessage response = await parent.GetAsync(DownloadPath);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     private static JsonNode YamlToJsonNode(string yaml)

@@ -33,7 +33,7 @@ curl -H "X-Api-Key: <api key>" -o wishlistarr-collections.yml \
   https://wishlistarr.example/api/v1/kometa/collections.yml
 ```
 
-Download it again after adding, renaming or archiving a profile.
+Download it again after adding, renaming or archiving a profile. With no active profiles the endpoint answers `409` instead of a file, because Kometa rejects a collection file with no collections (`collections or dynamic_collections attribute is required`).
 
 ## Use it from Kometa
 
