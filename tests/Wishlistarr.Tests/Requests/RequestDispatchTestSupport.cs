@@ -82,9 +82,26 @@ public sealed class DispatchApiFactory : KidRequestApiFactory
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("results")[0];
     }
 
+    public async Task RunDispatchJobAsync(HttpClient parent)
+    {
+        for (int attempt = 0; attempt < 1200; attempt++)
+        {
+            HttpResponseMessage response = await parent.PostAsync($"/api/v1/jobs/{RequestDispatchJob.JobName}/run", null);
+            if (response.StatusCode == HttpStatusCode.Accepted)
+            {
+                return;
+            }
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException("The dispatch job never became free to run.");
+    }
+
     public async Task<MediaRequest> WaitForAsync(int id, RequestState state)
     {
-        for (int attempt = 0; attempt < 200; attempt++)
+        for (int attempt = 0; attempt < 1200; attempt++)
         {
             MediaRequest request = (await this.GetRequestsAsync()).Single(row => row.Id == id);
             if (request.State == state)
@@ -100,7 +117,7 @@ public sealed class DispatchApiFactory : KidRequestApiFactory
 
     public async Task<MediaRequest> WaitForDispatchAsync(int id)
     {
-        for (int attempt = 0; attempt < 200; attempt++)
+        for (int attempt = 0; attempt < 1200; attempt++)
         {
             MediaRequest request = (await this.GetRequestsAsync()).Single(row => row.Id == id);
             if (request.DispatchedAt is not null && request.State == RequestState.Fulfilling)

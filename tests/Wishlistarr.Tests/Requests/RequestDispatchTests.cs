@@ -142,7 +142,7 @@ public sealed class RequestDispatchTests
         }
 
         await factory.SetModeAsync(parent, "seerr");
-        await parent.PostAsync($"/api/v1/jobs/{RequestDispatchJob.JobName}/run", null);
+        await factory.RunDispatchJobAsync(parent);
         MediaRequest sent = await factory.WaitForDispatchAsync(id);
 
         Assert.Equal(FulfilmentBackend.Arr, sent.Backend);
@@ -160,7 +160,7 @@ public sealed class RequestDispatchTests
 
         await factory.ApproveAsync(parent, id);
         await factory.SetModeAsync(parent, "arr");
-        await parent.PostAsync($"/api/v1/jobs/{RequestDispatchJob.JobName}/run", null);
+        await factory.RunDispatchJobAsync(parent);
         MediaRequest sent = await factory.WaitForAsync(id, RequestState.Fulfilling);
 
         Assert.Equal(FulfilmentBackend.Arr, sent.Backend);
