@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Wishlistarr.Api.Labels;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Data;
@@ -11,7 +12,8 @@ public sealed class KidProfiles(
     WishlistarrDbContext db,
     IPasswordHasher<KidProfile> hasher,
     IOptions<KidOptions> options,
-    TimeProvider time)
+    TimeProvider time,
+    IProfileLabelGate labels)
 {
     public const int MaxNameLength = 50;
     public const int MaxAvatarLength = 32;
@@ -28,6 +30,7 @@ public sealed class KidProfiles(
 
     public async Task<ProfileOutcome> CreateAsync(KidProfileRequest request, CancellationToken ct = default)
     {
+        using IDisposable held = await labels.EnterAsync(ct);
         if (Validate(request, out string? error) is not ValidatedProfile input)
         {
             return ProfileOutcome.Invalid(error ?? "Invalid profile.");
@@ -50,6 +53,12 @@ public sealed class KidProfiles(
     }
 
     public async Task<ProfileOutcome> UpdateAsync(int id, KidProfileRequest request, CancellationToken ct = default)
+    {
+        using IDisposable held = await labels.EnterAsync(ct);
+        return await this.UpdateWithLabelGateHeldAsync(id, request, ct);
+    }
+
+    internal async Task<ProfileOutcome> UpdateWithLabelGateHeldAsync(int id, KidProfileRequest request, CancellationToken ct)
     {
         if (Validate(request, out string? error) is not ValidatedProfile input)
         {
@@ -77,6 +86,7 @@ public sealed class KidProfiles(
 
     public async Task<bool> ArchiveAsync(int id, bool removeOwnedLabels, CancellationToken ct = default)
     {
+        using IDisposable held = await labels.EnterAsync(ct);
         KidProfile? profile = await this.FindActiveAsync(id, ct);
         if (profile is null)
         {

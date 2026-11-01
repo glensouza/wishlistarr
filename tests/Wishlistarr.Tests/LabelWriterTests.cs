@@ -147,6 +147,7 @@ public sealed class LabelWriterTests
         Assert.Equal("Favorites", put.Query["label[0].tag.tag"]);
         Assert.Equal("Ben", put.Query["label[1].tag.tag"]);
         Assert.Equal("Ada", put.Query["label[2].tag.tag"]);
+        Assert.Equal(["Favorites", "Ben", "Ada"], factory.Fake.Item("101").Labels);
         Assert.Equal("1", put.Query["label.locked"]);
         int index = item.IndexOf(put);
         Assert.True(index >= 2);
@@ -217,6 +218,24 @@ public sealed class LabelWriterTests
         Assert.Equal(0, factory.Puts);
         Assert.Equal(["ada"], factory.Fake.Item("101").Labels);
         Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Removing_a_label_uses_the_upstream_removal_field_and_keeps_the_others()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        factory.Fake.Item("101").SetLabels("Favorites", "Ben");
+        await factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request"));
+
+        LabelWriteResult removed = await factory.WithWriterAsync(writer => writer.RemoveAsync("101", "Ada"));
+
+        FakePlexServer.RecordedRequest put = factory.Fake.Requests.Last(request => request.Method == "PUT");
+        Assert.Equal(LabelWriteOutcome.Removed, removed.Outcome);
+        Assert.Equal("Ada", put.Query["label[].tag.tag-"]);
+        Assert.DoesNotContain(put.Query.Keys, key => key.StartsWith("label[0]", StringComparison.Ordinal));
+        Assert.Equal(["Favorites", "Ben"], factory.Fake.Item("101").Labels);
     }
 
     [Fact]

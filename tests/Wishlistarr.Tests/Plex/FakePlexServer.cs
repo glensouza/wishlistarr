@@ -440,7 +440,7 @@ public sealed partial class FakePlexServer : IAsyncDisposable
                 .OrderBy(entry => int.Parse(entry.Match.Groups[1].Value, CultureInfo.InvariantCulture))
                 .Select(entry => entry.Value),
         ];
-        string[] removed = query.TryGetValue("label[].tag.tag-", out string? removal) ? removal.Split(',') : [];
+        string[] removed = query.TryGetValue("label[].tag.tag-", out string? removal) ? [.. removal.Split(',').Select(Uri.UnescapeDataString)] : [];
         item.Edit(replacement.Count > 0 ? replacement : null, removed, query.GetValueOrDefault("label.locked") == "1");
         context.Response.StatusCode = StatusCodes.Status200OK;
     }

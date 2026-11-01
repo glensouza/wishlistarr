@@ -44,6 +44,7 @@ public static class ApiEndpoints
         v1.MapJobs();
         v1.MapLabelGuardian();
         v1.MapKometa();
+        v1.MapLibraryBackfill();
         v1.MapBackups();
         v1.MapUpdates();
         v1.MapWebhookSettings();
