@@ -123,7 +123,7 @@ public sealed partial class RequestLabeling(
                 : WriteFailedReason;
             retry = retryOnConnectionFailure
                 && deadline?.IsCancellationRequested != true
-                && (ex is HttpRequestException || ex is MediaServerException and not MediaServerItemChangedException);
+                && (ex is HttpRequestException or TaskCanceledException || ex is MediaServerException and not MediaServerItemChangedException);
         }
         finally
         {

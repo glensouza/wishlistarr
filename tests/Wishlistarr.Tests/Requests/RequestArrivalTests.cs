@@ -12,6 +12,7 @@ using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Requests;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
@@ -36,6 +37,8 @@ public sealed class ArrivalApiFactory() : DispatchApiFactory(useLibraryIndex: tr
             services.AddSingleton<TimeProvider>(this.Time);
             services.AddSingleton(provider => new TransportFailureMediaServer(provider.GetRequiredService<PlexMediaServer>()));
             services.RemoveAll<IMediaServer>();
+            services.RemoveAll<ILibraryScanner>();
+            services.AddSingleton<ILibraryScanner>(provider => provider.GetRequiredService<TransportFailureMediaServer>());
             services.AddSingleton<IMediaServer>(provider => provider.GetRequiredService<TransportFailureMediaServer>());
         });
     }
@@ -551,8 +554,11 @@ public sealed class RequestArrivalTests
         Assert.Single(await factory.GetLedgerAsync());
     }
 
-    [Fact]
-    public async Task Legacy_retries_stop_at_the_first_sign_that_plex_cannot_be_reached()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Legacy_retries_stop_after_one_attempt_when_plex_cannot_be_reached(int kind)
     {
         using ArrivalApiFactory factory = new();
         (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Show);
@@ -561,20 +567,70 @@ public sealed class RequestArrivalTests
             ("101", "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie),
             (key, "com.plexapp.agents.thetvdb://2000?lang=en", "2000", "tv_results", MediaKind.Show));
         await AgeLibraryAsync(factory, LegacyRetryAfter);
-        int before = factory.Plex.Count("GET", "/library/metadata/101");
-        int beforeKey = factory.Plex.Count("GET", $"/library/metadata/{key}");
-        factory.Plex.Delay = request => request.Path.StartsWith("/library/metadata/", StringComparison.Ordinal)
-            ? throw new InvalidOperationException("The server is down.")
-            : Task.CompletedTask;
+        TransportFailureMediaServer plex = factory.Services.GetRequiredService<TransportFailureMediaServer>();
+        plex.GetEntryFailure = kind switch
+        {
+            0 => new HttpRequestException("The connection was refused."),
+            1 => new TaskCanceledException("The request timed out."),
+            _ => new MediaServerException("Plex could not be reached."),
+        };
 
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
         }
 
-        bool touched101 = factory.Plex.Count("GET", "/library/metadata/101") > before;
-        bool touchedKey = factory.Plex.Count("GET", $"/library/metadata/{key}") > beforeKey;
-        Assert.True(touched101 != touchedKey);
+        Assert.Equal(1, plex.GetEntryCalls);
+    }
+
+    [Fact]
+    public async Task A_legacy_item_with_a_plex_error_status_is_skipped_and_stamped_so_later_items_still_resolve()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Show);
+        await IndexUnresolvedAsync(
+            factory,
+            ("101", "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie),
+            (key, "com.plexapp.agents.thetvdb://2000?lang=en", "2000", "tv_results", MediaKind.Show));
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+        string failing;
+        string later;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            string[] order = await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryItems.AsNoTracking()
+                .Where(item => item.RatingKey == "101" || item.RatingKey == key)
+                .OrderBy(item => item.Id)
+                .Select(item => item.RatingKey)
+                .ToArrayAsync();
+            (failing, later) = (order[0], order[1]);
+        }
+
+        factory.Plex.Delay = request => request.Path == $"/library/metadata/{failing}"
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+        DateTimeOffset before = factory.Time.GetUtcNow() - LegacyRetryAfter;
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
+        }
+
+        Assert.NotNull(await TitleIdAsync(factory, later));
+        Assert.Null(await TitleIdAsync(factory, failing));
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            DateTimeOffset stamped = (await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryItems.AsNoTracking()
+                .SingleAsync(item => item.RatingKey == failing)).IndexedAt;
+            Assert.True(stamped > before);
+        }
+
+        int reads = factory.Plex.Count("GET", $"/library/metadata/{failing}");
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(reads, factory.Plex.Count("GET", $"/library/metadata/{failing}"));
     }
 
     [Fact]
@@ -607,17 +663,20 @@ public sealed class RequestArrivalTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task A_failure_after_the_write_was_sent_keeps_the_owner_so_the_retry_ends_labeled_and_owned(bool mediaServerError)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task A_failure_after_the_write_was_sent_keeps_the_owner_so_the_retry_ends_labeled_and_owned(int kind)
     {
         using ArrivalApiFactory factory = new();
         (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
         Arrive(factory, key, MediaKind.Movie);
-        factory.Services.GetRequiredService<TransportFailureMediaServer>().FailAfterNextWrite = mediaServerError
-            ? new MediaServerException("Plex answered 502.")
-            : new HttpRequestException("The connection closed before the answer arrived.");
-
+        factory.Services.GetRequiredService<TransportFailureMediaServer>().FailAfterNextWrite = kind switch
+        {
+            0 => new HttpRequestException("The connection closed before the answer arrived."),
+            1 => new MediaServerException("Plex answered 502.", System.Net.HttpStatusCode.BadGateway),
+            _ => new TaskCanceledException("The request timed out."),
+        };
         await RunAsync(factory);
 
         Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
@@ -842,9 +901,25 @@ public sealed class RequestArrivalTests
     }
 }
 
-public sealed class TransportFailureMediaServer(IMediaServer inner) : IMediaServer
+internal sealed class TransportFailureMediaServer(PlexMediaServer inner) : IMediaServer, ILibraryScanner
 {
     public Exception? FailAfterNextWrite { get; set; }
+
+    public Exception? GetEntryFailure { get; set; }
+
+    public int GetEntryCalls { get; private set; }
+
+    public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default) => inner.ScanAsync(updatedSince, ct);
+
+    public Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default) => inner.ScanLabelsAsync(ct);
+
+    public Task<string?> GetServerIdAsync(CancellationToken ct = default) => inner.GetServerIdAsync(ct);
+
+    public Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default)
+    {
+        this.GetEntryCalls++;
+        return this.GetEntryFailure is Exception failure ? throw failure : inner.GetEntryAsync(itemId, ct);
+    }
 
     public Task<MediaServerTestResult> TestConnectionAsync(CancellationToken ct = default) => inner.TestConnectionAsync(ct);
 

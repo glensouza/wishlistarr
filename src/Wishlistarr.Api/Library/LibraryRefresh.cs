@@ -87,7 +87,8 @@ public sealed partial class LibraryRefresh(
         }
 
         // Failed lookups do not change Plex's timestamp, so the incremental cursor cannot decide which mappings to retry.
-        // Every attempt stamps IndexedAt, which spaces the attempts per item.
+        // Every attempt stamps IndexedAt, which spaces the attempts per item. A reload that fails for the item's own reasons is stamped too,
+        // so it waits out the backoff instead of blocking the items behind it.
         DateTimeOffset due = time.GetUtcNow() - UnresolvedRetryAfter;
         int after = 0;
         while (true)
@@ -135,13 +136,14 @@ public sealed partial class LibraryRefresh(
                 catch (Exception ex) when (!ct.IsCancellationRequested && ex is not MediaServerNotConfiguredException)
                 {
                     db.ChangeTracker.Clear();
-                    if (ex is HttpRequestException or MediaServerException)
+                    if (IsUnreachable(ex))
                     {
                         this.LogRetryStopped(ex);
                         return;
                     }
 
                     this.LogRetryFailed(ex, item.Id);
+                    await this.StampAttemptAsync(item.RatingKey, serverId, item.Id, ct);
                 }
 
                 if (this.tmdbUnavailable)
@@ -149,6 +151,23 @@ public sealed partial class LibraryRefresh(
                     return;
                 }
             }
+        }
+    }
+
+    private static bool IsUnreachable(Exception exception) =>
+        exception is HttpRequestException or TaskCanceledException or MediaServerException { StatusCode: null };
+
+    private async Task StampAttemptAsync(string ratingKey, string serverId, int itemId, CancellationToken ct)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        try
+        {
+            await db.LibraryItems.Where(row => row.ServerId == serverId && row.RatingKey == ratingKey)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.IndexedAt, now), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            this.LogRetryFailed(ex, itemId);
         }
     }
 

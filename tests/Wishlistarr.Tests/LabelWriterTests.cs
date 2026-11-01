@@ -512,7 +512,7 @@ public sealed class LabelWriterTests
     }
 
     [Fact]
-    public async Task A_retrying_caller_still_discards_the_row_when_the_failure_comes_before_the_write_is_sent()
+    public async Task A_failure_before_any_write_was_sent_still_discards_the_row_for_a_retrying_caller()
     {
         using LabelApiFactory factory = new();
         await factory.LinkAsync();
@@ -531,6 +531,78 @@ public sealed class LabelWriterTests
         await Assert.ThrowsAsync<MediaServerItemChangedException>(() =>
             factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", expectedIdentity: identity, keepReservationAfterSend: true)));
 
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task A_retrying_caller_keeps_the_row_when_plex_does_not_keep_a_change_that_was_sent()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        factory.Fake.AfterRequest = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                factory.Fake.Item("101").SetLabels();
+            }
+        };
+
+        await Assert.ThrowsAsync<MediaServerException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", keepReservationAfterSend: true)));
+
+        Assert.Equal(LabelWriter.MaxAttempts, factory.Puts);
+        Assert.Equal("Ada", Assert.Single(await factory.GetLedgerAsync()).Label);
+    }
+
+    [Fact]
+    public async Task A_retrying_caller_keeps_the_row_when_a_later_attempt_fails_before_sending()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        MediaItemLabels identity = await ReadAsync(factory, "101");
+        string guid = factory.Fake.Item("101").Guid;
+        int baseline = factory.Fake.Count("GET", "/library/metadata/101");
+        factory.Fake.AfterRequest = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                factory.Fake.Item("101").SetLabels();
+            }
+            else if (request.Method == "GET" && request.Path == "/library/metadata/101" && factory.Fake.Count("GET", request.Path) == baseline + 5)
+            {
+                factory.Fake.Rematch("101", guid, "Replacement", "tmdb://700");
+            }
+        };
+
+        await Assert.ThrowsAsync<MediaServerItemChangedException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", expectedIdentity: identity, keepReservationAfterSend: true)));
+
+        Assert.Equal(1, factory.Puts);
+        Assert.Equal("Ada", Assert.Single(await factory.GetLedgerAsync()).Label);
+    }
+
+    [Fact]
+    public async Task A_write_plex_refused_with_a_client_error_discards_the_row_even_for_a_retrying_caller()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        factory.Fake.Delay = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                factory.Fake.ServerTokenOverride = "refused-token";
+            }
+
+            return Task.CompletedTask;
+        };
+
+        MediaServerException error = await Assert.ThrowsAsync<MediaServerException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", keepReservationAfterSend: true)));
+
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, error.StatusCode);
         Assert.Empty(await factory.GetLedgerAsync());
     }
 

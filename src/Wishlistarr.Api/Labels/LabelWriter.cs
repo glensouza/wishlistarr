@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Kids;
 using Wishlistarr.Core.MediaServers;
@@ -270,9 +271,10 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         using IDisposable held = await locks.AcquireAsync($"{target.ServerId}/{target.Guid}", ct);
         CheckIdentity(target, expectedIdentity);
         Func<Task>? release = null;
-        async Task DiscardAsync()
+        bool anySent = false;
+        async Task DiscardAsync(bool refused = false)
         {
-            if (release is not null && !keepReservationOnFailure)
+            if (release is not null && !keepReservationOnFailure && (refused || !(keepReservationAfterSend && anySent)))
             {
                 Func<Task> discard = release;
                 release = null;
@@ -319,7 +321,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             // The ledger row is saved before Plex is touched, so a deadline that fires after Plex took the change cannot leave a label with no owner.
             release ??= await reserve(current);
             bool labelsChanged = false;
-            bool sent = false;
+            bool firstSend = false;
             try
             {
                 if (expectedIdentity is not null)
@@ -337,18 +339,16 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
                 if (!labelsChanged)
                 {
-                    sent = true;
+                    firstSend = !anySent;
+                    anySent = true;
                     await server.SetLabelsAsync(current, labels, ct);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Once the write was sent, a failure may have followed a write that landed, so a retrying caller keeps the owner row for its next attempt.
-                if (!(sent && keepReservationAfterSend))
-                {
-                    await DiscardAsync();
-                }
-
+                // Once any write was sent, a failure may have followed a write that landed, so a retrying caller keeps the owner row
+                // for its next attempt, unless Plex refused the first write outright.
+                await DiscardAsync(refused: firstSend && ex is MediaServerException { StatusCode: HttpStatusCode status } && (int)status is >= 400 and < 500);
                 throw;
             }
 
