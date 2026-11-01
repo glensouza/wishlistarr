@@ -199,19 +199,19 @@ public sealed class KidWishlistTests
         await AddRequestAsync(factory, adaId, 752, "Already Here", counts: false);
         await AddRequestAsync(factory, beauId, 753, "Beaus Wish");
 
-        JsonElement usedUp = await ada.GetFromJsonAsync<JsonElement>(WishlistPath);
+        JsonElement usedUp = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, usedUp.GetProperty("remaining").GetInt32());
         Assert.Equal(
             AllowanceWeek.NextStart(factory.Clock.GetUtcNow(), TimeZoneInfo.Utc),
             usedUp.GetProperty("resetsAt").GetDateTimeOffset());
-        JsonElement beauUsed = await beau.GetFromJsonAsync<JsonElement>(WishlistPath);
+        JsonElement beauUsed = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, beauUsed.GetProperty("remaining").GetInt32());
 
         // The next allowance week begins on Monday and is still inside the seven-day kid session.
         factory.SetClock(wednesday.AddDays(5));
         JsonElement nextWeek = await (await ada.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, nextWeek.GetProperty("remaining").GetInt32());
-        JsonElement beauNext = await beau.GetFromJsonAsync<JsonElement>(WishlistPath);
+        JsonElement beauNext = await (await beau.GetAsync(WishlistPath)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(1, beauNext.GetProperty("remaining").GetInt32());
     }
 
