@@ -59,7 +59,8 @@ public sealed partial class RequestLabeling(
         KidProfile profile,
         RequestActor actor,
         string source = LabelSource,
-        IReadOnlyDictionary<string, MediaItemLabels>? expectedItems = null)
+        IReadOnlyDictionary<string, MediaItemLabels>? expectedItems = null,
+        bool retryOnConnectionFailure = false)
     {
         MediaRequest? current = await requests.GetAsync(requestId, CancellationToken.None);
         if (current is not { State: RequestState.Available })
@@ -75,6 +76,7 @@ public sealed partial class RequestLabeling(
         CancellationTokenSource? deadline = null;
         string? failure = null;
         bool notOwned = false;
+        bool retry = false;
         List<string> added = [];
         try
         {
@@ -83,8 +85,13 @@ public sealed partial class RequestLabeling(
             int labeled = 0;
             foreach (MediaItem match in matches)
             {
-                LabelWriteResult written = await labels.AddAsync(
-                    match.Id, profile.PlexLabel, profile.Id, source, ct, expectedItems is null ? null : expectedItems[match.Id]);
+                MediaItemLabels? expected = null;
+                if (expectedItems is not null && !expectedItems.TryGetValue(match.Id, out expected))
+                {
+                    continue;
+                }
+
+                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct, expected);
                 if (written.Outcome == LabelWriteOutcome.Added)
                 {
                     added.Add(match.Id);
@@ -113,6 +120,9 @@ public sealed partial class RequestLabeling(
             failure = deadline?.IsCancellationRequested == true
                 ? TimeoutReason
                 : WriteFailedReason;
+            retry = retryOnConnectionFailure
+                && deadline?.IsCancellationRequested != true
+                && (ex is HttpRequestException || ex is MediaServerException and not MediaServerItemChangedException);
         }
         finally
         {
@@ -122,6 +132,11 @@ public sealed partial class RequestLabeling(
         if (failure is not null && added.Count > 0)
         {
             await this.RollBackAsync(requestId, added, profile.PlexLabel);
+        }
+
+        if (retry)
+        {
+            return new RequestLabelResult(new RequestResult(RequestOutcome.Unchanged, current, failure), false);
         }
 
         RequestResult moved = await requests.TransitionAsync(

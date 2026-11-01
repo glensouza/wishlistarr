@@ -29,11 +29,13 @@ public sealed partial class LibraryRefresh(
     WishlistarrDbContext db,
     ILibraryScanner scanner,
     ITmdbClient tmdb,
+    ITmdbApiKeyProvider keys,
     LibraryRefreshGate gate,
     TimeProvider time,
     ILogger<LibraryRefresh> logger)
 {
     private const int BatchSize = 200;
+    private static readonly TimeSpan UnresolvedRetryAfter = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan CursorOverlap = TimeSpan.FromSeconds(5);
 
     private readonly Dictionary<(MediaKind Kind, int TmdbId), int> titleIds = [];
@@ -73,7 +75,11 @@ public sealed partial class LibraryRefresh(
 
     public async Task RetryUnresolvedAsync(CancellationToken ct)
     {
-        using IDisposable held = await gate.EnterAsync(ct);
+        if (await keys.GetApiKeyAsync(ct) is not { Length: > 0 })
+        {
+            return;
+        }
+
         string? serverId = await scanner.GetServerIdAsync(ct);
         if (serverId is null)
         {
@@ -81,6 +87,8 @@ public sealed partial class LibraryRefresh(
         }
 
         // Failed lookups do not change Plex's timestamp, so the incremental cursor cannot decide which mappings to retry.
+        // Every attempt stamps IndexedAt, which spaces the attempts per item.
+        DateTimeOffset due = time.GetUtcNow() - UnresolvedRetryAfter;
         int after = 0;
         while (true)
         {
@@ -89,7 +97,7 @@ public sealed partial class LibraryRefresh(
                     && !item.ExternalIds.Any(id => id.Source == LibraryIdSource.Tmdb)
                     && item.ExternalIds.Any(id => id.Source == LibraryIdSource.Tvdb || id.Source == LibraryIdSource.Imdb))
                 .OrderBy(item => item.Id)
-                .Select(item => new { item.Id, item.RatingKey })
+                .Select(item => new { item.Id, item.RatingKey, item.IndexedAt })
                 .Take(BatchSize)
                 .ToListAsync(ct);
             if (unresolved.Count == 0)
@@ -97,9 +105,16 @@ public sealed partial class LibraryRefresh(
                 return;
             }
 
+            // SQLite cannot compare the stored offset timestamps in SQL, so the backoff is applied to each page here.
             foreach (var item in unresolved)
             {
                 after = item.Id;
+                if (item.IndexedAt > due)
+                {
+                    continue;
+                }
+
+                using IDisposable held = await gate.EnterAsync(ct);
                 LibrarySnapshot? snapshot = await scanner.GetEntryAsync(item.RatingKey, ct);
                 if (snapshot?.ServerId == serverId)
                 {

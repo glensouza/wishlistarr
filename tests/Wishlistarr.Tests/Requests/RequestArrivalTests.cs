@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Api.Jobs;
+using Wishlistarr.Api.Kids;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Requests;
 using Wishlistarr.Core.MediaServers;
@@ -38,6 +39,8 @@ public sealed class ArrivalApiFactory() : DispatchApiFactory(useLibraryIndex: tr
 
 public sealed class RequestArrivalTests
 {
+    private static readonly TimeSpan LegacyRetryAfter = TimeSpan.FromMinutes(30);
+
     [Theory]
     [InlineData("radarr", "arr", MediaKind.Movie)]
     [InlineData("sonarr", "arr", MediaKind.Show)]
@@ -88,7 +91,7 @@ public sealed class RequestArrivalTests
         factory.Tmdb.SetBody($"/3/find/{externalId}", $$"""{"{{results}}":[{"id":{{tmdb}}}]}""");
         factory.Plex.Rematch(key, guid, "An unrelated display title");
 
-        factory.Time.Advance(TimeSpan.FromMinutes(5));
+        factory.Time.Advance(LegacyRetryAfter);
         await factory.Services.GetRequiredService<JobScheduler>().RunDueAsync();
         await factory.WaitForAsync(id, RequestState.Labeled);
         await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
@@ -209,6 +212,12 @@ public sealed class RequestArrivalTests
 
         factory.Time.Advance(TimeSpan.FromMinutes(5));
         await factory.Services.GetRequiredService<JobScheduler>().RunDueAsync();
+        await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
+        Assert.Equal(1, factory.Tmdb.Count("/3/find/tt0133093"));
+        Assert.Equal(RequestState.Fulfilling, (await factory.GetRequestsAsync()).Single().State);
+
+        factory.Time.Advance(LegacyRetryAfter);
+        await factory.Services.GetRequiredService<JobScheduler>().RunDueAsync();
         await factory.WaitForAsync(id, RequestState.Labeled);
         await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
 
@@ -221,11 +230,14 @@ public sealed class RequestArrivalTests
 
     [Theory]
     [InlineData(2, false, false)]
+    [InlineData(2, true, false)]
     [InlineData(3, false, false)]
+    [InlineData(3, true, false)]
     [InlineData(4, false, false)]
     [InlineData(4, true, false)]
     [InlineData(4, true, true)]
     [InlineData(5, false, false)]
+    [InlineData(5, true, false)]
     [InlineData(5, true, true)]
     public async Task A_rematch_between_the_arrival_guard_and_the_write_does_not_label_the_replacement(int rematchOnRead, bool keepGuid, bool legacy)
     {
@@ -256,6 +268,69 @@ public sealed class RequestArrivalTests
         Assert.Equal(0, factory.LabelWrites);
         Assert.Empty(factory.Plex.Item(key).Labels);
         Assert.Empty(await factory.GetLedgerAsync());
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task A_rematch_that_keeps_the_guid_and_is_undone_by_the_next_read_still_blocks_the_write(int rematchOnRead)
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string guid = factory.Plex.Item(key).Guid;
+        int reads = 0;
+        factory.Plex.Delay = request =>
+        {
+            if (request.Path == $"/library/metadata/{key}")
+            {
+                int read = Interlocked.Increment(ref reads);
+                if (read == rematchOnRead)
+                {
+                    factory.Plex.Rematch(key, guid, "Replacement movie", "tmdb://700");
+                }
+                else if (read == rematchOnRead + 1)
+                {
+                    factory.Plex.Rematch(key, guid, "Arrived title", $"tmdb://{TmdbId(MediaKind.Movie)}");
+                }
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Equal(0, factory.LabelWrites);
+        Assert.Empty(factory.Plex.Item(key).Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task A_rematch_after_the_write_that_keeps_the_guid_does_not_end_labeled()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string guid = factory.Plex.Item(key).Guid;
+        factory.Plex.AfterRequest = request =>
+        {
+            if (request.Method == "PUT")
+            {
+                factory.Plex.Rematch(key, guid, "Replacement movie", "tmdb://700");
+            }
+        };
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Equal(1, factory.LabelWrites);
+        OwnedLabel owner = Assert.Single(await factory.GetLedgerAsync());
+        Assert.Equal(guid, owner.Guid);
         Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
     }
 
@@ -303,6 +378,156 @@ public sealed class RequestArrivalTests
     }
 
     [Fact]
+    public async Task A_plex_failure_while_the_label_is_written_leaves_the_request_available_and_polling_retries_it()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        factory.Plex.Delay = request => request.Method == "PUT"
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Empty(factory.Plex.Item(key).Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
+
+        factory.Plex.Delay = null;
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Single(await factory.GetLedgerAsync());
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Available);
+    }
+
+    [Fact]
+    public async Task Missing_expected_identities_are_skipped_instead_of_throwing_a_lookup_error()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        using IServiceScope scope = factory.Services.CreateScope();
+        IServiceProvider services = scope.ServiceProvider;
+        await services.GetRequiredService<MediaRequests>().TransitionAsync(id, RequestState.Available, RequestActor.System(RequestArrival.Component));
+        KidProfile profile = await services.GetRequiredService<WishlistarrDbContext>().KidProfiles.AsNoTracking().SingleAsync();
+        MediaItem match = new(key, factory.Plex.Item(key).Guid, "Arrived title", null, MediaKind.Movie, "1", [new ExternalId(ExternalIdSource.Tmdb, TmdbId(MediaKind.Movie).ToString(CultureInfo.InvariantCulture))]);
+
+        RequestLabelResult result = await services.GetRequiredService<RequestLabeling>().LabelLockedAsync(
+            id, [match], profile, RequestActor.System(RequestArrival.Component), expectedItems: new Dictionary<string, MediaItemLabels>());
+
+        Assert.Equal(RequestState.Failed, result.Result.Request!.State);
+        Assert.Equal(0, factory.LabelWrites);
+        Assert.Equal("The title is no longer in the library.", (await factory.GetHistoryAsync(id)).Single(item => item.ToState == RequestState.Failed).Reason);
+    }
+
+    [Fact]
+    public async Task The_profile_label_gate_is_held_from_the_profile_check_until_the_label_is_written()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        int profileId;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            profileId = await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().KidProfiles.Select(row => row.Id).SingleAsync();
+        }
+
+        using IServiceScope archiveScope = factory.Services.CreateScope();
+        Task<bool>? archive = null;
+        bool archivedDuringWrite = true;
+        int reads = 0;
+        factory.Plex.Delay = async request =>
+        {
+            // The second read is the label writer's own, after the profile was checked.
+            if (request.Path == $"/library/metadata/{key}" && Interlocked.Increment(ref reads) == 2)
+            {
+                archive = archiveScope.ServiceProvider.GetRequiredService<KidProfiles>().ArchiveAsync(profileId, false);
+                await Task.Delay(500);
+                archivedDuringWrite = archive.IsCompleted;
+            }
+        };
+
+        await RunAsync(factory);
+
+        Assert.False(archivedDuringWrite);
+        Assert.True(await archive!);
+        Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Single(await factory.GetLedgerAsync());
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task Polling_skips_legacy_retries_without_a_tmdb_key_and_without_waiting_for_the_refresh_gate()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        factory.Plex.Rematch(key, "com.plexapp.agents.imdb://tt0133093?lang=en", "Legacy movie");
+        factory.Tmdb.SetBody("/3/find/tt0133093", $$"""{"movie_results":[{"id":{{TmdbId(MediaKind.Movie)}}}]}""");
+        factory.Time.Advance(LegacyRetryAfter);
+        factory.TmdbKeys.Key = null;
+        int reads = factory.Plex.Count("GET", $"/library/metadata/{key}");
+
+        using (IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None))
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(reads, factory.Plex.Count("GET", $"/library/metadata/{key}"));
+        Assert.Equal(0, factory.Tmdb.Count("/3/find/tt0133093"));
+    }
+
+    [Fact]
+    public async Task Polling_does_not_take_the_refresh_gate_when_no_legacy_item_is_due()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        factory.Plex.Rematch(key, "com.plexapp.agents.imdb://tt0133093?lang=en", "Legacy movie");
+        factory.Tmdb.SetBody("/3/find/tt0133093", $$"""{"movie_results":[{"id":{{TmdbId(MediaKind.Movie)}}}]}""");
+        factory.Time.Advance(LegacyRetryAfter - TimeSpan.FromSeconds(1));
+
+        using (IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None))
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(0, factory.Tmdb.Count("/3/find/tt0133093"));
+    }
+
+    [Fact]
+    public async Task Only_arrival_webhook_events_start_the_arrival_job()
+    {
+        using ArrivalApiFactory factory = new();
+        (HttpClient parent, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        JobRunner jobs = factory.Services.GetRequiredService<JobRunner>();
+        await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
+        int baseline = (await jobs.GetLastRunAsync(RequestArrivalJob.JobName))!.Id;
+        (string Source, string Event)[] ignored = [("sonarr", "Grab"), ("radarr", "Grab"), ("seerr", "MEDIA_PENDING"), ("plex", "media.play")];
+        for (int index = 0; index < ignored.Length; index++)
+        {
+            await SendWebhookAsync(factory, parent, ignored[index].Source, key, index, ignored[index].Event);
+        }
+
+        Assert.False(jobs.IsRunning(RequestArrivalJob.JobName));
+        Assert.Equal(baseline, (await jobs.GetLastRunAsync(RequestArrivalJob.JobName))!.Id);
+
+        (string Source, string Event)[] arrivals = [("sonarr", "Download"), ("radarr", "Download"), ("seerr", "MEDIA_AVAILABLE"), ("plex", "library.new")];
+        int previous = baseline;
+        for (int index = 0; index < arrivals.Length; index++)
+        {
+            await SendWebhookAsync(factory, parent, arrivals[index].Source, key, 100 + index, arrivals[index].Event);
+            await WaitForJobAsync(factory, JobRunOutcome.Succeeded);
+            JobRun run = (await jobs.GetLastRunAsync(RequestArrivalJob.JobName))!;
+            Assert.Equal(JobRunTrigger.Webhook, run.Trigger);
+            Assert.True(run.Id > previous);
+            previous = run.Id;
+        }
+    }
+
+    [Fact]
     public async Task An_archived_profile_does_not_get_a_label_when_its_download_arrives()
     {
         using ArrivalApiFactory factory = new();
@@ -345,16 +570,16 @@ public sealed class RequestArrivalTests
     private static void Arrive(ArrivalApiFactory factory, string key, MediaKind kind) =>
         factory.Plex.Rematch(key, $"plex://{(kind == MediaKind.Movie ? "movie" : "show")}/arrived", "Arrived title", $"tmdb://{TmdbId(kind)}");
 
-    private static async Task SendWebhookAsync(ArrivalApiFactory factory, HttpClient parent, string source, string key, int delivery)
+    private static async Task SendWebhookAsync(ArrivalApiFactory factory, HttpClient parent, string source, string key, int delivery, string? eventType = null)
     {
         JsonElement endpoints = await parent.GetFromJsonAsync<JsonElement>("/api/v1/settings/webhooks");
         string url = endpoints.EnumerateArray().Single(item => item.GetProperty("source").GetString() == source).GetProperty("url").GetString()!;
         string body = source switch
         {
-            "plex" => $$"""{"event":"library.new","Metadata":{"ratingKey":"{{key}}","type":"show"},"delivery":{{delivery}}}""",
-            "seerr" => $$"""{"notification_type":"MEDIA_AVAILABLE","media":{"media_type":"movie","tmdbId":"603"},"delivery":{{delivery}}}""",
-            "sonarr" => $$"""{"eventType":"Download","series":{"id":1,"tvdbId":2000},"episodes":[{"seasonNumber":1,"episodeNumber":1}],"delivery":{{delivery}}}""",
-            _ => $$"""{"eventType":"Download","movie":{"id":1,"tmdbId":603},"delivery":{{delivery}}}""",
+            "plex" => $$"""{"event":"{{eventType ?? "library.new"}}","Metadata":{"ratingKey":"{{key}}","type":"show"},"delivery":{{delivery}}}""",
+            "seerr" => $$"""{"notification_type":"{{eventType ?? "MEDIA_AVAILABLE"}}","media":{"media_type":"movie","tmdbId":"603"},"delivery":{{delivery}}}""",
+            "sonarr" => $$"""{"eventType":"{{eventType ?? "Download"}}","series":{"id":1,"tvdbId":2000},"episodes":[{"seasonNumber":1,"episodeNumber":1}],"delivery":{{delivery}}}""",
+            _ => $$"""{"eventType":"{{eventType ?? "Download"}}","movie":{"id":1,"tmdbId":603},"delivery":{{delivery}}}""",
         };
         using HttpClient sender = factory.CreateClient();
         using HttpContent content = source == "plex"

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Api.Jobs;
+using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
@@ -23,6 +24,7 @@ public sealed partial class RequestArrival(
     MediaRequests requests,
     RequestLabeling labeling,
     RequestLocks locks,
+    IProfileLabelGate profileLabels,
     ILogger<RequestArrival> logger)
 {
     public const string Component = "arrival";
@@ -107,6 +109,8 @@ public sealed partial class RequestArrival(
             return;
         }
 
+        // A rename or archive takes the same gate, so the label written below is the profile's current one.
+        using IDisposable gate = await profileLabels.EnterAsync(ct);
         KidProfile? profile = await db.KidProfiles.AsNoTracking()
             .SingleOrDefaultAsync(row => row.Id == request.KidProfileId && row.ArchivedAt == null, ct);
         if (profile is null)
@@ -124,7 +128,7 @@ public sealed partial class RequestArrival(
             }
         }
 
-        await labeling.LabelLockedAsync(id, visible, profile, actor, expectedItems: expectedItems);
+        await labeling.LabelLockedAsync(id, visible, profile, actor, expectedItems: expectedItems, retryOnConnectionFailure: true);
     }
 
     // An incremental refresh cannot remove deleted items, and Fix Match can keep a rating key while replacing the title.
