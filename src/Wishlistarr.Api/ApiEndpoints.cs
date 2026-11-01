@@ -35,6 +35,7 @@ public static class ApiEndpoints
 
         v1.MapParentAuth();
         v1.MapParentKidProfiles();
+        v1.MapWatchHistory();
         v1.MapParentKidDevices();
         v1.MapRequests();
         v1.MapTmdb();

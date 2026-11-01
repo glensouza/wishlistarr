@@ -525,6 +525,9 @@ public sealed partial class RequestQueue(
         public Task<TmdbPage<TmdbSearchResult>> GetTrendingAsync(TmdbMediaType type, string window = "week", int page = 1, string language = "en-US", CancellationToken ct = default) =>
             this.RunAsync(token => inner.GetTrendingAsync(type, window, page, language, token), ct);
 
+        public Task<TmdbPage<TmdbSearchResult>> GetRecommendationsAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
+            this.RunAsync(token => inner.GetRecommendationsAsync(type, id, token), ct);
+
         public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
             this.RunAsync(token => inner.GetWatchProvidersAsync(type, id, token), ct);
 

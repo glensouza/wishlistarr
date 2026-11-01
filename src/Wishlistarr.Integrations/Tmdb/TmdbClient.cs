@@ -85,6 +85,9 @@ public sealed class TmdbClient(HttpClient http, TmdbCache cache, ITmdbApiKeyProv
             ct);
     }
 
+    public Task<TmdbPage<TmdbSearchResult>> GetRecommendationsAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
+        this.GetAsync<TmdbPage<TmdbSearchResult>>($"{Segment(type)}/{id}/recommendations", [("language", "en-US"), ("page", "1")], ListLifetime, ct);
+
     public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) =>
         this.GetAsync<TmdbWatchProviders>($"{Segment(type)}/{id}/watch/providers", [], DetailLifetime, ct);
 

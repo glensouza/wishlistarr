@@ -36,7 +36,8 @@ public sealed partial class KidHome(
     KidContentPipeline pipeline,
     IEnumerable<ILibraryIndex> indexes,
     TimeProvider time,
-    ILogger<KidHome> logger)
+    ILogger<KidHome> logger,
+    WatchHistory? watchHistory = null)
 {
     public const int MaxDiscoverRequests = 8;
     public const int MaxParallelDiscover = 4;
@@ -61,6 +62,28 @@ public sealed partial class KidHome(
             return HomeLoad.Unavailable();
         }
 
+        IReadOnlyList<KidCandidate> recommendations = [];
+        if (slots.Count > 0 && watchHistory is not null)
+        {
+            using CancellationTokenSource deadline = new(KidContentPipeline.LookupBudget, time);
+            using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct, deadline.Token);
+            try
+            {
+                ProfileWatchState? history = await watchHistory.ReadAsync(profileId, budget.Token);
+                TitleWatchState? finished = history?.Titles.FirstOrDefault(title => title.Finished);
+                if (finished is not null)
+                {
+                    TmdbMediaType type = finished.Kind == MediaKind.Movie ? TmdbMediaType.Movie : TmdbMediaType.Tv;
+                    TmdbPage<TmdbSearchResult> page = await tmdb.GetRecommendationsAsync(type, finished.TmdbId, budget.Token);
+                    recommendations = [.. page.Results.Select(item => KidContentPipeline.ToCandidate(item, finished.Kind)).OfType<KidCandidate>().Take(MaxCandidatesPerRow)];
+                }
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException or OperationCanceledException or MediaServerException)
+            {
+                recommendations = [];
+            }
+        }
+
         List<RowDraft> drafts = [];
         List<KidCandidate> pending = [];
         HashSet<TitleKey> seen = [];
@@ -80,6 +103,16 @@ public sealed partial class KidHome(
             }
 
             drafts.Add(new RowDraft(slots[index], [.. candidates.Select(candidate => candidate.Key)]));
+        }
+
+        if (recommendations.Count > 0)
+        {
+            foreach (KidCandidate candidate in recommendations)
+            {
+                if (seen.Add(candidate.Key)) pending.Add(candidate);
+            }
+
+            drafts.Add(new RowDraft(new HomeSlot("watched", null), [.. recommendations.Select(candidate => candidate.Key)]));
         }
 
         IReadOnlyList<KidMediaItem> allowed = pending.Count == 0
