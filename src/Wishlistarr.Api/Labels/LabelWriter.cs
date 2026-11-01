@@ -267,15 +267,39 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         using IDisposable held = await locks.AcquireAsync($"{target.ServerId}/{target.Guid}", ct);
         CheckIdentity(target, expectedIdentity);
         Func<Task>? release = null;
+        async Task DiscardAsync()
+        {
+            if (release is not null && !keepReservationOnFailure)
+            {
+                Func<Task> discard = release;
+                release = null;
+                await discard();
+            }
+        }
+
+        async Task CheckAsync(MediaItemLabels item)
+        {
+            try
+            {
+                CheckIdentity(item, expectedIdentity);
+            }
+            catch (MediaServerItemChangedException)
+            {
+                await DiscardAsync();
+                throw;
+            }
+        }
+
         for (int attempt = 0; attempt < MaxAttempts; attempt++)
         {
             MediaItemLabels? current = await server.GetLabelsAsync(target.Id, ct);
             if (current is null || current.ServerId != target.ServerId || current.Guid != target.Guid)
             {
+                await DiscardAsync();
                 return new LabelWriteResult(LabelWriteOutcome.ItemNotFound);
             }
 
-            CheckIdentity(current, expectedIdentity);
+            await CheckAsync(current);
             if (await plan(current, ct) is not IReadOnlyList<string> labels)
             {
                 return new LabelWriteResult(unchanged, current);
@@ -283,7 +307,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
             // Plex has no conditional write, so a second read narrows the window in which an edit made elsewhere could be overwritten.
             MediaItemLabels? confirm = await server.GetLabelsAsync(target.Id, ct);
-            if (confirm is not null) CheckIdentity(confirm, expectedIdentity);
+            if (confirm is not null) await CheckAsync(confirm);
             if (confirm is null || confirm.ServerId != target.ServerId || confirm.Guid != target.Guid || !confirm.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
             {
                 continue;
@@ -291,6 +315,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
             // The ledger row is saved before Plex is touched, so a deadline that fires after Plex took the change cannot leave a label with no owner.
             release ??= await reserve(current);
+            bool labelsChanged = false;
             try
             {
                 if (expectedIdentity is not null)
@@ -299,22 +324,27 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                     MediaItemLabels? final = await server.GetLabelsAsync(target.Id, ct);
                     if (final is null)
                     {
-                        throw new MediaServerException("The Plex item is no longer available.");
+                        throw new MediaServerItemChangedException("The Plex item is no longer available.");
                     }
 
                     CheckIdentity(final, expectedIdentity);
-                    if (!final.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
-                    {
-                        throw new MediaServerException("The Plex labels changed before they could be written.");
-                    }
+                    labelsChanged = !final.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels);
                 }
 
-                await server.SetLabelsAsync(current, labels, ct);
+                if (!labelsChanged)
+                {
+                    await server.SetLabelsAsync(current, labels, ct);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (!keepReservationOnFailure) await release();
+                await DiscardAsync();
                 throw;
+            }
+
+            if (labelsChanged)
+            {
+                continue;
             }
 
             MediaItemLabels? written = await server.GetLabelsAsync(target.Id, ct);
@@ -326,11 +356,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             }
         }
 
-        if (release is not null && !keepReservationOnFailure)
-        {
-            await release();
-        }
-
+        await DiscardAsync();
         throw new MediaServerException("Plex did not keep the label change.");
     }
 
@@ -360,7 +386,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 .All(group => group.Any(expected.ExternalIds.Contains) || expected.ExternalIds.All(id => id.Source != group.Key));
         if (!same)
         {
-            throw new MediaServerException("The Plex item changed before its label could be verified.");
+            throw new MediaServerItemChangedException("The Plex item changed before its label could be verified.");
         }
     }
 

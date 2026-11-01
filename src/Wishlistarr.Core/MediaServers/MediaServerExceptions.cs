@@ -8,3 +8,5 @@ public class MediaServerException(string message, HttpStatusCode? statusCode = n
 }
 
 public sealed class MediaServerNotConfiguredException(string message) : MediaServerException(message);
+
+public sealed class MediaServerItemChangedException(string message) : MediaServerException(message);
