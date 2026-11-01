@@ -397,6 +397,8 @@ public sealed class RequestQueueBudgetTests
             return new TmdbCertification("US", "PG", []);
         }
 
+        public Task<TmdbPage<TmdbSearchResult>> GetRecommendationsAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
+
         public async Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default)
         {
             if (this.FailProviders)

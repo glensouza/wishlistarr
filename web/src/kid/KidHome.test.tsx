@@ -235,6 +235,17 @@ it('shows allowed rows with lazy posters, a reserved frame and a library badge',
   expect(await axe(container)).toHaveNoViolations()
 })
 
+it('labels recommendations from finished viewing', async () => {
+  homeBody = {
+    rows: [{ id: 'watched', genreId: null, genreName: null, items: [tiny] }],
+  }
+  renderHome()
+  expect(
+    await screen.findByRole('heading', { name: 'Because you watched' }),
+  ).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'Tiny Tale' })).toBeTruthy()
+})
+
 it('moves focus across a row and between rows with the arrow keys', async () => {
   renderHome()
   const first = (

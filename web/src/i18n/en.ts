@@ -121,6 +121,7 @@ export const en = {
   'home.empty': 'Nothing to show here yet. Try a search.',
   'home.rowPopular': 'Popular for my age',
   'home.rowLibrary': 'New in our library',
+  'home.rowWatched': 'Because you watched',
   'home.genreAnimation': 'Animation',
   'home.genreFamily': 'Family',
   'home.genreComedy': 'Comedy',

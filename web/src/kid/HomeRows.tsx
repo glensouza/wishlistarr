@@ -30,6 +30,7 @@ export default function HomeRows() {
   function rowTitle(row: HomeRow) {
     if (row.id === 'popular') return t('home.rowPopular')
     if (row.id === 'library') return t('home.rowLibrary')
+    if (row.id === 'watched') return t('home.rowWatched')
     if (row.genreId === animationGenreId) return t('home.genreAnimation')
     if (row.genreId === familyGenreId) return t('home.genreFamily')
     if (row.genreId === comedyGenreId) return t('home.genreComedy')

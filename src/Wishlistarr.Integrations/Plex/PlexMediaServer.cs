@@ -15,7 +15,7 @@ internal sealed partial class PlexMediaServer(
     PlexServerClient servers,
     IAppSettings settings,
     IOptions<PlexOptions> options,
-    TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IDisposable
+    TimeProvider time) : IMediaServer, IMediaServerAccount, ILibraryScanner, IWatchIdentityResolver, IDisposable
 {
     private static readonly TimeSpan DefaultPinLifetime = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan SelectionBackoffBase = TimeSpan.FromSeconds(2);
@@ -441,6 +441,25 @@ internal sealed partial class PlexMediaServer(
                     : new LibrarySnapshot(server.ServerId, ToEntry(item, kind.Value, libraryId!, true));
             },
             ct);
+    }
+
+    public async Task<bool> MatchesAsync(string serverId, string itemKey, string eventGuid, string titleKey, string titleGuid, bool episode, CancellationToken ct = default)
+    {
+        if (!IsValidKey(itemKey) || !IsValidKey(titleKey) || string.IsNullOrWhiteSpace(eventGuid) || string.IsNullOrWhiteSpace(titleGuid))
+        {
+            return false;
+        }
+
+        return await this.WithServerAsync(async (server, token) =>
+        {
+            if (server.ServerId != serverId) return false;
+            PlexMetadata? item = await servers.GetMetadataAsync(server, itemKey, token);
+            if (item?.Guid != eventGuid || item.Type != (episode ? "episode" : "movie")) return false;
+            if (!episode) return itemKey == titleKey && item.Guid == titleGuid;
+            if (item.GrandparentRatingKey != titleKey) return false;
+            PlexMetadata? show = await servers.GetMetadataAsync(server, titleKey, token);
+            return show?.Type == "show" && show.Guid == titleGuid;
+        }, ct);
     }
 
     public void Dispose()

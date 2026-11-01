@@ -677,6 +677,8 @@ public sealed class KidSearchTests
 
         public Task<TmdbPage<TmdbSearchResult>> GetTrendingAsync(TmdbMediaType type, string window = "week", int page = 1, string language = "en-US", CancellationToken ct = default) => throw new NotSupportedException();
 
+        public Task<TmdbPage<TmdbSearchResult>> GetRecommendationsAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
+
         public Task<TmdbWatchProviders> GetWatchProvidersAsync(TmdbMediaType type, int id, CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<int?> FindIdAsync(TmdbMediaType type, ExternalIdSource source, string externalId, CancellationToken ct = default) => throw new NotSupportedException();

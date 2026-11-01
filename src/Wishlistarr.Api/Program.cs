@@ -29,6 +29,7 @@ using Wishlistarr.Data;
 using Wishlistarr.Integrations.Arr;
 using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Integrations.Seerr;
+using Wishlistarr.Integrations.Tautulli;
 using Wishlistarr.Integrations.Tmdb;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -121,6 +122,15 @@ builder.Services.AddScoped<PlexEnforcement>();
 builder.Services.AddLibraryIndex();
 builder.Services.AddScoped<KidContentPipeline>();
 builder.Services.AddScoped<KidHome>();
+builder.Services.AddScoped<WatchHistory>();
+builder.Services.AddSingleton<TautulliHistory>();
+builder.Services.AddHttpClient(TautulliHistory.ClientName, client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(5);
+        client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+    })
+    .RemoveAllLoggers()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
 builder.Services.AddScoped<KidRequestFlow>();
 builder.Services.AddScoped<KidWishlist>();
 builder.Services.AddScoped<KidSearch>();
