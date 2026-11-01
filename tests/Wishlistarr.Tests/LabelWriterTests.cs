@@ -496,6 +496,45 @@ public sealed class LabelWriterTests
     }
 
     [Fact]
+    public async Task A_retrying_caller_keeps_the_ledger_row_when_the_write_fails_after_it_was_sent()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        factory.Fake.Delay = request => request.Method == "PUT"
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        await Assert.ThrowsAsync<MediaServerException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", keepReservationAfterSend: true)));
+
+        Assert.Equal("Ada", Assert.Single(await factory.GetLedgerAsync()).Label);
+    }
+
+    [Fact]
+    public async Task A_retrying_caller_still_discards_the_row_when_the_failure_comes_before_the_write_is_sent()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        MediaItemLabels identity = await ReadAsync(factory, "101");
+        string guid = factory.Fake.Item("101").Guid;
+        int baseline = factory.Fake.Count("GET", "/library/metadata/101");
+        factory.Fake.AfterRequest = request =>
+        {
+            if (request.Method == "GET" && request.Path == "/library/metadata/101" && factory.Fake.Count("GET", request.Path) == baseline + 3)
+            {
+                factory.Fake.Rematch("101", guid, "Replacement", "tmdb://700");
+            }
+        };
+
+        await Assert.ThrowsAsync<MediaServerItemChangedException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", expectedIdentity: identity, keepReservationAfterSend: true)));
+
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
     public async Task A_write_plex_rejected_leaves_no_ledger_row()
     {
         using LabelApiFactory factory = new();

@@ -92,7 +92,7 @@ public sealed partial class RequestLabeling(
                     continue;
                 }
 
-                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct, expected);
+                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct, expected, retryOnConnectionFailure);
                 if (written.Outcome == LabelWriteOutcome.Added)
                 {
                     added.Add(match.Id);

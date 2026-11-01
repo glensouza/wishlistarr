@@ -87,7 +87,7 @@ public sealed partial class LibraryRefresh(
         }
 
         // Failed lookups do not change Plex's timestamp, so the incremental cursor cannot decide which mappings to retry.
-        // Every attempt stamps IndexedAt, which spaces the attempts per item; an item Plex no longer has is dropped from the index.
+        // Every attempt stamps IndexedAt, which spaces the attempts per item.
         DateTimeOffset due = time.GetUtcNow() - UnresolvedRetryAfter;
         int after = 0;
         while (true)
@@ -134,6 +134,13 @@ public sealed partial class LibraryRefresh(
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested && ex is not MediaServerNotConfiguredException)
                 {
+                    db.ChangeTracker.Clear();
+                    if (ex is HttpRequestException or MediaServerException)
+                    {
+                        this.LogRetryStopped(ex);
+                        return;
+                    }
+
                     this.LogRetryFailed(ex, item.Id);
                 }
 
@@ -520,7 +527,10 @@ public sealed partial class LibraryRefresh(
     [LoggerMessage(Level = LogLevel.Information, Message = "Library refresh indexed {Count} items.")]
     private partial void LogRefreshed(int count);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Retrying the legacy id lookup for library item {ItemId} failed; it will be retried later")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Plex could not be reached while retrying legacy id lookups; the remaining items wait for a later poll.")]
+    private partial void LogRetryStopped(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Retrying the legacy id lookup for library item {ItemId} failed; it will be retried later.")]
     private partial void LogRetryFailed(Exception exception, int itemId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "TMDB lookup failed for a {Kind} by {Source} id.")]

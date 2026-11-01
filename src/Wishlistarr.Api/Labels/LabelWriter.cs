@@ -95,7 +95,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         int kidProfileId,
         string source,
         CancellationToken ct = default,
-        MediaItemLabels? expectedIdentity = null)
+        MediaItemLabels? expectedIdentity = null,
+        bool keepReservationAfterSend = false)
     {
         if (PlexLabelRules.Validate(label) is string error)
         {
@@ -140,7 +141,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             LabelWriteOutcome.Added,
             LabelWriteOutcome.AlreadyPresent,
             ct,
-            expectedIdentity: expectedIdentity);
+            expectedIdentity: expectedIdentity,
+            keepReservationAfterSend: keepReservationAfterSend);
     }
 
     public async Task<LabelWriteResult> RemoveAsync(string itemId, string label, CancellationToken ct = default)
@@ -250,6 +252,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         string? expectedServerId = null,
         string? expectedGuid = null,
         bool keepReservationOnFailure = false,
+        bool keepReservationAfterSend = false,
         MediaItemLabels? expectedIdentity = null)
     {
         MediaItemLabels? target = await server.GetLabelsAsync(itemId, ct);
@@ -340,8 +343,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // A transport error after the write was sent may still have reached Plex, so the owner row stays for a retry to find.
-                if (!(sent && ex is HttpRequestException))
+                // Once the write was sent, a failure may have followed a write that landed, so a retrying caller keeps the owner row for its next attempt.
+                if (!(sent && keepReservationAfterSend))
                 {
                     await DiscardAsync();
                 }

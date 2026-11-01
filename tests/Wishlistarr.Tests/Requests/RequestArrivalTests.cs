@@ -528,7 +528,7 @@ public sealed class RequestArrivalTests
     }
 
     [Fact]
-    public async Task One_legacy_item_that_fails_to_reload_does_not_stop_the_arrival_check()
+    public async Task One_legacy_item_that_fails_to_save_does_not_stop_the_arrival_check()
     {
         using ArrivalApiFactory factory = new();
         (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Show);
@@ -537,15 +537,44 @@ public sealed class RequestArrivalTests
             ("101", "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie),
             (key, "com.plexapp.agents.thetvdb://2000?lang=en", "2000", "tv_results", MediaKind.Show));
         await AgeLibraryAsync(factory, LegacyRetryAfter);
-        factory.Plex.Delay = request => request.Path == "/library/metadata/101"
-            ? throw new InvalidOperationException("The server is down.")
-            : Task.CompletedTask;
+        factory.Plex.Item("101").UpdatedAtUnix = 1;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Database.ExecuteSqlRawAsync(
+                "CREATE TRIGGER block_legacy_item BEFORE UPDATE ON LibraryItems WHEN OLD.RatingKey = '101' BEGIN SELECT RAISE(ABORT, 'blocked'); END;");
+        }
 
         await RunAsync(factory);
 
         Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
         Assert.Contains(factory.Plex.Requests, request => request.Path == "/library/metadata/101");
         Assert.Single(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Legacy_retries_stop_at_the_first_sign_that_plex_cannot_be_reached()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Show);
+        await IndexUnresolvedAsync(
+            factory,
+            ("101", "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie),
+            (key, "com.plexapp.agents.thetvdb://2000?lang=en", "2000", "tv_results", MediaKind.Show));
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+        int before = factory.Plex.Count("GET", "/library/metadata/101");
+        int beforeKey = factory.Plex.Count("GET", $"/library/metadata/{key}");
+        factory.Plex.Delay = request => request.Path.StartsWith("/library/metadata/", StringComparison.Ordinal)
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
+        }
+
+        bool touched101 = factory.Plex.Count("GET", "/library/metadata/101") > before;
+        bool touchedKey = factory.Plex.Count("GET", $"/library/metadata/{key}") > beforeKey;
+        Assert.True(touched101 != touchedKey);
     }
 
     [Fact]
@@ -577,13 +606,17 @@ public sealed class RequestArrivalTests
         Assert.Equal(reads + 1, factory.Plex.Count("GET", "/library/metadata/101") + factory.Plex.Count("GET", $"/library/metadata/{key}"));
     }
 
-    [Fact]
-    public async Task A_transport_error_after_the_write_was_sent_keeps_the_owner_so_the_retry_ends_labeled_and_owned()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_failure_after_the_write_was_sent_keeps_the_owner_so_the_retry_ends_labeled_and_owned(bool mediaServerError)
     {
         using ArrivalApiFactory factory = new();
         (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
         Arrive(factory, key, MediaKind.Movie);
-        factory.Services.GetRequiredService<TransportFailureMediaServer>().FailAfterNextWrite = true;
+        factory.Services.GetRequiredService<TransportFailureMediaServer>().FailAfterNextWrite = mediaServerError
+            ? new MediaServerException("Plex answered 502.")
+            : new HttpRequestException("The connection closed before the answer arrived.");
 
         await RunAsync(factory);
 
@@ -811,7 +844,7 @@ public sealed class RequestArrivalTests
 
 public sealed class TransportFailureMediaServer(IMediaServer inner) : IMediaServer
 {
-    public bool FailAfterNextWrite { get; set; }
+    public Exception? FailAfterNextWrite { get; set; }
 
     public Task<MediaServerTestResult> TestConnectionAsync(CancellationToken ct = default) => inner.TestConnectionAsync(ct);
 
@@ -828,10 +861,10 @@ public sealed class TransportFailureMediaServer(IMediaServer inner) : IMediaServ
     public async Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default)
     {
         await inner.SetLabelsAsync(item, labels, ct);
-        if (this.FailAfterNextWrite)
+        if (this.FailAfterNextWrite is Exception failure)
         {
-            this.FailAfterNextWrite = false;
-            throw new HttpRequestException("The connection closed before the answer arrived.");
+            this.FailAfterNextWrite = null;
+            throw failure;
         }
     }
 }
