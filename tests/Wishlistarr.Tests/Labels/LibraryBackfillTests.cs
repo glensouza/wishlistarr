@@ -637,6 +637,22 @@ public sealed class LibraryBackfillTests
     }
 
     [Fact]
+    public async Task Dry_run_fails_with_bad_gateway_when_plex_labels_cannot_be_scanned()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillPreview preview = await factory.PreviewAsync(profile);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        factory.Plex.Delay = request => request.Path.EndsWith("/label", StringComparison.Ordinal)
+            ? throw new InvalidOperationException("label scan unavailable")
+            : Task.CompletedTask;
+
+        HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Bounded_chunks_resume_in_new_scopes_and_undo_all_copies_without_claiming_a_preexisting_copy_or_guardian_repair()
     {
         using BackfillApiFactory factory = new();

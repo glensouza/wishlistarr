@@ -440,8 +440,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
                 .OrderBy(entry => int.Parse(entry.Match.Groups[1].Value, CultureInfo.InvariantCulture))
                 .Select(entry => entry.Value),
         ];
-        string[] removed = query.TryGetValue("label[].tag.tag-", out string? removal) ? removal.Split(',') : [];
-        item.Edit(replacement, removed, query.GetValueOrDefault("label.locked") == "1");
+        string[] removed = query.TryGetValue("label[].tag.tag-", out string? removal) ? [.. removal.Split(',').Select(Uri.UnescapeDataString)] : [];
+        item.Edit(replacement.Count > 0 ? replacement : null, removed, query.GetValueOrDefault("label.locked") == "1");
         context.Response.StatusCode = StatusCodes.Status200OK;
     }
 
@@ -574,11 +574,15 @@ public sealed partial class FakePlexServer : IAsyncDisposable
             }
         }
 
-        public void Edit(IReadOnlyList<string> added, IReadOnlyList<string> removed, bool lockField)
+        public void Edit(IReadOnlyList<string>? replacement, IReadOnlyList<string> removed, bool lockField)
         {
             lock (this.labels)
             {
-                this.labels.AddRange(added.Distinct(StringComparer.OrdinalIgnoreCase).Where(label => !this.labels.Contains(label, StringComparer.OrdinalIgnoreCase)).ToList());
+                if (replacement is not null)
+                {
+                    this.labels.Clear();
+                    this.labels.AddRange(replacement.Distinct(StringComparer.OrdinalIgnoreCase));
+                }
 
                 this.labels.RemoveAll(label => removed.Contains(label, StringComparer.OrdinalIgnoreCase));
                 this.locked |= lockField;

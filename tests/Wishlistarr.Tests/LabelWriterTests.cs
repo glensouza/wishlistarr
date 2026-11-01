@@ -144,8 +144,9 @@ public sealed class LabelWriterTests
 
         List<FakePlexServer.RecordedRequest> item = [.. factory.Fake.Requests.Where(request => request.Path.StartsWith("/library/", StringComparison.Ordinal))];
         FakePlexServer.RecordedRequest put = Assert.Single(item, request => request.Method == "PUT");
-        Assert.Equal("Ada", put.Query["label[0].tag.tag"]);
-        Assert.False(put.Query.ContainsKey("label[1].tag.tag"));
+        Assert.Equal("Favorites", put.Query["label[0].tag.tag"]);
+        Assert.Equal("Ben", put.Query["label[1].tag.tag"]);
+        Assert.Equal("Ada", put.Query["label[2].tag.tag"]);
         Assert.Equal(["Favorites", "Ben", "Ada"], factory.Fake.Item("101").Labels);
         Assert.Equal("1", put.Query["label.locked"]);
         int index = item.IndexOf(put);

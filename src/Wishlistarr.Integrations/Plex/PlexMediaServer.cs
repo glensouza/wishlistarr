@@ -306,13 +306,20 @@ internal sealed partial class PlexMediaServer(
             new("type", item.Kind == MediaKind.Movie ? "1" : "2"),
             new("id", item.Id),
         ];
-        List<string> added = [.. distinct.Where(label => !item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase))];
-        List<string> removed = [.. item.Labels.Where(label => !distinct.Contains(label, StringComparer.OrdinalIgnoreCase))];
-        parameters.AddRange(added.Select((label, index) =>
-            new KeyValuePair<string, string>($"label[{index.ToString(CultureInfo.InvariantCulture)}].tag.tag", label)));
-        if (removed.Count > 0)
+        bool adding = distinct.Any(label => !item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase));
+        if (adding)
         {
-            parameters.Add(new("label[].tag.tag-", string.Join(',', removed)));
+            // Plex treats indexed values as the full replacement set, so adds resend every label that should remain.
+            parameters.AddRange(distinct.Select((label, index) =>
+                new KeyValuePair<string, string>($"label[{index.ToString(CultureInfo.InvariantCulture)}].tag.tag", label)));
+        }
+        else
+        {
+            List<string> removed = [.. item.Labels.Where(label => !distinct.Contains(label, StringComparer.OrdinalIgnoreCase))];
+            if (removed.Count > 0)
+            {
+                parameters.Add(new("label[].tag.tag-", string.Join(',', removed.Select(Uri.EscapeDataString))));
+            }
         }
 
         parameters.Add(new("label.locked", "1"));

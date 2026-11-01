@@ -127,6 +127,8 @@ public sealed class LibraryBackfill(
     {
         if (input.Items is null || input.Items.Count is < 1 or > MaxSelection || input.Items.Any(item => item is null || item.LibraryItemId <= 0 || string.IsNullOrEmpty(item.Guid)) || input.Items.Select(item => item.LibraryItemId).Distinct().Count() != input.Items.Count)
             throw new BackfillException(400, "Select between 1 and 10000 different library items.");
+        // The scan reads every label from Plex, so it runs before the gate is taken and never holds up a chunk.
+        LibraryLabelScan? scan = input.DryRun ? await scanner.ScanLabelsAsync(ct) : null;
         await gate.Semaphore.WaitAsync(ct);
         try
         {
@@ -138,7 +140,7 @@ public sealed class LibraryBackfill(
             Dictionary<int, string> expected = input.Items.ToDictionary(item => item.LibraryItemId, item => item.Guid);
             if (items.Count != ids.Length || items.Any(item => item.Guid != expected[item.Id] || item.CanonicalTitle is null || item.CanonicalTitle.TmdbId <= 0 || item.CanonicalTitle.Kind != item.Kind))
                 throw new BackfillException(409, "A selected title changed or has no TMDB match. Preview the library again.");
-            if (input.DryRun) return new BackfillCreated(null, await this.DryRunAsync(serverId, profile, items, ct));
+            if (input.DryRun) return new BackfillCreated(null, await this.DryRunAsync(serverId, profile, items, scan!, ct));
             LibraryBackfillBatch batch = new()
             {
                 KidProfileId = profile.Id,
@@ -288,9 +290,10 @@ public sealed class LibraryBackfill(
         finally { gate.Semaphore.Release(); }
     }
 
-    private async Task<BackfillDryRun> DryRunAsync(string serverId, KidProfile profile, IReadOnlyList<LibraryItem> items, CancellationToken ct)
+    private async Task<BackfillDryRun> DryRunAsync(string serverId, KidProfile profile, IReadOnlyList<LibraryItem> items, LibraryLabelScan scan, CancellationToken ct)
     {
-        LibraryLabelScan scan = await scanner.ScanLabelsAsync(ct);
+        if (scan.ServerId != serverId) throw new BackfillException(409, "The selected Plex server changed. Preview the library again.");
+        if (!scan.Complete) throw new BackfillException(502, "Plex labels could not be read completely. Try the dry run again.");
         string[] guids = [.. items.Select(item => item.Guid).Distinct()];
         HashSet<string> claimed = [.. await db.OwnedLabels.AsNoTracking()
             .Where(row => row.ServerId == serverId && row.Label == profile.PlexLabel && guids.Contains(row.Guid))
