@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
@@ -155,7 +156,8 @@ public sealed partial class LibraryRefresh(
     }
 
     private static bool IsUnreachable(Exception exception) =>
-        exception is HttpRequestException or TaskCanceledException or MediaServerException { StatusCode: null };
+        exception is HttpRequestException or TaskCanceledException
+            or MediaServerException { StatusCode: null or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout };
 
     private async Task StampAttemptAsync(string ratingKey, string serverId, int itemId, CancellationToken ct)
     {

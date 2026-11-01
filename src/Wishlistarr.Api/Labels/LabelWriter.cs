@@ -347,8 +347,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Once any write was sent, a failure may have followed a write that landed, so a retrying caller keeps the owner row
-                // for its next attempt, unless Plex refused the first write outright.
-                await DiscardAsync(refused: firstSend && ex is MediaServerException { StatusCode: HttpStatusCode status } && (int)status is >= 400 and < 500);
+                // for its next attempt, unless Plex refused the first write outright, which cannot be told once the client has sent it again after a transport failure.
+                await DiscardAsync(refused: firstSend && ex is MediaServerException { StatusCode: HttpStatusCode status, Resent: false } && (int)status is >= 400 and < 500);
                 throw;
             }
 

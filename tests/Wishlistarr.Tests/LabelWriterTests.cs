@@ -607,6 +607,34 @@ public sealed class LabelWriterTests
     }
 
     [Fact]
+    public async Task A_client_error_on_a_write_the_client_sent_again_keeps_the_row_because_the_first_send_may_have_landed()
+    {
+        using LabelApiFactory factory = new();
+        await factory.LinkAsync();
+        int ada = await factory.CreateProfileAsync("Ada");
+        int puts = 0;
+        factory.Fake.AbortAfter = request => request.Method == "PUT" && Interlocked.Increment(ref puts) == 1;
+        int arrivals = 0;
+        factory.Fake.Delay = request =>
+        {
+            if (request.Method == "PUT" && Interlocked.Increment(ref arrivals) == 2)
+            {
+                factory.Fake.ServerTokenOverride = "refused-token";
+            }
+
+            return Task.CompletedTask;
+        };
+
+        MediaServerException error = await Assert.ThrowsAsync<MediaServerException>(() =>
+            factory.WithWriterAsync(writer => writer.AddAsync("101", "Ada", ada, "request", keepReservationAfterSend: true)));
+
+        Assert.Equal(System.Net.HttpStatusCode.Unauthorized, error.StatusCode);
+        Assert.True(error.Resent);
+        Assert.Equal(["Ada"], factory.Fake.Item("101").Labels);
+        Assert.Equal("Ada", Assert.Single(await factory.GetLedgerAsync()).Label);
+    }
+
+    [Fact]
     public async Task A_write_plex_rejected_leaves_no_ledger_row()
     {
         using LabelApiFactory factory = new();

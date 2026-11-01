@@ -88,6 +88,8 @@ public sealed partial class FakePlexServer : IAsyncDisposable
 
     public Func<RecordedRequest, Task>? Delay { get; set; }
 
+    public Func<RecordedRequest, bool>? AbortAfter { get; set; }
+
     public TimeSpan MetadataDelay { get; set; }
 
     public static async Task<FakePlexServer> StartAsync()
@@ -316,6 +318,11 @@ public sealed partial class FakePlexServer : IAsyncDisposable
         {
             this.HandleEdit(context, path["/library/sections/".Length..^"/all".Length], request.Query);
             this.AfterRequest?.Invoke(request);
+            if (this.AbortAfter?.Invoke(request) == true)
+            {
+                context.Abort();
+            }
+
             return;
         }
 

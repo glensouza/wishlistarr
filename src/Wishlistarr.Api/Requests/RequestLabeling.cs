@@ -130,7 +130,8 @@ public sealed partial class RequestLabeling(
             deadline?.Dispose();
         }
 
-        if (failure is not null && added.Count > 0)
+        // A retry keeps the labels already added, so the shared ledger row they depend on is still there for the next attempt.
+        if (failure is not null && added.Count > 0 && !retry)
         {
             await this.RollBackAsync(requestId, added, profile.PlexLabel);
         }

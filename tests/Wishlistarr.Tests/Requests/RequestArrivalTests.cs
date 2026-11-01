@@ -558,6 +558,8 @@ public sealed class RequestArrivalTests
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
     public async Task Legacy_retries_stop_after_one_attempt_when_plex_cannot_be_reached(int kind)
     {
         using ArrivalApiFactory factory = new();
@@ -572,7 +574,9 @@ public sealed class RequestArrivalTests
         {
             0 => new HttpRequestException("The connection was refused."),
             1 => new TaskCanceledException("The request timed out."),
-            _ => new MediaServerException("Plex could not be reached."),
+            2 => new MediaServerException("Plex could not be reached."),
+            3 => new MediaServerException("Plex rejected the saved sign-in.", System.Net.HttpStatusCode.Unauthorized),
+            _ => new MediaServerException("Plex answered 503.", System.Net.HttpStatusCode.ServiceUnavailable),
         };
 
         using (IServiceScope scope = factory.Services.CreateScope())
@@ -688,6 +692,35 @@ public sealed class RequestArrivalTests
         Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
         Assert.Equal(1, factory.LabelWrites);
         Assert.Equal(owner.Id, Assert.Single(await factory.GetLedgerAsync()).Id);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task A_retryable_failure_on_a_copy_sharing_a_guid_keeps_the_earlier_copy_and_the_shared_row()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string guid = factory.Plex.Item(key).Guid;
+        factory.Plex.Rematch("102", guid, "Another copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        int puts = 0;
+        factory.Plex.Delay = request => request.Method == "PUT" && Interlocked.Increment(ref puts) == 2
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Single(await factory.GetLedgerAsync());
+        Assert.Single(new[] { key, "102" }, item => factory.Plex.Item(item).Labels.Count > 0);
+
+        factory.Plex.Delay = null;
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
+        Assert.NotEmpty(factory.Plex.Item(key).Labels);
+        Assert.Equal(factory.Plex.Item(key).Labels, factory.Plex.Item("102").Labels);
+        Assert.Single(await factory.GetLedgerAsync());
         Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
     }
 

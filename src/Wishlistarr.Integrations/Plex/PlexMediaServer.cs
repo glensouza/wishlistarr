@@ -616,6 +616,11 @@ internal sealed partial class PlexMediaServer(
                     reselected = true;
                 }
             }
+            catch (MediaServerException resent)
+            {
+                resent.Resent = true;
+                throw;
+            }
             finally
             {
                 this.selectionLock.Release();
@@ -630,6 +635,11 @@ internal sealed partial class PlexMediaServer(
                 }
 
                 return result;
+            }
+            catch (MediaServerException resent)
+            {
+                resent.Resent = true;
+                throw;
             }
             catch (Exception retryEx) when (reselected && IsUnreachable(retryEx, ct))
             {
