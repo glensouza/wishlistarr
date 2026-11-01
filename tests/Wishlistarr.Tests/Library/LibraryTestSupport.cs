@@ -12,6 +12,7 @@ using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
 using Wishlistarr.Integrations.Tmdb;
 using Wishlistarr.Tests.Jobs;
+using Wishlistarr.Tests.Tmdb;
 
 namespace Wishlistarr.Tests.Library;
 
@@ -247,6 +248,7 @@ public sealed class LibraryHarness : IAsyncDisposable
         services.AddSingleton<ILibraryScanner>(provider => provider.GetRequiredService<FakeScanner>());
         services.AddSingleton<FakeTmdbFinder>();
         services.AddSingleton<ITmdbClient>(provider => provider.GetRequiredService<FakeTmdbFinder>());
+        services.AddSingleton<ITmdbApiKeyProvider, FixedKeyProvider>();
         services.AddLibraryIndex();
 
         ServiceProvider provider = services.BuildServiceProvider();
