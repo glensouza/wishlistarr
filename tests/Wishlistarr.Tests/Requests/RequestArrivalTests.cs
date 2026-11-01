@@ -395,14 +395,14 @@ public sealed class RequestArrivalTests
 
         Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
         Assert.Empty(factory.Plex.Item(key).Labels);
-        Assert.Empty(await factory.GetLedgerAsync());
+        OwnedLabel kept = Assert.Single(await factory.GetLedgerAsync());
         Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
 
         factory.Plex.Delay = null;
         await RunAsync(factory);
 
         Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
-        Assert.Single(await factory.GetLedgerAsync());
+        Assert.Equal(kept.Id, Assert.Single(await factory.GetLedgerAsync()).Id);
         Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Available);
     }
 
