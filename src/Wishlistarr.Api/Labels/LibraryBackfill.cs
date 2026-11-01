@@ -130,9 +130,10 @@ public sealed class LibraryBackfill(
         LibraryLabelScan? scan = null;
         if (input.DryRun)
         {
-            // The cheap checks come first so a bad request never pays for the scan, which reads every label from Plex and stays outside the gate so it cannot hold up a chunk.
-            await this.ProfileAsync(input.KidProfileId, ct);
-            await this.ReadyServerAsync(ct);
+            // Cheap checks first, and the scan stays outside the gate so it cannot stall a chunk.
+            KidProfile early = await this.ProfileAsync(input.KidProfileId, ct);
+            string earlyServerId = await this.ReadyServerAsync(ct);
+            if (earlyServerId != input.ServerId || early.PlexLabel != input.Label) throw new BackfillException(409, "The server or profile label changed. Preview the library again.");
             scan = await scanner.ScanLabelsAsync(ct);
         }
 

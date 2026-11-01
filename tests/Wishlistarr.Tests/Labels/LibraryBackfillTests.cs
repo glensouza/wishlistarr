@@ -660,7 +660,7 @@ public sealed class LibraryBackfillTests
     }
 
     [Fact]
-    public async Task Dry_run_fails_with_bad_gateway_when_plex_labels_cannot_be_scanned()
+    public async Task Dry_run_scan_failure_is_bad_gateway_and_the_scan_does_not_hold_the_gate()
     {
         using BackfillApiFactory factory = new();
         int profile = await factory.PrepareAsync();
@@ -678,9 +678,15 @@ public sealed class LibraryBackfillTests
         };
 
         Task<HttpResponseMessage> response = parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
-        await scanning.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await factory.ChangeAsync(batch.Id, true);
-        release.SetResult();
+        try
+        {
+            await scanning.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await factory.ChangeAsync(batch.Id, true);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
 
         Assert.Equal(HttpStatusCode.BadGateway, (await response).StatusCode);
         Assert.Equal(BackfillState.Undoing, (await factory.BatchAsync(batch.Id)).State);
@@ -713,6 +719,26 @@ public sealed class LibraryBackfillTests
         HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("The selected Plex server changed. Preview the library again.", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task Dry_run_with_a_stale_refresh_or_changed_label_is_conflict_without_scanning_labels()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillPreview preview = await factory.PreviewAsync(profile);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        BackfillSelection[] items = [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)];
+
+        HttpResponseMessage changed = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, "Other", items, true));
+        using (IServiceScope scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryRefreshStates.ExecuteUpdateAsync(setters => setters.SetProperty(state => state.LastFullRefreshAt, (DateTimeOffset?)null));
+        HttpResponseMessage stale = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, items, true));
+
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.DoesNotContain(factory.Plex.Requests, request => request.Path.EndsWith("/label", StringComparison.Ordinal));
     }
 
     [Fact]
