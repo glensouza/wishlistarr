@@ -316,6 +316,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             // The ledger row is saved before Plex is touched, so a deadline that fires after Plex took the change cannot leave a label with no owner.
             release ??= await reserve(current);
             bool labelsChanged = false;
+            bool sent = false;
             try
             {
                 if (expectedIdentity is not null)
@@ -333,12 +334,18 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 
                 if (!labelsChanged)
                 {
+                    sent = true;
                     await server.SetLabelsAsync(current, labels, ct);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await DiscardAsync();
+                // A transport error after the write was sent may still have reached Plex, so the owner row stays for a retry to find.
+                if (!(sent && ex is HttpRequestException))
+                {
+                    await DiscardAsync();
+                }
+
                 throw;
             }
 

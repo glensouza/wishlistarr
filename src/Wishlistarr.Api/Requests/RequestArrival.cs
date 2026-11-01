@@ -25,10 +25,12 @@ public sealed partial class RequestArrival(
     RequestLabeling labeling,
     RequestLocks locks,
     IProfileLabelGate profileLabels,
+    TimeProvider time,
     ILogger<RequestArrival> logger)
 {
     public const string Component = "arrival";
     private const int BatchSize = 50;
+    private static readonly TimeSpan MissingTitleWindow = TimeSpan.FromHours(24);
 
     public async Task CheckAsync(CancellationToken ct)
     {
@@ -106,6 +108,17 @@ public sealed partial class RequestArrival(
 
         if (visible.Count == 0)
         {
+            if (request.State == RequestState.Available && time.GetUtcNow() - request.StateChangedAt >= MissingTitleWindow)
+            {
+                await requests.TransitionAsync(
+                    id,
+                    RequestState.Failed,
+                    RequestActor.System(Component),
+                    RequestLabeling.NoLongerInLibraryReason,
+                    ct,
+                    RequestState.Available);
+            }
+
             return;
         }
 

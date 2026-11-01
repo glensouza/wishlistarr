@@ -87,7 +87,7 @@ public sealed partial class LibraryRefresh(
         }
 
         // Failed lookups do not change Plex's timestamp, so the incremental cursor cannot decide which mappings to retry.
-        // Every attempt stamps IndexedAt, which spaces the attempts per item.
+        // Every attempt stamps IndexedAt, which spaces the attempts per item; an item Plex no longer has is dropped from the index.
         DateTimeOffset due = time.GetUtcNow() - UnresolvedRetryAfter;
         int after = 0;
         while (true)
@@ -115,10 +115,31 @@ public sealed partial class LibraryRefresh(
                 }
 
                 using IDisposable held = await gate.EnterAsync(ct);
-                LibrarySnapshot? snapshot = await scanner.GetEntryAsync(item.RatingKey, ct);
-                if (snapshot?.ServerId == serverId)
+                try
                 {
-                    await this.UpsertAsync(serverId, [snapshot.Entry], ct);
+                    LibrarySnapshot? snapshot = await scanner.GetEntryAsync(item.RatingKey, ct);
+                    if (snapshot is null)
+                    {
+                        await db.LibraryItems.Where(row => row.ServerId == serverId && row.RatingKey == item.RatingKey).ExecuteDeleteAsync(ct);
+                        await this.RemoveOrphanTitlesAsync(ct);
+                    }
+                    else if (snapshot.ServerId != serverId)
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        await this.UpsertAsync(serverId, [snapshot.Entry], ct);
+                    }
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested && ex is not MediaServerNotConfiguredException)
+                {
+                    this.LogRetryFailed(ex, item.Id);
+                }
+
+                if (this.tmdbUnavailable)
+                {
+                    return;
                 }
             }
         }
@@ -498,6 +519,9 @@ public sealed partial class LibraryRefresh(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Library refresh indexed {Count} items.")]
     private partial void LogRefreshed(int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Retrying the legacy id lookup for library item {ItemId} failed; it will be retried later")]
+    private partial void LogRetryFailed(Exception exception, int itemId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "TMDB lookup failed for a {Kind} by {Source} id.")]
     private partial void LogResolveFailed(Exception exception, MediaKind kind, ExternalIdSource source);

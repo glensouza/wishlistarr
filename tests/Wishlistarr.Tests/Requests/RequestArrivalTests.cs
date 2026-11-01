@@ -15,6 +15,7 @@ using Wishlistarr.Api.Requests;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Tests.Arr;
 
 namespace Wishlistarr.Tests.Requests;
@@ -33,6 +34,9 @@ public sealed class ArrivalApiFactory() : DispatchApiFactory(useLibraryIndex: tr
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(this.Time);
+            services.AddSingleton(provider => new TransportFailureMediaServer(provider.GetRequiredService<PlexMediaServer>()));
+            services.RemoveAll<IMediaServer>();
+            services.AddSingleton<IMediaServer>(provider => provider.GetRequiredService<TransportFailureMediaServer>());
         });
     }
 }
@@ -463,38 +467,163 @@ public sealed class RequestArrivalTests
     {
         using ArrivalApiFactory factory = new();
         (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
-        factory.Plex.Rematch(key, "com.plexapp.agents.imdb://tt0133093?lang=en", "Legacy movie");
-        factory.Tmdb.SetBody("/3/find/tt0133093", $$"""{"movie_results":[{"id":{{TmdbId(MediaKind.Movie)}}}]}""");
-        factory.Time.Advance(LegacyRetryAfter);
+        await IndexUnresolvedAsync(factory, (key, "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie));
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
         factory.TmdbKeys.Key = null;
         int reads = factory.Plex.Count("GET", $"/library/metadata/{key}");
 
-        using (IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None))
-        {
-            using IServiceScope scope = factory.Services.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
-        }
+        await RetryWhileGateHeldAsync(factory);
 
         Assert.Equal(reads, factory.Plex.Count("GET", $"/library/metadata/{key}"));
-        Assert.Equal(0, factory.Tmdb.Count("/3/find/tt0133093"));
+        Assert.Equal(1, factory.Tmdb.Count("/3/find/tt0133093"));
     }
 
     [Fact]
-    public async Task Polling_does_not_take_the_refresh_gate_when_no_legacy_item_is_due()
+    public async Task Polling_does_not_take_the_refresh_gate_or_ask_plex_while_no_legacy_item_is_due()
     {
         using ArrivalApiFactory factory = new();
         (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
-        factory.Plex.Rematch(key, "com.plexapp.agents.imdb://tt0133093?lang=en", "Legacy movie");
-        factory.Tmdb.SetBody("/3/find/tt0133093", $$"""{"movie_results":[{"id":{{TmdbId(MediaKind.Movie)}}}]}""");
-        factory.Time.Advance(LegacyRetryAfter - TimeSpan.FromSeconds(1));
+        await IndexUnresolvedAsync(factory, (key, "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie));
+        await AgeLibraryAsync(factory, LegacyRetryAfter - TimeSpan.FromSeconds(30));
+        int reads = factory.Plex.Count("GET", $"/library/metadata/{key}");
 
-        using (IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None))
+        await RetryWhileGateHeldAsync(factory);
+
+        Assert.Equal(reads, factory.Plex.Count("GET", $"/library/metadata/{key}"));
+        Assert.Equal(1, factory.Tmdb.Count("/3/find/tt0133093"));
+
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+        using (IServiceScope scope = factory.Services.CreateScope())
         {
-            using IServiceScope scope = factory.Services.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
         }
 
-        Assert.Equal(0, factory.Tmdb.Count("/3/find/tt0133093"));
+        Assert.Equal(2, factory.Tmdb.Count("/3/find/tt0133093"));
+        Assert.NotNull(await TitleIdAsync(factory, key));
+    }
+
+    [Fact]
+    public async Task Polling_drops_a_legacy_item_that_plex_no_longer_has_instead_of_retrying_it()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        await IndexUnresolvedAsync(factory, (key, "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie));
+        factory.Plex.DeleteItem(key);
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
+            Assert.False(await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryItems.AnyAsync(item => item.RatingKey == key));
+        }
+
+        int reads = factory.Plex.Count("GET", $"/library/metadata/{key}");
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(reads, factory.Plex.Count("GET", $"/library/metadata/{key}"));
+    }
+
+    [Fact]
+    public async Task One_legacy_item_that_fails_to_reload_does_not_stop_the_arrival_check()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Show);
+        await IndexUnresolvedAsync(
+            factory,
+            ("101", "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie),
+            (key, "com.plexapp.agents.thetvdb://2000?lang=en", "2000", "tv_results", MediaKind.Show));
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+        factory.Plex.Delay = request => request.Path == "/library/metadata/101"
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Contains(factory.Plex.Requests, request => request.Path == "/library/metadata/101");
+        Assert.Single(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Legacy_retries_stop_once_tmdb_reports_that_no_key_is_configured()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Show);
+        await IndexUnresolvedAsync(
+            factory,
+            ("101", "com.plexapp.agents.imdb://tt0133093?lang=en", "tt0133093", "movie_results", MediaKind.Movie),
+            (key, "com.plexapp.agents.thetvdb://2000?lang=en", "2000", "tv_results", MediaKind.Show));
+        await AgeLibraryAsync(factory, LegacyRetryAfter);
+        int reads = factory.Plex.Count("GET", "/library/metadata/101") + factory.Plex.Count("GET", $"/library/metadata/{key}");
+        factory.Plex.Delay = request =>
+        {
+            if (request.Path.StartsWith("/library/metadata/", StringComparison.Ordinal))
+            {
+                factory.TmdbKeys.Key = null;
+            }
+
+            return Task.CompletedTask;
+        };
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(reads + 1, factory.Plex.Count("GET", "/library/metadata/101") + factory.Plex.Count("GET", $"/library/metadata/{key}"));
+    }
+
+    [Fact]
+    public async Task A_transport_error_after_the_write_was_sent_keeps_the_owner_so_the_retry_ends_labeled_and_owned()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        factory.Services.GetRequiredService<TransportFailureMediaServer>().FailAfterNextWrite = true;
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
+        Assert.NotEmpty(factory.Plex.Item(key).Labels);
+        OwnedLabel owner = Assert.Single(await factory.GetLedgerAsync());
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Equal(1, factory.LabelWrites);
+        Assert.Equal(owner.Id, Assert.Single(await factory.GetLedgerAsync()).Id);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task An_available_request_whose_title_stays_missing_fails_after_the_window()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<MediaRequests>().TransitionAsync(id, RequestState.Available, RequestActor.System(RequestArrival.Component));
+        }
+
+        factory.Plex.DeleteItem(key);
+        await RunAsync(factory);
+        Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
+
+        await AgeRequestAsync(factory, TimeSpan.FromHours(23));
+        await RunAsync(factory);
+        Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
+
+        await AgeRequestAsync(factory, TimeSpan.FromHours(24));
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Equal(RequestLabeling.NoLongerInLibraryReason, (await factory.GetHistoryAsync(id)).Single(item => item.ToState == RequestState.Failed).Reason);
+        Assert.Equal(0, factory.LabelWrites);
     }
 
     [Fact]
@@ -544,6 +673,58 @@ public sealed class RequestArrivalTests
         Assert.Equal(RequestState.Fulfilling, (await factory.GetRequestsAsync()).Single().State);
         Assert.Empty(factory.Plex.Item(key).Labels);
         Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    private static async Task IndexUnresolvedAsync(ArrivalApiFactory factory, params (string Key, string Guid, string ExternalId, string Results, MediaKind Kind)[] items)
+    {
+        foreach ((string key, string guid, string externalId, string results, MediaKind kind) in items)
+        {
+            factory.Plex.Rematch(key, guid, "Legacy title");
+            string path = $"/3/find/{externalId}";
+            factory.Tmdb.SetBody(path, $$"""{"{{results}}":[{"id":{{TmdbId(kind)}}}]}""");
+            factory.Tmdb.Enqueue(path, 503);
+        }
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
+        }
+
+        foreach ((string key, _, string externalId, _, _) in items)
+        {
+            Assert.Null(await TitleIdAsync(factory, key));
+            Assert.Equal(1, factory.Tmdb.Count($"/3/find/{externalId}"));
+        }
+    }
+
+    private static async Task<int?> TitleIdAsync(ArrivalApiFactory factory, string key)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        return (await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryItems.AsNoTracking()
+            .SingleAsync(item => item.RatingKey == key)).TitleId;
+    }
+
+    private static async Task AgeLibraryAsync(ArrivalApiFactory factory, TimeSpan age)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        DateTimeOffset stamp = factory.Time.GetUtcNow() - age;
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().LibraryItems
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.IndexedAt, stamp));
+    }
+
+    private static async Task AgeRequestAsync(ArrivalApiFactory factory, TimeSpan age)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        DateTimeOffset stamp = factory.Time.GetUtcNow() - age;
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().MediaRequests
+            .ExecuteUpdateAsync(setters => setters.SetProperty(request => request.StateChangedAt, stamp));
+    }
+
+    private static async Task RetryWhileGateHeldAsync(ArrivalApiFactory factory)
+    {
+        using IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
+        using IServiceScope scope = factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     private static int TmdbId(MediaKind kind) => kind == MediaKind.Movie ? DispatchApiFactory.MovieId : FakeArrServer.ShowTmdbId;
@@ -625,5 +806,32 @@ public sealed class RequestArrivalTests
         }
 
         throw new TimeoutException("The arrival check did not finish.");
+    }
+}
+
+public sealed class TransportFailureMediaServer(IMediaServer inner) : IMediaServer
+{
+    public bool FailAfterNextWrite { get; set; }
+
+    public Task<MediaServerTestResult> TestConnectionAsync(CancellationToken ct = default) => inner.TestConnectionAsync(ct);
+
+    public Task<IReadOnlyList<MediaLibrary>> GetLibrariesAsync(CancellationToken ct = default) => inner.GetLibrariesAsync(ct);
+
+    public Task<IReadOnlyList<MediaServerUser>> GetUsersAsync(CancellationToken ct = default) => inner.GetUsersAsync(ct);
+
+    public Task<IReadOnlyList<MediaItem>> FindByExternalIdAsync(MediaKind kind, ExternalId id, CancellationToken ct = default) => inner.FindByExternalIdAsync(kind, id, ct);
+
+    public Task<IReadOnlyList<MediaItem>> FindByGuidAsync(string guid, CancellationToken ct = default) => inner.FindByGuidAsync(guid, ct);
+
+    public Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default) => inner.GetLabelsAsync(itemId, ct);
+
+    public async Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default)
+    {
+        await inner.SetLabelsAsync(item, labels, ct);
+        if (this.FailAfterNextWrite)
+        {
+            this.FailAfterNextWrite = false;
+            throw new HttpRequestException("The connection closed before the answer arrived.");
+        }
     }
 }

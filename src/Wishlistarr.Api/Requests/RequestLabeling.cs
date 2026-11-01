@@ -18,6 +18,7 @@ public sealed partial class RequestLabeling(
 {
     public const string LabelSource = "request";
     public const string StoppedReason = "Labeling was stopped before it started.";
+    public const string NoLongerInLibraryReason = "The title is no longer in the library.";
     public const string TimeoutReason = "Plex did not answer in time.";
     public const string WriteFailedReason = "The Plex label could not be written.";
 
@@ -111,7 +112,7 @@ public sealed partial class RequestLabeling(
 
             if (labeled == 0)
             {
-                failure = "The title is no longer in the library.";
+                failure = NoLongerInLibraryReason;
             }
         }
         catch (Exception ex)
