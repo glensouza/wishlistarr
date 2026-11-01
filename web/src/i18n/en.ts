@@ -32,7 +32,7 @@ export const en = {
   'backfill.dryRun': 'Dry run selected labels',
   'backfill.apply': 'Apply selected labels',
   'backfill.dryDone':
-    'Dry run passed. No batch, labels or ledger entries were changed.',
+    'Dry run passed: {selected} selected, {wouldApply} would be labeled, {wouldPreserve} already have the label or another owner and would be preserved. No batch, labels or ledger entries were changed.',
   'backfill.queued': 'Labeling queued. Progress is saved after each title.',
   'backfill.failed': 'Library labels could not be loaded. Try again.',
   'backfill.history': 'Recent label batches',

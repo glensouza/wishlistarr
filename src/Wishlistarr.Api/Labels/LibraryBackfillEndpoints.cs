@@ -29,8 +29,9 @@ public static class LibraryBackfillEndpoints
         group.MapPost("/batches", (BackfillApply input, LibraryBackfill backfill, JobRunner jobs, CancellationToken ct) =>
             ExecuteAsync(async () =>
             {
-                BackfillBatchResponse? batch = await backfill.CreateAsync(input, ct);
-                if (batch is null) return Results.Ok(new { dryRun = true, selected = input.Items.Count });
+                BackfillCreated created = await backfill.CreateAsync(input, ct);
+                if (created.DryRun is { } dryRun) return Results.Ok(new { dryRun = true, selected = dryRun.Selected, wouldApply = dryRun.WouldApply, wouldPreserve = dryRun.WouldPreserve });
+                BackfillBatchResponse batch = created.Batch!;
                 await jobs.StartAsync(LibraryBackfillJob.JobName, JobRunTrigger.Manual, CancellationToken.None, rerunIfRunning: true);
                 return Results.Accepted($"/api/v1/labels/backfill/batches/{batch.Id}", batch);
             }))
@@ -62,12 +63,12 @@ public static class LibraryBackfillEndpoints
         group.MapPost("/batches/{id}/resume", (int id, LibraryBackfill backfill, JobRunner jobs, CancellationToken ct) => ChangeAsync(id, false, backfill, jobs, ct))
             .WithName("ResumeLibraryBackfill")
             .WithSummary("Resumes a paused apply or undo from its saved progress.")
-            .Produces<BackfillBatchResponse>(202).ProducesProblem(404);
+            .Produces<BackfillBatchResponse>(202).ProducesProblem(404).ProducesProblem(409);
 
         group.MapPost("/batches/{id}/undo", (int id, LibraryBackfill backfill, JobRunner jobs, CancellationToken ct) => ChangeAsync(id, true, backfill, jobs, ct))
             .WithName("UndoLibraryBackfill")
             .WithSummary("Queues removal of labels owned by this batch, preserving labels and ownership from outside it.")
-            .Produces<BackfillBatchResponse>(202).ProducesProblem(404);
+            .Produces<BackfillBatchResponse>(202).ProducesProblem(404).ProducesProblem(409);
     }
 
     private static Task<IResult> ChangeAsync(int id, bool undo, LibraryBackfill backfill, JobRunner jobs, CancellationToken ct) => ExecuteAsync(async () =>

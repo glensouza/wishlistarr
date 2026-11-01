@@ -30,6 +30,10 @@ public sealed record BackfillSelection(int LibraryItemId, string Guid);
 
 public sealed record BackfillApply(int KidProfileId, string ServerId, string Label, IReadOnlyList<BackfillSelection> Items, bool DryRun = false);
 
+public sealed record BackfillDryRun(int Selected, int WouldApply, int WouldPreserve);
+
+public sealed record BackfillCreated(BackfillBatchResponse? Batch, BackfillDryRun? DryRun);
+
 public sealed record BackfillBatchResponse(int Id, int KidProfileId, string Label, BackfillState State, DateTimeOffset CreatedAt, string? Error, int Total, int Pending, int Applied, int Preserved, int Skipped, int Undone);
 
 public sealed record BackfillItemResponse(string Title, MediaKind Kind, int? TmdbId, BackfillItemState State, string? Detail);
@@ -119,7 +123,7 @@ public sealed class LibraryBackfill(
         return new BackfillPreview(profileId, serverId, profile.PlexLabel, preview, total, offset, PageSize);
     }
 
-    public async Task<BackfillBatchResponse?> CreateAsync(BackfillApply input, CancellationToken ct)
+    public async Task<BackfillCreated> CreateAsync(BackfillApply input, CancellationToken ct)
     {
         if (input.Items is null || input.Items.Count is < 1 or > MaxSelection || input.Items.Any(item => item is null || item.LibraryItemId <= 0 || string.IsNullOrEmpty(item.Guid)) || input.Items.Select(item => item.LibraryItemId).Distinct().Count() != input.Items.Count)
             throw new BackfillException(400, "Select between 1 and 10000 different library items.");
@@ -134,7 +138,7 @@ public sealed class LibraryBackfill(
             Dictionary<int, string> expected = input.Items.ToDictionary(item => item.LibraryItemId, item => item.Guid);
             if (items.Count != ids.Length || items.Any(item => item.Guid != expected[item.Id] || item.CanonicalTitle is null || item.CanonicalTitle.TmdbId <= 0 || item.CanonicalTitle.Kind != item.Kind))
                 throw new BackfillException(409, "A selected title changed or has no TMDB match. Preview the library again.");
-            if (input.DryRun) return null;
+            if (input.DryRun) return new BackfillCreated(null, await this.DryRunAsync(serverId, profile, items, ct));
             LibraryBackfillBatch batch = new()
             {
                 KidProfileId = profile.Id,
@@ -153,14 +157,15 @@ public sealed class LibraryBackfill(
             };
             db.LibraryBackfillBatches.Add(batch);
             await db.SaveChangesAsync(ct);
-            return Summarize(batch);
+            return new BackfillCreated(Summarize(batch), null);
         }
         finally { gate.Semaphore.Release(); }
     }
 
     public async Task<BackfillBatchResponse> ChangeAsync(int id, bool undo, CancellationToken ct)
     {
-        await gate.Semaphore.WaitAsync(ct);
+        // A chunk holds the gate while it talks to Plex, so a request refuses instead of hanging behind it.
+        if (!await gate.Semaphore.WaitAsync(0, ct)) throw new BackfillException(409, "A chunk is being processed. Try again in a moment.");
         try
         {
             LibraryBackfillBatch batch = await db.LibraryBackfillBatches.Include(batch => batch.Items).SingleOrDefaultAsync(batch => batch.Id == id, ct)
@@ -178,6 +183,10 @@ public sealed class LibraryBackfill(
             else if (batch.State == BackfillState.UndoPaused)
             {
                 batch.State = BackfillState.Undoing;
+            }
+            else
+            {
+                throw new BackfillException(409, "Only a paused batch can be resumed.");
             }
             batch.Error = null;
             await db.SaveChangesAsync(ct);
@@ -277,6 +286,18 @@ public sealed class LibraryBackfill(
             }
         }
         finally { gate.Semaphore.Release(); }
+    }
+
+    private async Task<BackfillDryRun> DryRunAsync(string serverId, KidProfile profile, IReadOnlyList<LibraryItem> items, CancellationToken ct)
+    {
+        LibraryLabelScan scan = await scanner.ScanLabelsAsync(ct);
+        string[] guids = [.. items.Select(item => item.Guid).Distinct()];
+        HashSet<string> claimed = [.. await db.OwnedLabels.AsNoTracking()
+            .Where(row => row.ServerId == serverId && row.Label == profile.PlexLabel && guids.Contains(row.Guid))
+            .Select(row => row.Guid).ToListAsync(ct)];
+        int preserved = items.Count(item => claimed.Contains(item.Guid)
+            || (scan.LabelsByItem.TryGetValue(item.RatingKey, out IReadOnlyList<string>? present) && present.Contains(profile.PlexLabel, LabelWriter.LabelComparer)));
+        return new BackfillDryRun(items.Count, items.Count - preserved, preserved);
     }
 
     private async Task<KidProfile> ProfileAsync(int id, CancellationToken ct) =>

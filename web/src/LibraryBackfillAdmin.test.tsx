@@ -150,7 +150,13 @@ beforeEach(() => {
       if (init?.method === 'POST') {
         const body = JSON.parse(init.body as string) as Record<string, unknown>
         writes.push({ path, body })
-        if (body.dryRun) return Response.json({ dryRun: true, selected: 2 })
+        if (body.dryRun)
+          return Response.json({
+            dryRun: true,
+            selected: 2,
+            wouldApply: 1,
+            wouldPreserve: 1,
+          })
         if (path.endsWith('/undo'))
           batches = [{ ...complete, state: 'undoing' }]
         else if (path.endsWith('/resume'))
@@ -243,7 +249,9 @@ it('dry runs the selected titles without clearing selection or creating a batch'
   fireEvent.click(
     screen.getByRole('button', { name: 'Dry run selected labels' }),
   )
-  await screen.findByText(/Dry run passed/)
+  await screen.findByText(
+    /Dry run passed: 2 selected, 1 would be labeled, 1 already have the label/,
+  )
   expect(writes).toHaveLength(1)
   expect(writes[0].body.dryRun).toBe(true)
   expect(

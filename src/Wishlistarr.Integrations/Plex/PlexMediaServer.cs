@@ -306,14 +306,13 @@ internal sealed partial class PlexMediaServer(
             new("type", item.Kind == MediaKind.Movie ? "1" : "2"),
             new("id", item.Id),
         ];
-        if (distinct.Count > 0)
+        List<string> added = [.. distinct.Where(label => !item.Labels.Contains(label, StringComparer.OrdinalIgnoreCase))];
+        List<string> removed = [.. item.Labels.Where(label => !distinct.Contains(label, StringComparer.OrdinalIgnoreCase))];
+        parameters.AddRange(added.Select((label, index) =>
+            new KeyValuePair<string, string>($"label[{index.ToString(CultureInfo.InvariantCulture)}].tag.tag", label)));
+        if (removed.Count > 0)
         {
-            parameters.AddRange(distinct.Select((label, index) =>
-                new KeyValuePair<string, string>($"label[{index.ToString(CultureInfo.InvariantCulture)}].tag.tag", label)));
-        }
-        else if (item.Labels.Count > 0)
-        {
-            parameters.Add(new("label[].tag.tag-", string.Join(',', item.Labels)));
+            parameters.Add(new("label[].tag.tag-", string.Join(',', removed)));
         }
 
         parameters.Add(new("label.locked", "1"));

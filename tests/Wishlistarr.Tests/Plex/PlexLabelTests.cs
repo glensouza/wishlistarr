@@ -74,7 +74,7 @@ public sealed class PlexLabelTests
     }
 
     [Fact]
-    public async Task Setting_labels_sends_the_full_set_and_locks_the_field()
+    public async Task Setting_labels_sends_only_the_new_labels_and_locks_the_field()
     {
         await using PlexHarness harness = await PlexHarness.CreateAsync();
         await harness.LinkAndSelectAsync();
@@ -91,13 +91,28 @@ public sealed class PlexLabelTests
             {
                 ["type"] = "2",
                 ["id"] = "201",
-                ["label[0].tag.tag"] = "Favorites",
-                ["label[1].tag.tag"] = "Ada & Ben",
+                ["label[0].tag.tag"] = "Ada & Ben",
                 ["label.locked"] = "1",
             },
             put.Query);
         Assert.Equal(["Favorites", "Ada & Ben"], harness.Server.Item("201").Labels);
         Assert.True(harness.Server.Item("201").Locked);
+    }
+
+    [Fact]
+    public async Task Removing_one_label_uses_the_removal_field_without_resending_the_rest()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync();
+        await harness.LinkAndSelectAsync();
+        harness.Server.Item("201").SetLabels("Favorites", "Ada", "Ben");
+        MediaItemLabels item = (await harness.Media.GetLabelsAsync("201"))!;
+
+        await harness.Media.SetLabelsAsync(item, ["Favorites", "Ben"]);
+
+        FakePlexServer.RecordedRequest put = Assert.Single(harness.Server.Requests, request => request.Method == "PUT");
+        Assert.Equal("Ada", put.Query["label[].tag.tag-"]);
+        Assert.DoesNotContain(put.Query.Keys, key => key.StartsWith("label[0]", StringComparison.Ordinal));
+        Assert.Equal(["Favorites", "Ben"], harness.Server.Item("201").Labels);
     }
 
     [Fact]

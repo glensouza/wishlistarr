@@ -102,7 +102,7 @@ public sealed partial class LabelGuardian(
         }
 
         List<LabelGuardianEntry> extras = scan.Complete
-            ? await this.FindExtrasAsync(scan, profiles, owned, ct)
+            ? await this.FindExtrasAsync(scan, profiles, await this.LoadOwnedAsync(serverId, ct, excludeFinishedUndo: true), ct)
             : [];
 
         // Once repairs start, the report is saved even if the application is stopping or a write fails unexpectedly, so a repair that was made is never missing from the history.
@@ -196,12 +196,20 @@ public sealed partial class LabelGuardian(
     private static bool IsUniqueViolation(Exception ex) =>
         ex is SqliteException { SqliteErrorCode: SqliteConstraint } || ex.InnerException is SqliteException { SqliteErrorCode: SqliteConstraint };
 
-    private async Task<Dictionary<string, HashSet<string>>> LoadOwnedAsync(string serverId, CancellationToken ct)
+    private async Task<Dictionary<string, HashSet<string>>> LoadOwnedAsync(string serverId, CancellationToken ct, bool excludeFinishedUndo = false)
     {
         var all = await db.OwnedLabels.AsNoTracking()
             .Where(row => row.ServerId == serverId)
-            .Select(row => new { row.Guid, row.Label })
+            .Select(row => new { row.Guid, row.Label, row.Source })
             .ToListAsync(ct);
+        if (excludeFinishedUndo)
+        {
+            // Skipped copies keep an undo row for the audit trail, but once the undo has finished their label is no longer owned.
+            HashSet<string> finished = [.. (await db.LibraryBackfillBatches.AsNoTracking().Where(batch => batch.State == BackfillState.Undone).Select(batch => batch.Id).ToListAsync(ct))
+                .Select(LibraryBackfill.UndoSource)];
+            all = [.. all.Where(row => !finished.Contains(row.Source))];
+        }
+
         Dictionary<string, HashSet<string>> owned = new(StringComparer.Ordinal);
         foreach (var row in all)
         {

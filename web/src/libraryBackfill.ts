@@ -55,22 +55,25 @@ export const listBackfills = () =>
 export const getBackfill = (id: number) =>
   request<BackfillDetail>('GET', `${root}/batches/${id}`)
 
+export type BackfillDryRun = {
+  dryRun: true
+  selected: number
+  wouldApply: number
+  wouldPreserve: number
+}
+
 export const applyBackfill = (
   preview: BackfillPreview,
   items: { libraryItemId: number; guid: string }[],
   dryRun: boolean,
 ) =>
-  request<BackfillBatch | { dryRun: true; selected: number }>(
-    'POST',
-    `${root}/batches`,
-    {
-      kidProfileId: preview.kidProfileId,
-      serverId: preview.serverId,
-      label: preview.label,
-      items,
-      dryRun,
-    },
-  )
+  request<BackfillBatch | BackfillDryRun>('POST', `${root}/batches`, {
+    kidProfileId: preview.kidProfileId,
+    serverId: preview.serverId,
+    label: preview.label,
+    items,
+    dryRun,
+  })
 
 export const changeBackfill = (id: number, action: 'resume' | 'undo') =>
   request<BackfillBatch>('POST', `${root}/batches/${id}/${action}`, {})

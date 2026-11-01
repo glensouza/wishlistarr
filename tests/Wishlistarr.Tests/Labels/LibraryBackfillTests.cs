@@ -105,7 +105,7 @@ public sealed class BackfillApiFactory : KidRequestApiFactory
     {
         using IServiceScope scope = this.Services.CreateScope();
         BackfillSelection[] items = [.. preview.Items.Where(item => selected.Length == 0 ? item.Selectable : selected.Contains(item.LibraryItemId)).Select(item => new BackfillSelection(item.LibraryItemId, item.Guid))];
-        return await scope.ServiceProvider.GetRequiredService<LibraryBackfill>().CreateAsync(new BackfillApply(preview.KidProfileId, preview.ServerId, preview.Label, items, dryRun), default);
+        return (await scope.ServiceProvider.GetRequiredService<LibraryBackfill>().CreateAsync(new BackfillApply(preview.KidProfileId, preview.ServerId, preview.Label, items, dryRun), default)).Batch;
     }
 
     public async Task RunAsync(CancellationToken ct = default)
@@ -420,6 +420,83 @@ public sealed class LibraryBackfillTests
     }
 
     [Fact]
+    public async Task Resume_is_refused_unless_the_batch_is_paused()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillBatchResponse batch = (await factory.CreateAsync(await factory.PreviewAsync(profile)))!;
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        string resume = $"/api/v1/labels/backfill/batches/{batch.Id}/resume";
+
+        Assert.Equal(HttpStatusCode.Conflict, (await parent.PostAsJsonAsync(resume, new { })).StatusCode);
+        Assert.Equal(BackfillState.Applying, (await factory.BatchAsync(batch.Id)).State);
+        await factory.RunAsync();
+        Assert.Equal(BackfillState.Completed, (await factory.BatchAsync(batch.Id)).State);
+        Assert.Equal(HttpStatusCode.Conflict, (await parent.PostAsJsonAsync(resume, new { })).StatusCode);
+        await factory.ChangeAsync(batch.Id, true);
+        await factory.RunAsync();
+        Assert.Equal(BackfillState.Undone, (await factory.BatchAsync(batch.Id)).State);
+        HttpResponseMessage undone = await parent.PostAsJsonAsync(resume, new { });
+        Assert.Equal(HttpStatusCode.Conflict, undone.StatusCode);
+        Assert.Equal(BackfillState.Undone, (await factory.BatchAsync(batch.Id)).State);
+    }
+
+    [Fact]
+    public async Task Resume_and_undo_answer_busy_instead_of_waiting_for_a_running_chunk()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillBatchResponse batch = (await factory.CreateAsync(await factory.PreviewAsync(profile)))!;
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        BackfillGate gate = factory.Services.GetRequiredService<BackfillGate>();
+        await gate.Semaphore.WaitAsync();
+        try
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+            HttpResponseMessage resume = await parent.PostAsJsonAsync($"/api/v1/labels/backfill/batches/{batch.Id}/resume", new { }, timeout.Token);
+            HttpResponseMessage undo = await parent.PostAsJsonAsync($"/api/v1/labels/backfill/batches/{batch.Id}/undo", new { }, timeout.Token);
+
+            Assert.Equal(HttpStatusCode.Conflict, resume.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, undo.StatusCode);
+        }
+        finally
+        {
+            gate.Semaphore.Release();
+        }
+
+        Assert.Equal(BackfillState.Applying, (await factory.BatchAsync(batch.Id)).State);
+    }
+
+    [Fact]
+    public async Task Undo_rows_kept_for_skipped_copies_stop_counting_as_owned_once_the_undo_has_finished()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillBatchResponse batch = (await factory.CreateAsync(await factory.PreviewAsync(profile)))!;
+        await factory.RunAsync();
+        string guid = factory.Plex.Item("101").Guid;
+        async Task SetAsync(BackfillState state)
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            await db.LibraryBackfillBatches.Where(row => row.Id == batch.Id).ExecuteUpdateAsync(setters => setters.SetProperty(row => row.State, state));
+            await db.OwnedLabels.Where(row => row.Guid == guid).ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Source, LibraryBackfill.UndoSource(batch.Id)));
+        }
+
+        async Task<int> ExtrasAsync()
+        {
+            using IServiceScope scope = factory.Services.CreateScope();
+            LabelGuardianReport report = (await scope.ServiceProvider.GetRequiredService<LabelGuardian>().RunAsync(true, false, default));
+            return report.Entries.Count(entry => entry.Kind == LabelDriftKind.Extra && entry.RatingKey == "101");
+        }
+
+        await SetAsync(BackfillState.Undoing);
+        Assert.Equal(0, await ExtrasAsync());
+        await SetAsync(BackfillState.Undone);
+        Assert.Equal(1, await ExtrasAsync());
+    }
+
+    [Fact]
     public async Task Plex_failure_pauses_and_resume_retries_only_pending_items()
     {
         using BackfillApiFactory factory = new();
@@ -527,6 +604,8 @@ public sealed class LibraryBackfillTests
         JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(body.GetProperty("dryRun").GetBoolean());
         Assert.Equal(1, body.GetProperty("selected").GetInt32());
+        Assert.Equal(1, body.GetProperty("wouldApply").GetInt32());
+        Assert.Equal(0, body.GetProperty("wouldPreserve").GetInt32());
         Assert.Equal(0, factory.LabelWrites);
         Assert.Empty(await factory.GetLedgerAsync());
         using IServiceScope scope = factory.Services.CreateScope();
@@ -534,6 +613,27 @@ public sealed class LibraryBackfillTests
         Assert.Equal(0, await db.LibraryBackfillBatches.CountAsync());
         Assert.Equal(0, await db.LibraryBackfillItems.CountAsync());
         Assert.Equal(0, await db.JobRuns.CountAsync(run => run.JobName == LibraryBackfillJob.JobName));
+    }
+
+    [Fact]
+    public async Task Dry_run_reports_how_many_items_would_be_applied_and_how_many_already_have_the_label_or_an_owner()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        factory.Plex.Item("102").SetLabels("Kid");
+        using (IServiceScope scope = factory.Services.CreateScope())
+            await scope.ServiceProvider.GetRequiredService<LabelWriter>().AddAsync("101", "Kid", profile, "grant");
+        BackfillPreview preview = await factory.PreviewAsync(profile);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        BackfillSelection[] items = [.. preview.Items.Select(item => new BackfillSelection(item.LibraryItemId, item.Guid))];
+
+        HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, items, true));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        JsonElement body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(3, body.GetProperty("selected").GetInt32());
+        Assert.Equal(1, body.GetProperty("wouldApply").GetInt32());
+        Assert.Equal(2, body.GetProperty("wouldPreserve").GetInt32());
     }
 
     [Fact]
@@ -735,7 +835,7 @@ public sealed class LibraryBackfillTests
         string remaining = before.Items.First(item => item.State == BackfillItemState.Applied).RatingKey;
         using (IServiceScope scope = factory.Services.CreateScope())
             Assert.Equal(LabelWriteOutcome.LabelInUse, (await scope.ServiceProvider.GetRequiredService<LabelWriter>().RemoveBackfillAsync(remaining, "Kid", profile, ledger.Source, preview.ServerId, guid, default)).Outcome);
-        await factory.ChangeAsync(batch.Id, !resumed);
+        if (!resumed) await factory.ChangeAsync(batch.Id, true);
         await factory.RunAsync();
 
         LibraryBackfillBatch paused = await factory.BatchAsync(batch.Id);

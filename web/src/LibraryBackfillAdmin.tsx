@@ -32,7 +32,7 @@ export default function LibraryBackfillAdmin() {
   const seen = useRef(
     new Map<
       number,
-      { title: string; outcome: BackfillPreviewItem['outcome'] }
+      { titleKey: string; outcome: BackfillPreviewItem['outcome'] }
     >(),
   )
   const [batches, setBatches] = useState<BackfillBatch[]>([])
@@ -81,7 +81,7 @@ export default function LibraryBackfillAdmin() {
         )
         const newlyRestricted = new Set<number>()
         for (const [id, previous] of seen.current) {
-          const latest = decisions.get(previous.title)
+          const latest = decisions.get(previous.titleKey)
           if (!latest) continue
           if (
             !latest.selectable ||
@@ -90,13 +90,13 @@ export default function LibraryBackfillAdmin() {
           )
             newlyRestricted.add(id)
           seen.current.set(id, {
-            title: previous.title,
+            titleKey: previous.titleKey,
             outcome: latest.outcome,
           })
         }
         for (const item of loaded.items)
           seen.current.set(item.libraryItemId, {
-            title: titleKey(item),
+            titleKey: titleKey(item),
             outcome: item.outcome,
           })
         setSelection((previous) => {
@@ -157,7 +157,7 @@ export default function LibraryBackfillAdmin() {
     setNotice(null)
     setWorking(true)
     try {
-      await applyBackfill(
+      const result = await applyBackfill(
         preview,
         [...selection].map(([libraryItemId, guid]) => ({
           libraryItemId,
@@ -165,7 +165,15 @@ export default function LibraryBackfillAdmin() {
         })),
         dryRun,
       )
-      setNotice(t(dryRun ? 'backfill.dryDone' : 'backfill.queued'))
+      setNotice(
+        'dryRun' in result
+          ? t('backfill.dryDone', {
+              selected: result.selected,
+              wouldApply: result.wouldApply,
+              wouldPreserve: result.wouldPreserve,
+            })
+          : t('backfill.queued'),
+      )
       if (!dryRun) {
         setBatches(await listBackfills())
         setSelection(new Map())
