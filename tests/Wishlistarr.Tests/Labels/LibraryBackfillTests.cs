@@ -10,8 +10,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Api.Labels;
 using Wishlistarr.Core.Content;
+using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Plex;
 using Wishlistarr.Tests.Plex;
 using Wishlistarr.Tests.Requests;
 
@@ -43,8 +45,27 @@ public sealed class ObservedProfileLabelGate : IProfileLabelGate
     }
 }
 
+public sealed class ScanServerOverride(ILibraryScanner inner) : ILibraryScanner
+{
+    public string? ServerId { get; set; }
+
+    public Task<LibraryScan> ScanAsync(DateTimeOffset? updatedSince, CancellationToken ct = default) => inner.ScanAsync(updatedSince, ct);
+
+    public async Task<LibraryLabelScan> ScanLabelsAsync(CancellationToken ct = default)
+    {
+        LibraryLabelScan scan = await inner.ScanLabelsAsync(ct);
+        return this.ServerId is null ? scan : scan with { ServerId = this.ServerId };
+    }
+
+    public Task<string?> GetServerIdAsync(CancellationToken ct = default) => inner.GetServerIdAsync(ct);
+
+    public Task<LibrarySnapshot?> GetEntryAsync(string itemId, CancellationToken ct = default) => inner.GetEntryAsync(itemId, ct);
+}
+
 public sealed class BackfillApiFactory : KidRequestApiFactory
 {
+    public ScanServerOverride? Scans { get; private set; }
+
     public ObservedProfileLabelGate ProfileLabels { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -56,6 +77,8 @@ public sealed class BackfillApiFactory : KidRequestApiFactory
         {
             services.RemoveAll<IProfileLabelGate>();
             services.AddSingleton<IProfileLabelGate>(this.ProfileLabels);
+            services.RemoveAll<ILibraryScanner>();
+            services.AddSingleton<ILibraryScanner>(provider => this.Scans = new ScanServerOverride(provider.GetRequiredService<PlexMediaServer>()));
         });
     }
 
@@ -643,13 +666,67 @@ public sealed class LibraryBackfillTests
         int profile = await factory.PrepareAsync();
         BackfillPreview preview = await factory.PreviewAsync(profile);
         HttpClient parent = await factory.CreateAuthorizedClientAsync();
-        factory.Plex.Delay = request => request.Path.EndsWith("/label", StringComparison.Ordinal)
-            ? throw new InvalidOperationException("label scan unavailable")
-            : Task.CompletedTask;
+        BackfillBatchResponse batch = (await factory.CreateAsync(preview))!;
+        TaskCompletionSource scanning = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Plex.Delay = async request =>
+        {
+            if (!request.Path.EndsWith("/label", StringComparison.Ordinal)) return;
+            scanning.TrySetResult();
+            await release.Task;
+            throw new InvalidOperationException("label scan unavailable");
+        };
+
+        Task<HttpResponseMessage> response = parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
+        await scanning.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await factory.ChangeAsync(batch.Id, true);
+        release.SetResult();
+
+        Assert.Equal(HttpStatusCode.BadGateway, (await response).StatusCode);
+        Assert.Equal(BackfillState.Undoing, (await factory.BatchAsync(batch.Id)).State);
+    }
+
+    [Fact]
+    public async Task Dry_run_fails_with_bad_gateway_when_the_label_scan_is_incomplete()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        factory.Plex.Item("102").SetLabels("Kid");
+        BackfillPreview preview = await factory.PreviewAsync(profile);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        factory.Plex.HiddenKeys["102"] = true;
 
         HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
 
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Dry_run_fails_with_conflict_when_the_label_scan_is_for_another_server()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillPreview preview = await factory.PreviewAsync(profile);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        factory.Scans!.ServerId = "another-server";
+
+        HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Dry_run_for_an_unknown_profile_is_not_found_without_scanning_labels()
+    {
+        using BackfillApiFactory factory = new();
+        int profile = await factory.PrepareAsync();
+        BackfillPreview preview = await factory.PreviewAsync(profile);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+
+        HttpResponseMessage response = await parent.PostAsJsonAsync("/api/v1/labels/backfill/batches", new BackfillApply(profile + 100, preview.ServerId, preview.Label, [new(preview.Items[0].LibraryItemId, preview.Items[0].Guid)], true));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain(factory.Plex.Requests, request => request.Path.EndsWith("/label", StringComparison.Ordinal));
     }
 
     [Fact]

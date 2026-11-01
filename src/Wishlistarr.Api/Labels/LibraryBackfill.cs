@@ -127,8 +127,15 @@ public sealed class LibraryBackfill(
     {
         if (input.Items is null || input.Items.Count is < 1 or > MaxSelection || input.Items.Any(item => item is null || item.LibraryItemId <= 0 || string.IsNullOrEmpty(item.Guid)) || input.Items.Select(item => item.LibraryItemId).Distinct().Count() != input.Items.Count)
             throw new BackfillException(400, "Select between 1 and 10000 different library items.");
-        // The scan reads every label from Plex, so it runs before the gate is taken and never holds up a chunk.
-        LibraryLabelScan? scan = input.DryRun ? await scanner.ScanLabelsAsync(ct) : null;
+        LibraryLabelScan? scan = null;
+        if (input.DryRun)
+        {
+            // The cheap checks come first so a bad request never pays for the scan, which reads every label from Plex and stays outside the gate so it cannot hold up a chunk.
+            await this.ProfileAsync(input.KidProfileId, ct);
+            await this.ReadyServerAsync(ct);
+            scan = await scanner.ScanLabelsAsync(ct);
+        }
+
         await gate.Semaphore.WaitAsync(ct);
         try
         {
