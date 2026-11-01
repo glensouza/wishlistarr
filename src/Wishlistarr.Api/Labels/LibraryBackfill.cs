@@ -133,7 +133,7 @@ public sealed class LibraryBackfill(
             // Cheap checks first, and the scan stays outside the gate so it cannot stall a chunk.
             KidProfile early = await this.ProfileAsync(input.KidProfileId, ct);
             string earlyServerId = await this.ReadyServerAsync(ct);
-            if (earlyServerId != input.ServerId || early.PlexLabel != input.Label) throw new BackfillException(409, "The server or profile label changed. Preview the library again.");
+            EnsureUnchanged(input, early, earlyServerId);
             scan = await scanner.ScanLabelsAsync(ct);
         }
 
@@ -142,7 +142,7 @@ public sealed class LibraryBackfill(
         {
             KidProfile profile = await this.ProfileAsync(input.KidProfileId, ct);
             string serverId = await this.ReadyServerAsync(ct);
-            if (serverId != input.ServerId || profile.PlexLabel != input.Label) throw new BackfillException(409, "The server or profile label changed. Preview the library again.");
+            EnsureUnchanged(input, profile, serverId);
             int[] ids = [.. input.Items.Select(item => item.LibraryItemId)];
             List<LibraryItem> items = await db.LibraryItems.AsNoTracking().Include(item => item.CanonicalTitle).Where(item => ids.Contains(item.Id) && item.ServerId == serverId).OrderBy(item => item.Id).ToListAsync(ct);
             Dictionary<int, string> expected = input.Items.ToDictionary(item => item.LibraryItemId, item => item.Guid);
@@ -309,6 +309,11 @@ public sealed class LibraryBackfill(
         int preserved = items.Count(item => claimed.Contains(item.Guid)
             || (scan.LabelsByItem.TryGetValue(item.RatingKey, out IReadOnlyList<string>? present) && present.Contains(profile.PlexLabel, LabelWriter.LabelComparer)));
         return new BackfillDryRun(items.Count, items.Count - preserved, preserved);
+    }
+
+    private static void EnsureUnchanged(BackfillApply input, KidProfile profile, string serverId)
+    {
+        if (serverId != input.ServerId || profile.PlexLabel != input.Label) throw new BackfillException(409, "The server or profile label changed. Preview the library again.");
     }
 
     private async Task<KidProfile> ProfileAsync(int id, CancellationToken ct) =>
