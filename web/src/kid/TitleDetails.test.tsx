@@ -619,3 +619,15 @@ it('explains when a selected season is no longer listed', async () => {
     (screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled,
   ).toBe(false)
 })
+
+it('explains when the request changed while it was being asked', async () => {
+  payload = structuredClone(show)
+  requestStatus = 409
+  const user = userEvent.setup()
+  renderAt('/title/show/82728')
+  await user.click(await screen.findByRole('button', { name: 'Ask' }))
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'That one changed just now. Try again.',
+  )
+})

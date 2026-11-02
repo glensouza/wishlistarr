@@ -21,7 +21,6 @@ const requestLabels: Record<string, MessageKey> = {
   fulfilling: 'details.onTheWay',
   available: 'details.ready',
   labeled: 'details.added',
-  monitoring: 'details.monitoring',
   failed: 'details.failedRequest',
 }
 
@@ -160,9 +159,11 @@ function TitleScreen() {
           ? 'details.seasonUnavailable'
           : status === 422
             ? 'details.notAllowed'
-            : status === 429
-              ? 'details.allowance'
-              : 'details.requestFailed',
+            : status === 409
+              ? 'details.conflict'
+              : status === 429
+                ? 'details.allowance'
+                : 'details.requestFailed',
       )
     } finally {
       setAsking(false)

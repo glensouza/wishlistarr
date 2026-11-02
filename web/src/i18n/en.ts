@@ -335,7 +335,7 @@ export const en = {
   'details.seasons': 'Seasons',
   'details.seasonNote':
     'Choose a season to request. Access in Plex is for the whole show, including future seasons.',
-  'details.monitoring': 'Watching for more episodes',
+  'details.conflict': 'That one changed just now. Try again.',
   'details.seasonUnavailable':
     'That season is no longer listed. Refresh this page and choose another.',
   'details.seasonUnknown': 'Checking this season',
