@@ -590,7 +590,7 @@ public sealed class RequestAccessTests
         HttpResponseMessage asked = await KidRequestApiFactory.RequestAsync(other, "show", 82728);
         JsonElement instantBody = await asked.Content.ReadFromJsonAsync<JsonElement>();
         int instant = instantBody.GetProperty("id").GetInt32();
-        Assert.Equal("labeled", instantBody.GetProperty("state").GetString());
+        Assert.Equal("monitoring", instantBody.GetProperty("state").GetString());
 
         JsonElement[] parentApproved = await kid.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history") ?? [];
         JsonElement[] systemApproved = await other.GetFromJsonAsync<JsonElement[]>("/api/v1/kid/requests/history") ?? [];

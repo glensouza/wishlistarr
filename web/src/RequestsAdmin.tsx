@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useT, type MessageKey } from './i18n'
 import { listKidProfiles, type KidProfile } from './kidProfiles'
+import { seasonLabel } from './seasons'
 import {
   approveRequests,
   decisionResultKey,
@@ -25,6 +26,7 @@ const stateKey: Record<ParentRequest['state'], MessageKey> = {
   fulfilling: 'requests.fulfilling',
   available: 'requests.available',
   labeled: 'requests.labeled',
+  monitoring: 'requests.monitoring',
   failed: 'requests.failed',
   revoked: 'requests.revoked',
 }
@@ -432,6 +434,7 @@ export default function RequestsAdmin() {
                   })}
                 </span>
                 <span>{t(stateKey[row.state])}</span>
+                {row.kind === 'show' && <p>{t('requests.showAccess')}</p>}
                 <button
                   type="button"
                   disabled={busy}
@@ -488,6 +491,24 @@ export default function RequestsAdmin() {
                     name: row.kidName,
                   })}
                 </span>
+                <span>{t(stateKey[row.state])}</span>
+                {row.seasons?.map((season) => (
+                  <p key={season.number}>
+                    {t('requests.seasonStatus', {
+                      name: seasonLabel(t, season.number),
+                      status: t(
+                        (
+                          {
+                            unknown: 'details.seasonUnknown',
+                            missing: 'details.seasonMissing',
+                            partial: 'details.seasonPartial',
+                            available: 'details.seasonAvailable',
+                          } as const
+                        )[season.availability],
+                      ),
+                    })}
+                  </p>
+                ))}
                 <button
                   type="button"
                   disabled={busy}
@@ -537,6 +558,7 @@ export default function RequestsAdmin() {
                     })}
                   </span>
                   <span>{t(stateKey[row.state])}</span>
+                  {row.kind === 'show' && <p>{t('requests.showAccess')}</p>}
                   {row.labelMayRemain && (
                     <span>
                       {t(

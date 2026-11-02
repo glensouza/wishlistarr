@@ -5,6 +5,18 @@ namespace Wishlistarr.Tests.Plex;
 public sealed class PlexLabelTests
 {
     [Fact]
+    public async Task Seasons_read_the_number_and_episode_count_across_pages()
+    {
+        await using PlexHarness harness = await PlexHarness.CreateAsync(options => options.PageSize = 1);
+        await harness.LinkAndSelectAsync();
+        harness.Server.AddItem(new FakePlexServer.FakeItem("2012", "season", "plex://season/two", "Season 2", 2) { ParentRatingKey = "201", Index = 2, LeafCount = 4 });
+        IReadOnlyList<MediaSeason> seasons = await harness.Media.GetSeasonsAsync("201");
+        Assert.Equal([new MediaSeason(1, 1), new MediaSeason(2, 4)], seasons);
+        Assert.Contains(harness.Server.Requests, request => request.Path == "/library/metadata/201/children" && request.Query["X-Plex-Container-Start"] == "1");
+        await Assert.ThrowsAsync<MediaServerException>(() => harness.Media.GetSeasonsAsync("../identity"));
+    }
+
+    [Fact]
     public async Task Labels_are_read_with_the_item_library_and_lock_state()
     {
         await using PlexHarness harness = await PlexHarness.CreateAsync();

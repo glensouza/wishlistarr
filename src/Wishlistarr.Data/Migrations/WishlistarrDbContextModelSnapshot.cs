@@ -668,6 +668,14 @@ namespace Wishlistarr.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTimeOffset?>("AcceptedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("AllSeasons")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
                     b.Property<string>("Backend")
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
@@ -680,6 +688,11 @@ namespace Wishlistarr.Data.Migrations
 
                     b.Property<DateTimeOffset?>("DispatchedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("DownloadRequested")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
 
                     b.Property<int?>("ExternalId")
                         .HasColumnType("INTEGER");
@@ -774,6 +787,30 @@ namespace Wishlistarr.Data.Migrations
                     b.HasIndex("MediaRequestId");
 
                     b.ToTable("MediaRequestEvents");
+                });
+
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequestSeason", b =>
+                {
+                    b.Property<int>("MediaRequestId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Availability")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Requested")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AvailableEpisodes")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MediaRequestId", "Number");
+
+                    b.ToTable("MediaRequestSeason");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.NotificationApproval", b =>
@@ -1253,6 +1290,17 @@ namespace Wishlistarr.Data.Migrations
                     b.Navigation("MediaRequest");
                 });
 
+            modelBuilder.Entity("Wishlistarr.Data.MediaRequestSeason", b =>
+                {
+                    b.HasOne("Wishlistarr.Data.MediaRequest", "MediaRequest")
+                        .WithMany("Seasons")
+                        .HasForeignKey("MediaRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MediaRequest");
+                });
+
             modelBuilder.Entity("Wishlistarr.Data.NotificationApproval", b =>
                 {
                     b.HasOne("Wishlistarr.Data.MediaRequest", null)
@@ -1358,6 +1406,8 @@ namespace Wishlistarr.Data.Migrations
             modelBuilder.Entity("Wishlistarr.Data.MediaRequest", b =>
                 {
                     b.Navigation("Events");
+
+                    b.Navigation("Seasons");
                 });
 
             modelBuilder.Entity("Wishlistarr.Data.ParentAccount", b =>

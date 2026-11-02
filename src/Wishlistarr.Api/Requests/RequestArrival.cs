@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Labels;
@@ -6,6 +7,7 @@ using Wishlistarr.Core.Content;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
 using Wishlistarr.Data;
+using Wishlistarr.Integrations.Tmdb;
 
 namespace Wishlistarr.Api.Requests;
 
@@ -22,6 +24,8 @@ public sealed partial class RequestArrival(
     LibraryLookup library,
     IMediaServer server,
     MediaRequests requests,
+    RequestSeasons seasons,
+    RequestDispatch dispatch,
     RequestLabeling labeling,
     RequestLocks locks,
     IProfileLabelGate profileLabels,
@@ -39,15 +43,19 @@ public sealed partial class RequestArrival(
             return;
         }
 
-        try
+        // A monitored show is already in the library, so only requests still waiting for their title need the index brought up to date.
+        if (await this.Pending().AnyAsync(request => request.State != RequestState.Monitoring, ct))
         {
-            await refresh.RetryUnresolvedAsync(ct);
-            // A ready index can still predate the download, including the external ids of a legacy agent item.
-            await refresh.IncrementalAsync(ct);
-        }
-        catch (MediaServerNotConfiguredException)
-        {
-            return;
+            try
+            {
+                await refresh.RetryUnresolvedAsync(ct);
+                // A ready index can still predate the download, including the external ids of a legacy agent item.
+                await refresh.IncrementalAsync(ct);
+            }
+            catch (MediaServerNotConfiguredException)
+            {
+                return;
+            }
         }
 
         int after = 0;
@@ -71,6 +79,10 @@ public sealed partial class RequestArrival(
                 {
                     await this.CheckOneAsync(id, ct);
                 }
+                catch (MediaServerNotConfiguredException)
+                {
+                    return;
+                }
                 catch (Exception ex) when (!ct.IsCancellationRequested)
                 {
                     this.LogCheckFailed(ex, id);
@@ -80,14 +92,20 @@ public sealed partial class RequestArrival(
     }
 
     private IQueryable<MediaRequest> Pending() => db.MediaRequests.AsNoTracking()
-        .Where(request => request.DispatchedAt != null
-            && (request.State == RequestState.Approved || request.State == RequestState.Fulfilling || request.State == RequestState.Available)
+        .Where(request => (request.State == RequestState.Monitoring
+                || request.State == RequestState.Fulfilling
+                || ((request.DispatchedAt != null || request.ExternalId != null || request.AcceptedAt != null) && (request.State == RequestState.Approved || request.State == RequestState.Available)))
             && request.KidProfile!.ArchivedAt == null);
 
     private async Task CheckOneAsync(int id, CancellationToken ct)
     {
         using IDisposable held = await locks.AcquireAsync(id, ct);
-        MediaRequest? request = await this.Pending().SingleOrDefaultAsync(row => row.Id == id, ct);
+        if (!await this.Pending().AnyAsync(row => row.Id == id, ct))
+        {
+            return;
+        }
+
+        MediaRequest? request = await requests.GetAsync(id, ct);
         if (request is null)
         {
             return;
@@ -104,6 +122,24 @@ public sealed partial class RequestArrival(
                 // Keep the resolved TMDB id as well as Plex's ids, so a later contradictory TMDB id cannot pass a legacy-only snapshot.
                 expectedItems[match.Id] = current with { ExternalIds = [.. match.ExternalIds.Concat(current.ExternalIds).Distinct()] };
             }
+        }
+
+        // With nothing visible a refresh would record every season as missing, so the last observation stays.
+        bool complete = request.Kind == MediaKind.Show
+            && !(visible.Count == 0 && request.State == RequestState.Monitoring)
+            && await this.TryRefreshSeasonsAsync(request, visible, ct);
+        if (request.State == RequestState.Monitoring)
+        {
+            if (complete)
+            {
+                await requests.TransitionAsync(id, RequestState.Labeled, RequestActor.System(Component), ct: ct, expectedFrom: RequestState.Monitoring);
+            }
+            else if (request.DownloadRequested && request.DispatchedAt is null && request.Seasons.Any(season => (request.AllSeasons || season.Requested) && season.Availability != SeasonAvailability.Available))
+            {
+                await dispatch.StartAsync();
+            }
+
+            return;
         }
 
         if (visible.Count == 0)
@@ -141,7 +177,33 @@ public sealed partial class RequestArrival(
             }
         }
 
-        await labeling.LabelLockedAsync(id, visible, profile, actor, expectedItems: expectedItems, retryOnConnectionFailure: true);
+        RequestLabelResult labeled = await labeling.LabelLockedAsync(id, visible, profile, actor, expectedItems: expectedItems, retryOnConnectionFailure: true);
+        if (complete && labeled.Result.Request?.State == RequestState.Monitoring)
+        {
+            await requests.TransitionAsync(id, RequestState.Labeled, actor, ct: ct, expectedFrom: RequestState.Monitoring);
+        }
+    }
+
+    private async Task<bool> TryRefreshSeasonsAsync(MediaRequest request, IReadOnlyList<MediaItem> visible, CancellationToken ct)
+    {
+        try
+        {
+            return await seasons.RefreshAsync(request, visible, ct);
+        }
+        catch (TmdbNotConfiguredException ex)
+        {
+            this.LogSeasonsNotConfigured(ex, request.Id);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or JsonException or HttpRequestException or TaskCanceledException)
+        {
+            this.LogSeasonsFailed(ex, request.Id);
+        }
+        catch (MediaServerException ex)
+        {
+            this.LogSeasonsReadFailed(ex, request.Id);
+        }
+
+        return false;
     }
 
     // An incremental refresh cannot remove deleted items, and Fix Match can keep a rating key while replacing the title.
@@ -151,6 +213,15 @@ public sealed partial class RequestArrival(
         && current.ExternalIds.Any(indexed.ExternalIds.Contains)
         && current.ExternalIds.GroupBy(id => id.Source)
             .All(group => group.Any(indexed.ExternalIds.Contains) || indexed.ExternalIds.All(id => id.Source != group.Key));
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "TMDB is not configured, so the seasons of request {RequestId} were not checked")]
+    private partial void LogSeasonsNotConfigured(Exception ex, int requestId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Reading the seasons of request {RequestId} from TMDB failed; they will be checked again")]
+    private partial void LogSeasonsFailed(Exception ex, int requestId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Reading the seasons of request {RequestId} from Plex failed; they will be checked again")]
+    private partial void LogSeasonsReadFailed(Exception ex, int requestId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Checking Plex arrival for request {RequestId} failed; it will be checked again")]
     private partial void LogCheckFailed(Exception ex, int requestId);

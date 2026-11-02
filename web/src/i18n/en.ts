@@ -333,7 +333,21 @@ export const en = {
   'details.trailerFrame': 'Trailer',
   'details.cast': 'Cast',
   'details.seasons': 'Seasons',
-  'details.seasonNote': 'Access is for the whole show, not one season.',
+  'details.seasonNote':
+    'Choose a season to request. Access in Plex is for the whole show, including future seasons.',
+  'details.conflict': 'That one changed just now. Try again.',
+  'details.seasonUnavailable':
+    'That season is no longer listed. Refresh this page and choose another.',
+  'details.seasonUnknown': 'Checking this season',
+  'details.seasonMissing': 'Not here yet',
+  'details.seasonPartial': 'Some episodes are ready',
+  'details.seasonAvailable': 'This season is ready',
+  'requests.showAccess':
+    'Approving grants access to the whole show in Plex, including all current and future seasons. Season requests only control downloads.',
+  'requests.monitoring': 'Monitoring seasons',
+  'requests.seasonStatus': '{name}: {status}',
+  'queue.allSeasons': 'Requested: all seasons',
+  'queue.seasonsHeading': 'Requested seasons',
   'details.specials': 'Specials',
   'details.seasonName': 'Season {number}',
   'details.episodes': '{count} episodes',

@@ -48,7 +48,7 @@ public sealed class KidRequestFlowTests
         HttpResponseMessage response = await KidRequestApiFactory.RequestAsync(kid, "show", 82728);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.Equal("labeled", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        Assert.Equal("monitoring", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
         Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
     }
 

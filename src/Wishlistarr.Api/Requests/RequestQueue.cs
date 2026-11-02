@@ -62,7 +62,9 @@ public sealed record ApprovalQueueItem(
     IReadOnlyList<QueueWatchProvider> Providers,
     string? TrailerKey,
     QueueReason Reason,
-    IReadOnlyList<QueueGap> Gaps);
+    IReadOnlyList<QueueGap> Gaps,
+    IReadOnlyList<RequestSeasonResponse> Seasons,
+    bool AllSeasons);
 
 public sealed record ApprovalQueuePage(IReadOnlyList<ApprovalQueueItem> Items, int Total, int Limit, int Offset, bool TmdbConfigured = true);
 
@@ -89,7 +91,7 @@ public sealed partial class RequestQueue(
             return null;
         }
 
-        IQueryable<MediaRequest> matching = db.MediaRequests.AsNoTracking()
+        IQueryable<MediaRequest> matching = db.MediaRequests.AsNoTracking().Include(request => request.Seasons)
             .Where(request => request.State == RequestState.Pending)
             .Where(request => kidProfileId == null || request.KidProfileId == kidProfileId)
             .Join(
@@ -271,7 +273,9 @@ public sealed partial class RequestQueue(
             lookup.Providers,
             lookup.Trailer,
             reason,
-            lookup.Gaps);
+            lookup.Gaps,
+            RequestSeasonResponse.From(request),
+            request.AllSeasons);
     }
 
     private static QueueReason Build(
