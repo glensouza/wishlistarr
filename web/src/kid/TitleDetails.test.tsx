@@ -257,7 +257,7 @@ it('moves between the season choices and ask with the arrow keys', async () => {
   place(season, 188, 252, 168, 44)
   place(puppy, 376, 236, 180, 44)
 
-  expect(season.checked).toBe(true)
+  expect(season.checked).toBe(false)
   expect(specials.checked).toBe(false)
   ask.focus()
   const down = new KeyboardEvent('keydown', {
@@ -269,7 +269,7 @@ it('moves between the season choices and ask with the arrow keys', async () => {
   expect(down.defaultPrevented).toBe(true)
   expect(document.activeElement).toBe(specials)
   expect(specials.checked).toBe(false)
-  expect(season.checked).toBe(true)
+  expect(season.checked).toBe(false)
 
   specials.dispatchEvent(
     new KeyboardEvent('keydown', {
@@ -279,7 +279,7 @@ it('moves between the season choices and ask with the arrow keys', async () => {
     }),
   )
   expect(document.activeElement).toBe(season)
-  expect(season.checked).toBe(true)
+  expect(season.checked).toBe(false)
   season.dispatchEvent(
     new KeyboardEvent('keydown', {
       key: 'ArrowRight',
@@ -422,7 +422,7 @@ it('sends the chosen season with a show request', async () => {
   expect(
     (screen.getByRole('radio', { name: 'Season 1' }) as HTMLInputElement)
       .checked,
-  ).toBe(true)
+  ).toBe(false)
 
   await user.click(screen.getByRole('radio', { name: 'The puppy year' }))
   expect(screen.getByText('A puppy arrives.')).toBeTruthy()
@@ -441,6 +441,16 @@ it('sends the chosen season with a show request', async () => {
     tmdbId: 82728,
     seasons: [0],
   })
+})
+
+it('requests the whole show when no season was chosen', async () => {
+  payload = structuredClone(show)
+  const user = userEvent.setup()
+  renderAt('/title/show/82728')
+
+  await user.click(await screen.findByRole('button', { name: 'Ask' }))
+  await screen.findByRole('button', { name: 'Asked' })
+  expect(requests()[0].body).toEqual({ kind: 'show', tmdbId: 82728 })
 })
 
 it('still explains show access when a show has no seasons', async () => {
@@ -599,7 +609,8 @@ it('explains when a selected season is no longer listed', async () => {
   requestStatus = 400
   const user = userEvent.setup()
   renderAt('/title/show/82728')
-  await user.click(await screen.findByRole('button', { name: 'Ask' }))
+  await user.click(await screen.findByRole('radio', { name: 'Season 1' }))
+  await user.click(screen.getByRole('button', { name: 'Ask' }))
   expect(await screen.findByRole('alert')).toHaveProperty(
     'textContent',
     'That season is no longer listed. Refresh this page and choose another.',

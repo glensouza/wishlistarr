@@ -345,6 +345,9 @@ export const en = {
   'requests.showAccess':
     'Approving grants access to the whole show in Plex, including all current and future seasons. Season requests only control downloads.',
   'requests.monitoring': 'Monitoring seasons',
+  'requests.seasonStatus': '{name}: {status}',
+  'queue.allSeasons': 'Requested: all seasons',
+  'queue.seasonsHeading': 'Requested seasons',
   'details.specials': 'Specials',
   'details.seasonName': 'Season {number}',
   'details.episodes': '{count} episodes',

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useT, type MessageKey } from './i18n'
 import { listKidProfiles, type KidProfile } from './kidProfiles'
+import { seasonLabel } from './seasons'
 import {
   approveRequests,
   decisionResultKey,
@@ -493,17 +494,19 @@ export default function RequestsAdmin() {
                 <span>{t(stateKey[row.state])}</span>
                 {row.seasons?.map((season) => (
                   <p key={season.number}>
-                    {t('details.seasonName', { number: season.number })}:{' '}
-                    {t(
-                      (
-                        {
-                          unknown: 'details.seasonUnknown',
-                          missing: 'details.seasonMissing',
-                          partial: 'details.seasonPartial',
-                          available: 'details.seasonAvailable',
-                        } as const
-                      )[season.availability],
-                    )}
+                    {t('requests.seasonStatus', {
+                      name: seasonLabel(t, season.number),
+                      status: t(
+                        (
+                          {
+                            unknown: 'details.seasonUnknown',
+                            missing: 'details.seasonMissing',
+                            partial: 'details.seasonPartial',
+                            available: 'details.seasonAvailable',
+                          } as const
+                        )[season.availability],
+                      ),
+                    })}
                   </p>
                 ))}
                 <button

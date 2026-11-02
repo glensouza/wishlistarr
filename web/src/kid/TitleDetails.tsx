@@ -146,7 +146,7 @@ function TitleScreen() {
       const made = await requestTitle(
         shown.kind,
         shown.tmdbId,
-        shown.kind === 'show' && selected ? [selected.number] : undefined,
+        shown.kind === 'show' && picked !== null ? [picked] : undefined,
       )
       setRequest({
         state: made.state,
@@ -222,10 +222,9 @@ function TitleScreen() {
               (!askable(state) &&
                 !(
                   canAskSeason &&
-                  selected &&
+                  picked !== null &&
                   !seasonRequests.some(
-                    (season) =>
-                      season.number === selected.number && season.requested,
+                    (season) => season.number === picked && season.requested,
                   )
                 ))
             }
@@ -253,7 +252,7 @@ function TitleScreen() {
                   <input
                     type="radio"
                     name={seasonGroup}
-                    checked={selected?.number === season.number}
+                    checked={picked === season.number}
                     onChange={() => setPicked(season.number)}
                   />
                   {seasonName(season, t)}

@@ -12,6 +12,7 @@ import { WatchProviders } from './about/WatchProviders'
 import { useT, type MessageKey } from './i18n'
 import Trailer, { isYoutubeId } from './kid/Trailer'
 import { ProfileEvents } from './RequestHistoryPanel'
+import { seasonLabel } from './seasons'
 import {
   approveRequests,
   decisionResultKey,
@@ -636,11 +637,23 @@ function QueueCard({
       {item.kind === 'show' && (
         <>
           <p>{t('requests.showAccess')}</p>
-          {item.seasons?.map((season) => (
-            <p key={season.number}>
-              {t('details.seasonName', { number: season.number })}
-            </p>
-          ))}
+          {item.allSeasons ? (
+            <p>{t('queue.allSeasons')}</p>
+          ) : (
+            item.seasons &&
+            item.seasons.length > 0 && (
+              <>
+                <p>
+                  <strong>{t('queue.seasonsHeading')}</strong>
+                </p>
+                <ul>
+                  {item.seasons.map((season) => (
+                    <li key={season.number}>{seasonLabel(t, season.number)}</li>
+                  ))}
+                </ul>
+              </>
+            )
+          )}
         </>
       )}
       <div className="approval-actions">

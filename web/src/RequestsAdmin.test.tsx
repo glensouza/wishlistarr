@@ -617,3 +617,23 @@ it('says when a retry did not go through', async () => {
     await screen.findByText('That title could not be sent again.'),
   ).toBeTruthy()
 })
+
+it('shows each season of a monitored show with its availability, naming the specials', async () => {
+  labeled = [
+    {
+      ...waiting,
+      id: 8,
+      kind: 'show',
+      state: 'monitoring',
+      title: 'Bluey',
+      canRevoke: true,
+      seasons: [
+        { number: 0, availability: 'available', availableEpisodes: 2 },
+        { number: 2, availability: 'partial', availableEpisodes: 3 },
+      ],
+    },
+  ]
+  render(<RequestsAdmin />)
+  expect(await screen.findByText('Specials: This season is ready')).toBeTruthy()
+  expect(screen.getByText('Season 2: Some episodes are ready')).toBeTruthy()
+})

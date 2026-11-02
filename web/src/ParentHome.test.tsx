@@ -1194,3 +1194,19 @@ it('warns that approving a season grants the whole show including future seasons
   expect(screen.getByText('Season 2')).toBeTruthy()
   expect(screen.getByRole('button', { name: /Approve/ })).toBeTruthy()
 })
+
+it('lists the requested seasons under a heading and names the specials', async () => {
+  homeData([{ ...ada, kind: 'show', seasons: [{ number: 0 }, { number: 2 }] }])
+  render(<ParentHome />)
+  expect(await screen.findByText('Requested seasons')).toBeTruthy()
+  expect(screen.getByText('Specials')).toBeTruthy()
+  expect(screen.getByText('Season 2')).toBeTruthy()
+  expect(screen.queryByText('Requested: all seasons')).toBeNull()
+})
+
+it('says when an approval request covers every season', async () => {
+  homeData([{ ...ada, kind: 'show', seasons: [], allSeasons: true }])
+  render(<ParentHome />)
+  expect(await screen.findByText('Requested: all seasons')).toBeTruthy()
+  expect(screen.queryByText('Requested seasons')).toBeNull()
+})
