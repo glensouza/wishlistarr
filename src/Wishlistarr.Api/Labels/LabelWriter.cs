@@ -19,7 +19,7 @@ public enum LabelWriteOutcome
     ProfileUnavailable,
 }
 
-public sealed record LabelWriteResult(LabelWriteOutcome Outcome, MediaItemLabels? Item = null);
+public sealed record LabelWriteResult(LabelWriteOutcome Outcome, MediaItemLabels? Item = null, bool CreatedRow = false);
 
 public sealed record ProfileLabels(MediaItemLabels Item, IReadOnlyList<OwnedLabel> Owned);
 
@@ -115,7 +115,8 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             throw new ArgumentException("The kid profile does not exist.", nameof(kidProfileId));
         }
 
-        return await this.WriteAsync(
+        bool rowCreated = false;
+        LabelWriteResult result = await this.WriteAsync(
             itemId,
             async (item, token) =>
             {
@@ -138,13 +139,14 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 return [.. item.Labels, owned?.Label ?? label];
             },
             item => item.Labels.Contains(label, LabelComparer),
-            item => this.ReserveAsync(item, label, kidProfileId, source),
+            item => this.ReserveAsync(item, label, kidProfileId, source, null, made => rowCreated = made),
             (_, _) => Task.CompletedTask,
             LabelWriteOutcome.Added,
             LabelWriteOutcome.AlreadyPresent,
             ct,
             expectedIdentity: expectedIdentity,
             keepReservationAfterSend: keepReservationAfterSend);
+        return result with { CreatedRow = rowCreated };
     }
 
     public async Task<LabelWriteResult> RemoveAsync(string itemId, string label, CancellationToken ct = default, bool forgetOwnership = true)
@@ -414,7 +416,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         }
     }
 
-    private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source, Action? reserveItem = null)
+    private async Task<Func<Task>> ReserveAsync(MediaItemLabels item, string label, int kidProfileId, string source, Action? reserveItem = null, Action<bool>? reportCreated = null)
     {
         OwnedLabel? owned = await this.FindOwnedAsync(item, label, CancellationToken.None);
         bool created = owned is null;
@@ -437,6 +439,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         owned.AppliedAt = time.GetUtcNow();
         reserveItem?.Invoke();
         await db.SaveChangesAsync(CancellationToken.None);
+        reportCreated?.Invoke(created);
         return async () =>
         {
             if (created)

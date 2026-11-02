@@ -78,8 +78,8 @@ public sealed partial class RequestLabeling(
         string? failure = null;
         bool notOwned = false;
         bool retry = false;
-        HashSet<string> dependedGuids = [];
-        int position = -1;
+        HashSet<string> createdGuids = [];
+        HashSet<string> sentGuids = [];
         List<(string ItemId, string Guid)> added = [];
         try
         {
@@ -88,7 +88,6 @@ public sealed partial class RequestLabeling(
             int labeled = 0;
             foreach (MediaItem match in matches)
             {
-                position++;
                 MediaItemLabels? expected = null;
                 if (expectedItems is not null && !expectedItems.TryGetValue(match.Id, out expected))
                 {
@@ -99,6 +98,10 @@ public sealed partial class RequestLabeling(
                 if (written.Outcome == LabelWriteOutcome.Added)
                 {
                     added.Add((match.Id, written.Item!.Guid));
+                    if (written.CreatedRow)
+                    {
+                        createdGuids.Add(written.Item.Guid);
+                    }
                 }
 
                 if (written.Outcome is LabelWriteOutcome.Added or LabelWriteOutcome.AlreadyPresent)
@@ -108,7 +111,6 @@ public sealed partial class RequestLabeling(
 
                 if (written is { Outcome: LabelWriteOutcome.AlreadyPresent, Item: MediaItemLabels present })
                 {
-                    dependedGuids.Add(present.Guid);
                     if (!await labels.OwnsAsync(present, profile.PlexLabel, ct))
                     {
                         notOwned = true;
@@ -126,12 +128,7 @@ public sealed partial class RequestLabeling(
             this.LogLabelFailed(ex, requestId);
             if (ex.Data[LabelWriter.WriteSentKey] is string sentGuid)
             {
-                dependedGuids.Add(sentGuid);
-            }
-
-            foreach (MediaItem unreached in matches.Skip(position + 1))
-            {
-                dependedGuids.Add(unreached.Guid);
+                sentGuids.Add(sentGuid);
             }
 
             failure = deadline?.IsCancellationRequested == true
@@ -149,7 +146,7 @@ public sealed partial class RequestLabeling(
         // A retry keeps the labels already added, so the shared ledger row they depend on is still there for the next attempt.
         if (failure is not null && added.Count > 0 && !retry)
         {
-            await this.RollBackAsync(requestId, added, profile.PlexLabel, dependedGuids);
+            await this.RollBackAsync(requestId, added, profile.PlexLabel, createdGuids, sentGuids);
         }
 
         if (retry)
@@ -168,20 +165,31 @@ public sealed partial class RequestLabeling(
     }
 
     // A failed request should not leave the kid with some copies of the title, so labels this call added come off again.
-    // Copies of one guid share a ledger row, which is forgotten only with the last of them and only when no other copy still depends on it.
-    private async Task RollBackAsync(int requestId, IReadOnlyList<(string ItemId, string Guid)> copies, string label, IReadOnlySet<string> dependedGuids)
+    // Copies of one guid share a ledger row. Rolling back forgets a row only when this call created it, together with the last copy of its guid,
+    // and only if no removal of that guid failed and no failing write for it was sent.
+    private async Task RollBackAsync(
+        int requestId,
+        IReadOnlyList<(string ItemId, string Guid)> copies,
+        string label,
+        IReadOnlySet<string> createdGuids,
+        IReadOnlySet<string> sentGuids)
     {
         using CancellationTokenSource deadline = new(options.Value.LabelTimeout, time);
+        HashSet<string> failedGuids = [];
         for (int index = 0; index < copies.Count; index++)
         {
             (string itemId, string guid) = copies[index];
-            bool keepOwnership = dependedGuids.Contains(guid) || copies.Skip(index + 1).Any(later => later.Guid == guid);
+            bool forget = createdGuids.Contains(guid)
+                && !sentGuids.Contains(guid)
+                && !failedGuids.Contains(guid)
+                && !copies.Skip(index + 1).Any(later => later.Guid == guid);
             try
             {
-                await labels.RemoveAsync(itemId, label, deadline.Token, forgetOwnership: !keepOwnership);
+                await labels.RemoveAsync(itemId, label, deadline.Token, forgetOwnership: forget);
             }
             catch (Exception ex)
             {
+                failedGuids.Add(guid);
                 this.LogRollBackFailed(ex, requestId, itemId);
             }
         }
