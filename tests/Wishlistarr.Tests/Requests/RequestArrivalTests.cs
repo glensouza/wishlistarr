@@ -10,8 +10,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Kids;
+using Wishlistarr.Api.Labels;
 using Wishlistarr.Api.Library;
 using Wishlistarr.Api.Requests;
+using Wishlistarr.Core.Content;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
 using Wishlistarr.Core.Requests;
@@ -786,13 +788,7 @@ public sealed class RequestArrivalTests
         (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
         Arrive(factory, key, MediaKind.Movie);
         string guid = factory.Plex.Item(key).Guid;
-        factory.Plex.Rematch("102", guid, "Second copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
-        factory.Plex.AddItem(new Wishlistarr.Tests.Plex.FakePlexServer.FakeItem("103", "movie", guid, "Third copy", 1) { GuidIds = [$"tmdb://{TmdbId(MediaKind.Movie)}"] });
-        using (IServiceScope scope = factory.Services.CreateScope())
-        {
-            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
-        }
-
+        string[] order = await SeedCopiesAsync(factory, key);
         int puts = 0;
         int thirdReads = 0;
         factory.Plex.Delay = request =>
@@ -802,9 +798,9 @@ public sealed class RequestArrivalTests
                 throw new InvalidOperationException("The server is down.");
             }
 
-            if (request.Path == "/library/metadata/102" && Interlocked.Increment(ref thirdReads) == 3)
+            if (request.Path == $"/library/metadata/{order[2]}" && Interlocked.Increment(ref thirdReads) == 3)
             {
-                factory.Plex.Rematch("102", guid, "Replacement movie", "tmdb://700");
+                factory.Plex.Rematch(order[2], guid, "Replacement movie", "tmdb://700");
             }
 
             return Task.CompletedTask;
@@ -812,14 +808,14 @@ public sealed class RequestArrivalTests
 
         await RunAsync(factory);
         Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
-        Assert.NotEmpty(factory.Plex.Item(key).Labels);
-        Assert.Empty(factory.Plex.Item("103").Labels);
+        Assert.NotEmpty(factory.Plex.Item(order[0]).Labels);
+        Assert.Empty(factory.Plex.Item(order[1]).Labels);
 
         await RunAsync(factory);
 
         Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
-        Assert.NotEmpty(factory.Plex.Item(key).Labels);
-        Assert.Empty(factory.Plex.Item("103").Labels);
+        Assert.NotEmpty(factory.Plex.Item(order[0]).Labels);
+        Assert.Empty(factory.Plex.Item(order[1]).Labels);
         Assert.Single(await factory.GetLedgerAsync());
         Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
     }
@@ -830,20 +826,90 @@ public sealed class RequestArrivalTests
         using ArrivalApiFactory factory = new();
         (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
         Arrive(factory, key, MediaKind.Movie);
+        string[] order = await SeedSharedPairWithFailingThirdAsync(factory, key);
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.All(order, copy => Assert.Empty(factory.Plex.Item(copy).Labels));
+        Assert.Empty(await factory.GetLedgerAsync());
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task A_failed_removal_of_one_copy_keeps_the_row_its_sibling_copy_still_needs()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string[] order = await SeedSharedPairWithFailingThirdAsync(factory, key);
+        int puts = 0;
+        Func<Wishlistarr.Tests.Plex.FakePlexServer.RecordedRequest, Task> rematchThird = factory.Plex.Delay!;
+        factory.Plex.Delay = request => request.Method == "PUT" && Interlocked.Increment(ref puts) == 3
+            ? throw new InvalidOperationException("The server is down.")
+            : rematchThird(request);
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.NotEmpty(factory.Plex.Item(order[0]).Labels);
+        Assert.Empty(factory.Plex.Item(order[1]).Labels);
+        Assert.Single(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task A_hand_added_label_on_a_sibling_copy_does_not_keep_a_row_this_call_created_after_the_only_label_it_covered_was_removed()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string[] order = await SeedSharedPairWithFailingThirdAsync(factory, key);
+        string label;
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            label = await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().KidProfiles.Select(row => row.PlexLabel).SingleAsync();
+        }
+
+        factory.Plex.Item(order[1]).SetLabels(label);
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Empty(factory.Plex.Item(order[0]).Labels);
+        Assert.Equal([label], factory.Plex.Item(order[1]).Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
+    [Fact]
+    public async Task Rolling_back_a_copy_never_forgets_a_row_that_existed_for_a_copy_outside_the_request()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, _, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
         string guid = factory.Plex.Item(key).Guid;
-        factory.Plex.AddItem(new Wishlistarr.Tests.Plex.FakePlexServer.FakeItem("103", "movie", guid, "Second copy", 1) { GuidIds = [$"tmdb://{TmdbId(MediaKind.Movie)}"] });
-        factory.Plex.Rematch("102", "plex://movie/other", "Other copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        factory.Plex.Rematch("102", guid, "Second copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        factory.Plex.AddItem(new Wishlistarr.Tests.Plex.FakePlexServer.FakeItem("103", "movie", guid, "Outside copy", 1) { GuidIds = ["tmdb://999"] });
         using (IServiceScope scope = factory.Services.CreateScope())
         {
             await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
         }
 
+        string[] order = await CopyOrderAsync(factory);
+        factory.Plex.Rematch(order[1], "plex://movie/other", "Other copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
+            WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+            KidProfile profile = await db.KidProfiles.AsNoTracking().SingleAsync();
+            await scope.ServiceProvider.GetRequiredService<LabelWriter>().AddAsync("103", profile.PlexLabel, profile.Id, "grant");
+        }
+
         int reads = 0;
         factory.Plex.Delay = request =>
         {
-            if (request.Path == "/library/metadata/102" && Interlocked.Increment(ref reads) == 2)
+            if (request.Path == $"/library/metadata/{order[1]}" && Interlocked.Increment(ref reads) == 2)
             {
-                factory.Plex.Rematch("102", "plex://movie/other", "Replacement movie", "tmdb://700");
+                factory.Plex.Rematch(order[1], "plex://movie/other", "Replacement movie", "tmdb://700");
             }
 
             return Task.CompletedTask;
@@ -852,11 +918,9 @@ public sealed class RequestArrivalTests
         await RunAsync(factory);
 
         Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
-        Assert.Empty(factory.Plex.Item(key).Labels);
-        Assert.Empty(factory.Plex.Item("103").Labels);
-        Assert.Empty(factory.Plex.Item("102").Labels);
-        Assert.Empty(await factory.GetLedgerAsync());
-        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+        Assert.Empty(factory.Plex.Item(order[0]).Labels);
+        Assert.NotEmpty(factory.Plex.Item("103").Labels);
+        Assert.Equal(guid, Assert.Single(await factory.GetLedgerAsync()).Guid);
     }
 
     [Fact]
@@ -985,6 +1049,53 @@ public sealed class RequestArrivalTests
         using IDisposable held = await factory.Services.GetRequiredService<LibraryRefreshGate>().EnterAsync(CancellationToken.None);
         using IServiceScope scope = factory.Services.CreateScope();
         await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().RetryUnresolvedAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static async Task<string[]> CopyOrderAsync(ArrivalApiFactory factory)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        IEnumerable<MediaItem> copies = await scope.ServiceProvider.GetRequiredService<LibraryLookup>()
+            .FindAsync(new TitleKey(MediaKind.Movie, TmdbId(MediaKind.Movie)), CancellationToken.None);
+        return [.. copies.Select(copy => copy.Id)];
+    }
+
+    private static async Task<string[]> SeedCopiesAsync(ArrivalApiFactory factory, string key)
+    {
+        string guid = factory.Plex.Item(key).Guid;
+        string tmdb = $"tmdb://{TmdbId(MediaKind.Movie)}";
+        factory.Plex.Rematch("102", guid, "Second copy", tmdb);
+        factory.Plex.AddItem(new Wishlistarr.Tests.Plex.FakePlexServer.FakeItem("103", "movie", guid, "Third copy", 1) { GuidIds = [tmdb] });
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
+        }
+
+        string[] order = await CopyOrderAsync(factory);
+        Assert.Equal(3, order.Length);
+        return order;
+    }
+
+    private static async Task<string[]> SeedSharedPairWithFailingThirdAsync(ArrivalApiFactory factory, string key)
+    {
+        string[] order = await SeedCopiesAsync(factory, key);
+        factory.Plex.Rematch(order[2], "plex://movie/other", "Other copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
+        }
+
+        int reads = 0;
+        factory.Plex.Delay = request =>
+        {
+            if (request.Path == $"/library/metadata/{order[2]}" && Interlocked.Increment(ref reads) == 2)
+            {
+                factory.Plex.Rematch(order[2], "plex://movie/other", "Replacement movie", "tmdb://700");
+            }
+
+            return Task.CompletedTask;
+        };
+
+        return order;
     }
 
     private static int TmdbId(MediaKind kind) => kind == MediaKind.Movie ? DispatchApiFactory.MovieId : FakeArrServer.ShowTmdbId;
