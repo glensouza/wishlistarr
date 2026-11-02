@@ -375,7 +375,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             await DiscardAsync();
             throw new MediaServerException("Plex did not keep the label change.");
         }
-        catch (Exception ex) when (anySent)
+        catch (Exception ex) when (anySent && (keepReservationAfterSend || ex is OperationCanceledException))
         {
             ex.Data[WriteSentKey] = true;
             throw;
