@@ -100,7 +100,6 @@ export const en = {
     'No Plex servers were found. Check that this account owns or can access a server, then find servers again.',
   'setup.tmdbHint':
     'TMDB supplies title information and artwork. Enter your own API key or API Read Access Token.',
-  'setup.getTmdbKey': 'Get a TMDB key',
   'setup.requestHint':
     'Choose Seerr (also supports Overseerr and Jellyseerr), or connect both Sonarr for TV and Radarr for movies.',
   'setup.requestMode': 'Request service',
@@ -130,7 +129,7 @@ export const en = {
   'setup.profilesFailed':
     'Kid profiles could not be loaded. Try again before creating a profile.',
   'setup.restrictionsHint':
-    'In Plex Settings → Users and Sharing, edit the kid’s user. For both movies and TV, set the allowed content ratings for the kid’s age; this is the usual setup. You can also add this profile’s label under Allow only for titles you approve. A rating limit, the label, or both counts for each type. Custom rating and label restrictions need Plex Pass on the admin account; built-in managed-user restriction profiles are available without it. Managed users may need restriction profile None before editing custom restrictions. Wishlistarr reads these restrictions but does not change them.',
+    'In Plex Settings → Users and Sharing, edit the kid’s user. For both movies and TV, set the allowed content ratings for the kid’s age; this is the usual setup. You can also add this profile’s label under Allow only for titles you approve. A rating limit, the label, or both counts for each type. Custom rating and label restrictions need Plex Pass on the admin account. Managed users may need restriction profile None before editing custom restrictions. Wishlistarr reads these restrictions but does not change them.',
   'setup.restrictionsWait':
     'Plex changes may take a moment to appear. Checks can reuse a result for up to 60 seconds. Wait a minute after changing restrictions, then check again.',
   'setup.profileLabel': 'Profile: {name}. Plex label: {label}.',

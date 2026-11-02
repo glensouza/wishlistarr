@@ -21,6 +21,7 @@ let seerrValid = false
 let complete = false
 let showGuide = true
 let statusFails = false
+let savedMode: string | null = null
 const kid = () => ({
   id: 1,
   name: 'Demo',
@@ -46,7 +47,12 @@ function install() {
     if (path === '/api/v1/plex/server') return undefined as never
     if (path === '/api/v1/settings/plex/test')
       return { valid: true, message: 'Connected' } as never
-    if (path === '/api/v1/settings' && method === 'GET') return [] as never
+    if (path === '/api/v1/settings' && method === 'GET')
+      return (
+        savedMode
+          ? [{ key: 'fulfilment.mode', isSecret: false, value: savedMode }]
+          : []
+      ) as never
     if (path === '/api/v1/settings/tmdb.api_key') return undefined as never
     if (path === '/api/v1/settings/tmdb/test-candidate') {
       const valid = (body as { apiKey?: string }).apiKey === 'good-key'
@@ -93,6 +99,7 @@ afterEach(() => {
   complete = false
   showGuide = true
   statusFails = false
+  savedMode = null
 })
 
 it('tests a new TMDB key before saving it and never shows it again', async () => {
@@ -388,4 +395,29 @@ it('creates a profile only after selecting a Plex user', async () => {
       autoApprove: false,
     }),
   )
+})
+
+it('starts the request service step on the saved mode when run again', async () => {
+  savedMode = 'arr'
+  install()
+  const user = userEvent.setup()
+  render(
+    <SetupGuide>
+      <p>Parent settings</p>
+    </SetupGuide>,
+  )
+  await user.click(
+    await screen.findByRole('button', { name: 'Test connection' }),
+  )
+  await continueWhenReady(user)
+  await user.type(
+    await screen.findByLabelText('API key or read access token'),
+    'good-key',
+  )
+  await user.click(
+    screen.getByRole('button', { name: 'Save and test connection' }),
+  )
+  await continueWhenReady(user)
+  const mode = await screen.findByLabelText('Request service')
+  expect(mode).toHaveProperty('value', 'arr')
 })

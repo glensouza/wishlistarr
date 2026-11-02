@@ -22,7 +22,7 @@ public static class SetupEndpoints
         RouteGroupBuilder setup = parent.MapGroup("/setup").WithTags("Setup");
         setup.MapGet("/", StatusAsync)
             .WithName("GetSetupStatus")
-            .WithSummary("Reports whether the guided setup has been completed and whether it should open on its own. It opens only until it is completed or exited once, and never when Plex, TMDB and a request service are already saved.")
+            .WithSummary("Reports whether the guided setup has been completed and whether it should open on its own. It opens only until it is completed or exited once, and not when Plex, TMDB and a request service are already saved and the request service choice is made.")
             .Produces<SetupStatus>();
 
         setup.MapPost("/dismiss", async (SettingsStore store, CancellationToken ct) =>
@@ -91,6 +91,7 @@ public static class SetupEndpoints
         ArrConnectionStore connections,
         KidProfiles profiles,
         PlexEnforcement enforcement,
+        ILoggerFactory loggers,
         CancellationToken ct)
     {
         string step = "Plex";
@@ -157,10 +158,19 @@ public static class SetupEndpoints
             await store.SetAsync(CompletedKey, "true", false, ct);
             return Results.NoContent();
         }
+        catch (TmdbNotConfiguredException)
+        {
+            return Incomplete("TMDB is not configured. Check the TMDB step.");
+        }
+        catch (SeerrNotConfiguredException)
+        {
+            return Incomplete("Seerr is not configured. Check the request service step.");
+        }
         catch (Exception ex) when (!ct.IsCancellationRequested
             && ex is MediaServerException or TmdbException or SeerrException or ArrException or HttpRequestException or TaskCanceledException
-                or JsonException or XmlException or FormatException or InvalidOperationException)
+                or JsonException or XmlException or FormatException)
         {
+            loggers.CreateLogger("Wishlistarr.Setup").LogWarning("{Step} check failed with {ExceptionType}.", step, ex.GetType().Name);
             return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: $"{step} could not be checked. Check that step and try again.");
         }
     }

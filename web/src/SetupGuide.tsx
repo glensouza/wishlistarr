@@ -142,9 +142,27 @@ export default function SetupGuide({ children }: { children: ReactNode }) {
 function RequestServiceStep({ onNext }: { onNext: () => void }) {
   const t = useT()
   const [mode, setMode] = useState<'seerr' | 'arr'>('seerr')
+  const [loaded, setLoaded] = useState(false)
   const [ready, setReady] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let current = true
+    request<{ key: string; value?: string | null }[]>('GET', '/api/v1/settings')
+      .then((settings) => {
+        const saved = settings.find(
+          (entry) => entry.key === 'fulfilment.mode',
+        )?.value
+        if (current && saved === 'arr') setMode('arr')
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (current) setLoaded(true)
+      })
+    return () => {
+      current = false
+    }
+  }, [])
   async function saveMode() {
     setBusy(true)
     setError(null)
@@ -168,6 +186,7 @@ function RequestServiceStep({ onNext }: { onNext: () => void }) {
     mode === 'seerr'
       ? ready.includes('seerr')
       : ready.includes('sonarr') && ready.includes('radarr')
+  if (!loaded) return <p role="status">{t('setup.loading')}</p>
   return (
     <>
       <p>{t('setup.requestHint')}</p>

@@ -173,6 +173,35 @@ public sealed class SetupTests
         AssertNoSecrets(Logs(factory));
     }
 
+    [Theory]
+    [InlineData("tmdb", "TMDB is not configured. Check the TMDB step.")]
+    [InlineData("seerr", "Seerr is not configured. Check the request service step.")]
+    public async Task A_connection_removed_after_its_step_asks_to_configure_it_again(string removed, string title)
+    {
+        await using FakePlexServer plex = await FakePlexServer.StartAsync();
+        await using FakeTmdbServer tmdb = await FakeTmdbServer.StartAsync();
+        using SetupApiFactory factory = new(plex, tmdb);
+        await using FakeSeerrServer seerr = await FakeSeerrServer.StartAsync();
+        await using FakeArrServer sonarr = await FakeArrServer.StartAsync(ArrService.Sonarr);
+        await using FakeArrServer radarr = await FakeArrServer.StartAsync(ArrService.Radarr);
+        HttpClient client = await PrepareAsync(factory, seerr, sonarr, radarr, "seerr");
+        if (removed == "tmdb")
+        {
+            (await client.PutAsJsonAsync("/api/v1/settings/tmdb.api_key", new { value = string.Empty })).EnsureSuccessStatusCode();
+        }
+        else
+        {
+            (await client.DeleteAsync("/api/v1/settings/seerr")).EnsureSuccessStatusCode();
+        }
+
+        HttpResponseMessage completed = await client.PostAsJsonAsync("/api/v1/setup/complete", new { profileId = 1 });
+
+        Assert.Equal(HttpStatusCode.Conflict, completed.StatusCode);
+        JsonElement problem = await completed.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(title, problem.GetProperty("title").GetString());
+        Assert.False((await StatusAsync(client)).GetProperty("completed").GetBoolean());
+    }
+
     [Fact]
     public async Task An_unparseable_upstream_reply_is_a_friendly_bad_gateway_problem()
     {
