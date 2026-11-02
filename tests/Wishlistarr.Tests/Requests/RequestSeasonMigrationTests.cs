@@ -46,6 +46,7 @@ public sealed class RequestSeasonMigrationTests
         Assert.All(requests, request => Assert.True(request.AllSeasons));
         Assert.Equal([false, true, true, false, false, true, false, true], requests.Select(request => request.DownloadRequested));
         Assert.Equal([4, 4, 3, 4, 3, 3, 3, 3], requests.Select(request => request.Version));
+        Assert.Equal([true, true, false, false, false, false, false, false], requests.Select(request => request.AcceptedAt is not null));
         Assert.Equal(3, await db.MediaRequestEvents.CountAsync(item => item.FromState == RequestState.Labeled && item.ToState == RequestState.Monitoring));
         Assert.False(db.Database.HasPendingModelChanges());
     }

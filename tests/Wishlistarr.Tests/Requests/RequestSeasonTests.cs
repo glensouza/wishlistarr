@@ -649,6 +649,24 @@ public sealed class RequestSeasonTests
     }
 
     [Fact]
+    public async Task An_approved_request_that_was_accepted_is_labeled_when_its_title_arrives()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1], arrive: false);
+        await UpdateRequestAsync(factory, id, setters => setters
+            .SetProperty(row => row.State, RequestState.Approved)
+            .SetProperty(row => row.ExternalId, (int?)null)
+            .SetProperty(row => row.DispatchedAt, (DateTimeOffset?)null));
+        Assert.NotNull(Assert.Single(await factory.GetRequestsAsync()).AcceptedAt);
+        Arrive(factory);
+
+        await CheckAsync(factory);
+
+        Assert.Equal(RequestState.Monitoring, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
+    }
+
+    [Fact]
     public async Task A_fulfilling_request_whose_own_send_was_never_accepted_still_fails_when_refused()
     {
         using ArrivalApiFactory factory = new();

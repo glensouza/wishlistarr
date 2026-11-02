@@ -198,7 +198,7 @@ public sealed partial class RequestDispatch(
             this.LogDispatchFailed(ex, id, chosen);
             if (IsResend(request))
             {
-                // The title is already with the backend, so a refused extra season is tried again after a pause instead of failing the request or retrying every run.
+                // The title is already with the backend (monitored, or accepted earlier), so a refused resend of an extra season is tried again after a pause instead of failing the request or retrying every run.
                 backoff.Defer(id, time.GetUtcNow());
                 return;
             }
