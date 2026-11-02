@@ -5,6 +5,28 @@ namespace Wishlistarr.Tests.Plex;
 public sealed class LabelRestrictionEvaluatorTests
 {
     [Theory]
+    [InlineData("label=Ada", "", true)]
+    [InlineData("contentRating=PG", "", true)]
+    [InlineData("contentRating=G%2CPG|label=Ada", "", true)]
+    [InlineData("", "contentRating=PG", true)]
+    [InlineData("", "label=Ada", true)]
+    [InlineData("label=Ada", null, true)]
+    [InlineData("contentRating!=R|label=Ada", "", true)]
+    [InlineData("contentRating=PG|label!=Ada", "", true)]
+    [InlineData("", "", false)]
+    [InlineData("contentRating=", "", false)]
+    [InlineData("contentRating!=R", "", false)]
+    [InlineData("label=Ben", "", false)]
+    [InlineData("label!=Ada", "", false)]
+    [InlineData("label=Ada|label!=Ada", "", false)]
+    [InlineData("label=Ada|garbage", "", false)]
+    [InlineData("contentRating=PG|unknown=rule", "", false)]
+    [InlineData("label=Ada", "garbage", false)]
+    [InlineData(null, null, false)]
+    public void Restricted_requires_an_understood_rating_cap_or_allowed_profile_label(string? specific, string? shared, bool expected) =>
+        Assert.Equal(expected, LabelRestrictionEvaluator.Evaluate(specific, shared, "Ada").Restricted);
+
+    [Theory]
     [InlineData("label=Ada", LabelFilterMode.AllowOnly)]
     [InlineData("contentRating=TV-Y%2CTV-Y7|label=Ada", LabelFilterMode.AllowOnly)]
     [InlineData("label=Ben%2CAda", LabelFilterMode.AllowOnly)]

@@ -387,6 +387,7 @@ async function userSelectAda() {
 
 it('links quick actions to the sections on the parent page', async () => {
   install((path) => {
+    if (path === '/api/v1/setup') return { completed: true, showGuide: false }
     if (path === '/api/v1/auth/status') {
       return { setupRequired: false, principalType: 'Parent', kidDevice: null }
     }

@@ -12,7 +12,7 @@ public enum LabelFilterMode
     AllowOnly,
 }
 
-public sealed record LabelRestriction(LabelEnforcement State, LabelFilterMode? Mode = null)
+public sealed record LabelRestriction(LabelEnforcement State, LabelFilterMode? Mode = null, bool Restricted = false)
 {
     public static LabelRestriction Unknown { get; } = new(LabelEnforcement.Unknown);
 }
@@ -38,13 +38,45 @@ public static class LabelRestrictionEvaluator
     public static LabelRestriction Evaluate(string? specific, string? all, string label)
     {
         LabelRestriction own = Evaluate(specific, label);
-        if (own.State == LabelEnforcement.Enforced)
-        {
-            return own;
-        }
-
         LabelRestriction shared = Evaluate(all, label);
-        return shared.State == LabelEnforcement.Enforced ? shared : own;
+        LabelRestriction result = own.State == LabelEnforcement.Enforced ? own
+            : shared.State == LabelEnforcement.Enforced ? shared : own;
+        return result with { Restricted = Restricts(specific, all, result) };
+    }
+
+    private static bool Restricts(string? specific, string? all, LabelRestriction label)
+    {
+        bool read = specific is not null || all is not null;
+        bool understood = Understood(specific) && Understood(all);
+        bool labelAllowed = label.State == LabelEnforcement.Enforced;
+        bool ratingCapped = CapsRating(specific) || CapsRating(all);
+        return read && understood && (labelAllowed || ratingCapped);
+    }
+
+    private static bool Understood(string? filter) =>
+        Rules(filter).All(rule => rule.Key is not null
+            && (rule.Key.Equals("label", StringComparison.OrdinalIgnoreCase)
+                || rule.Key.Equals("contentRating", StringComparison.OrdinalIgnoreCase)));
+
+    private static bool CapsRating(string? filter) =>
+        Rules(filter).Any(rule => !rule.Negated
+            && rule.Values.Length > 0
+            && string.Equals(rule.Key, "contentRating", StringComparison.OrdinalIgnoreCase));
+
+    private static IEnumerable<(string? Key, bool Negated, string[] Values)> Rules(string? filter)
+    {
+        foreach (string part in (filter ?? string.Empty).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int equals = part.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                yield return (null, false, []);
+                continue;
+            }
+
+            bool negated = part[equals - 1] == '!';
+            yield return (part[..(negated ? equals - 1 : equals)].Trim(), negated, [.. Values(part[(equals + 1)..])]);
+        }
     }
 
     public static LabelRestriction Evaluate(string? filter, string label)
