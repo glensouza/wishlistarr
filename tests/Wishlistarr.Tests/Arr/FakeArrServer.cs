@@ -208,8 +208,9 @@ public sealed class FakeArrServer : IAsyncDisposable
         else if (path == "/api/v3/series/lookup" && this.Service == ArrService.Sonarr)
         {
             string term = request.Query.GetValueOrDefault("term", string.Empty);
-            JsonObject show = ShowTemplate();
-            if (this.LookupSeasons is { } seasons)
+            JsonObject? stored = this.library.FirstOrDefault(series => series["tmdbId"]?.GetValue<int>() == ShowTmdbId);
+            JsonObject show = stored is null ? ShowTemplate() : (JsonObject)stored.DeepClone();
+            if (this.LookupSeasons is { } seasons && stored is null)
             {
                 show["seasons"] = new JsonArray([.. seasons.Select(number => (JsonNode)Season(number))]);
             }

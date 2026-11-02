@@ -156,14 +156,13 @@ public sealed class ArrBackendTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task Sonarr_refuses_partial_season_acceptance_until_its_metadata_catches_up(bool existing, bool staleStoredSeries)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Sonarr_refuses_partial_season_acceptance_until_its_metadata_catches_up(bool existing)
     {
         await using ArrHarness harness = await ArrHarness.CreateAsync(ArrService.Sonarr);
         JsonObject? stored = existing ? harness.Server.SeedSeries(monitored: true, 1) : null;
-        if (staleStoredSeries)
+        if (existing)
         {
             stored!["seasons"]!.AsArray().RemoveAt(3);
         }
@@ -183,7 +182,7 @@ public sealed class ArrBackendTests
         }
 
         harness.Server.LookupSeasons = null;
-        if (staleStoredSeries)
+        if (existing)
         {
             stored!["seasons"]!.AsArray().Add(new JsonObject { ["seasonNumber"] = 3, ["monitored"] = false });
         }
