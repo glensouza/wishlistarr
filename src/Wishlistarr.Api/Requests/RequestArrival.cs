@@ -93,7 +93,8 @@ public sealed partial class RequestArrival(
 
     private IQueryable<MediaRequest> Pending() => db.MediaRequests.AsNoTracking()
         .Where(request => (request.State == RequestState.Monitoring
-                || ((request.DispatchedAt != null || request.ExternalId != null) && (request.State == RequestState.Approved || request.State == RequestState.Fulfilling || request.State == RequestState.Available)))
+                || request.State == RequestState.Fulfilling
+                || ((request.DispatchedAt != null || request.ExternalId != null) && (request.State == RequestState.Approved || request.State == RequestState.Available)))
             && request.KidProfile!.ArchivedAt == null);
 
     private async Task CheckOneAsync(int id, CancellationToken ct)

@@ -159,7 +159,7 @@ public sealed partial class RequestDispatch(
             return;
         }
 
-        if (IsResend(request) && backoff.IsWaiting(id, time.GetUtcNow()))
+        if (backoff.IsWaiting(id, time.GetUtcNow()))
         {
             return;
         }
@@ -196,7 +196,7 @@ public sealed partial class RequestDispatch(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             this.LogDispatchFailed(ex, id, chosen);
-            if (IsResend(request))
+            if (await this.IsResendAsync(request))
             {
                 // The title is already with the backend, so a refused extra season is tried again after a pause instead of failing the request or retrying every run.
                 backoff.Defer(id, time.GetUtcNow());
@@ -230,9 +230,27 @@ public sealed partial class RequestDispatch(
         }
     }
 
-    // A request the backend already accepted (it has its id) or one that is only being monitored keeps its state when a later send is refused.
-    private static bool IsResend(MediaRequest request) =>
-        request.State == RequestState.Monitoring || (request.State == RequestState.Fulfilling && request.ExternalId is not null);
+    // A request the backend already accepted, or one that is only being monitored, keeps its state when a later send is refused.
+    // Seerr does not always return an id, so a Fulfilling request counts as accepted when it got there from Approved rather than from a failed send.
+    private async Task<bool> IsResendAsync(MediaRequest request)
+    {
+        if (request.State == RequestState.Monitoring || request.ExternalId is not null)
+        {
+            return request.State is RequestState.Monitoring or RequestState.Approved or RequestState.Fulfilling;
+        }
+
+        if (request.State != RequestState.Fulfilling)
+        {
+            return false;
+        }
+
+        RequestState? entered = await db.MediaRequestEvents.AsNoTracking()
+            .Where(item => item.MediaRequestId == request.Id && item.ToState == RequestState.Fulfilling)
+            .OrderByDescending(item => item.Id)
+            .Select(item => item.FromState)
+            .FirstOrDefaultAsync(CancellationToken.None);
+        return entered == RequestState.Approved;
+    }
 
     private async Task PruneBackoffAsync(CancellationToken ct)
     {

@@ -601,6 +601,78 @@ public sealed class RequestSeasonTests
         Assert.Equal(1, season.AvailableEpisodes);
     }
 
+    [Fact]
+    public async Task A_refused_extra_season_keeps_a_fulfilling_request_that_has_no_service_id()
+    {
+        using ArrivalApiFactory factory = new();
+        (HttpClient kid, _, int id) = await DownloadAsync(factory, [1], arrive: false);
+        await UpdateRequestAsync(factory, id, setters => setters.SetProperty(row => row.ExternalId, (int?)null));
+        await factory.Sonarr.DisposeAsync();
+
+        Assert.Equal(HttpStatusCode.OK, (await AskAsync(kid, [2], FakeArrServer.ShowTmdbId)).StatusCode);
+        await WaitForDispatchJobAsync(factory);
+        MediaRequest waiting = Assert.Single(await factory.GetRequestsAsync());
+        Assert.Equal(RequestState.Fulfilling, waiting.State);
+        Assert.Null(waiting.DispatchedAt);
+        Assert.Null(waiting.ExternalId);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
+
+        Arrive(factory);
+        await CheckAsync(factory);
+        Assert.Equal(RequestState.Monitoring, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
+    }
+
+    [Fact]
+    public async Task A_refused_resend_keeps_an_approved_request_that_has_a_service_id()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1], arrive: false);
+        await UpdateRequestAsync(factory, id, setters => setters
+            .SetProperty(row => row.State, RequestState.Approved)
+            .SetProperty(row => row.ExternalId, 5)
+            .SetProperty(row => row.DispatchedAt, (DateTimeOffset?)null));
+        await factory.Sonarr.DisposeAsync();
+
+        await DispatchAsync(factory);
+
+        Assert.Equal(RequestState.Approved, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
+    }
+
+    [Fact]
+    public async Task A_monitored_show_counts_as_ready_when_a_requested_season_has_episodes_whatever_its_availability()
+    {
+        using ArrivalApiFactory factory = new();
+        (HttpClient kid, _, int id) = await DownloadAsync(factory, [1]);
+        factory.Services.GetRequiredService<TmdbCache>().Clear();
+        factory.Tmdb.Enqueue($"/3/tv/{FakeArrServer.ShowTmdbId}", 404);
+        await CheckAsync(factory);
+        Assert.Equal("onTheWay", await WishStateAsync(kid));
+
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().Set<MediaRequestSeason>()
+                .Where(season => season.MediaRequestId == id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(season => season.AvailableEpisodes, 2));
+        }
+
+        MediaRequestSeason season = Assert.Single(await SeasonsAsync(factory, id));
+        Assert.Equal(SeasonAvailability.Unknown, season.Availability);
+        Assert.Equal("ready", await WishStateAsync(kid));
+    }
+
+    private static async Task UpdateRequestAsync(
+        ArrivalApiFactory factory,
+        int id,
+        Action<Microsoft.EntityFrameworkCore.Query.UpdateSettersBuilder<MediaRequest>> set)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>().MediaRequests
+            .Where(row => row.Id == id)
+            .ExecuteUpdateAsync(set);
+    }
+
     private static async Task<(HttpClient Kid, int Profile, int Id)> DownloadAsync(ArrivalApiFactory factory, int[]? seasons, string status = "Returning Series", bool arrive = true)
     {
         SetDetails(factory, status, tmdbId: FakeArrServer.ShowTmdbId);
