@@ -49,6 +49,8 @@ public partial class AddRequestSeasons : Migration
             UPDATE MediaRequests SET DownloadRequested = 0
             WHERE EXISTS (SELECT 1 FROM MediaRequestEvents e WHERE e.MediaRequestId = MediaRequests.Id
                 AND e.FromState IS NULL AND e.ActorKind = 'Parent' AND e.Reason = 'Parent grant');
+            UPDATE MediaRequests SET DownloadRequested = 0
+            WHERE Kind = 'Show' AND State IN ('Labeled', 'Available') AND DispatchedAt IS NULL;
             INSERT INTO MediaRequestEvents (MediaRequestId, FromState, ToState, ActorKind, ActorName, OccurredAt)
             SELECT Id, 'Labeled', 'Monitoring', 'System', 'season-tracking', strftime('%Y-%m-%d %H:%M:%f+00:00', 'now')
             FROM MediaRequests WHERE Kind = 'Show' AND State = 'Labeled';
@@ -61,6 +63,13 @@ public partial class AddRequestSeasons : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.Sql("""
+            UPDATE MediaRequestEvents SET ToState = 'Labeled' WHERE ToState = 'Monitoring' AND FromState = 'Available';
+            UPDATE MediaRequestEvents SET FromState = 'Labeled' WHERE FromState = 'Monitoring' AND ToState = 'Revoked';
+            DELETE FROM MediaRequestEvents WHERE FromState = 'Monitoring' OR ToState = 'Monitoring';
+            UPDATE MediaRequests SET State = 'Labeled', Version = Version + 1 WHERE State = 'Monitoring';
+            """);
+
         migrationBuilder.DropTable(
             name: "MediaRequestSeason");
 
