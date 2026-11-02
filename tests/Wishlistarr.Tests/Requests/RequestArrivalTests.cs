@@ -761,6 +761,105 @@ public sealed class RequestArrivalTests
     }
 
     [Fact]
+    public async Task Rolling_back_a_copy_forgets_its_row_when_the_failing_copy_has_another_guid()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        factory.Plex.Rematch("102", "com.plexapp.agents.imdb://tt0133093?lang=en", "Legacy copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        TransportFailureMediaServer plex = factory.Services.GetRequiredService<TransportFailureMediaServer>();
+        plex.WritesBeforeFailure = 1;
+        plex.FailAfterNextWrite = new OperationCanceledException();
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        string labeled = Assert.Single(new[] { key, "102" }, item => factory.Plex.Item(item).Labels.Count > 0);
+        Assert.Equal(factory.Plex.Item(labeled).Guid, Assert.Single(await factory.GetLedgerAsync()).Guid);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task Rolling_back_a_copy_keeps_the_shared_row_when_an_earlier_attempt_labeled_another_copy_of_the_guid()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string guid = factory.Plex.Item(key).Guid;
+        factory.Plex.Rematch("102", guid, "Second copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        factory.Plex.AddItem(new Wishlistarr.Tests.Plex.FakePlexServer.FakeItem("103", "movie", guid, "Third copy", 1) { GuidIds = [$"tmdb://{TmdbId(MediaKind.Movie)}"] });
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
+        }
+
+        int puts = 0;
+        int thirdReads = 0;
+        factory.Plex.Delay = request =>
+        {
+            if (request.Method == "PUT" && Interlocked.Increment(ref puts) == 2)
+            {
+                throw new InvalidOperationException("The server is down.");
+            }
+
+            if (request.Path == "/library/metadata/102" && Interlocked.Increment(ref thirdReads) == 3)
+            {
+                factory.Plex.Rematch("102", guid, "Replacement movie", "tmdb://700");
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await RunAsync(factory);
+        Assert.Equal(RequestState.Available, (await factory.GetRequestsAsync()).Single().State);
+        Assert.NotEmpty(factory.Plex.Item(key).Labels);
+        Assert.Empty(factory.Plex.Item("103").Labels);
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.NotEmpty(factory.Plex.Item(key).Labels);
+        Assert.Empty(factory.Plex.Item("103").Labels);
+        Assert.Single(await factory.GetLedgerAsync());
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
+    public async Task Rolling_back_two_copies_of_one_guid_removes_both_labels_before_the_row_is_forgotten()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string guid = factory.Plex.Item(key).Guid;
+        factory.Plex.AddItem(new Wishlistarr.Tests.Plex.FakePlexServer.FakeItem("103", "movie", guid, "Second copy", 1) { GuidIds = [$"tmdb://{TmdbId(MediaKind.Movie)}"] });
+        factory.Plex.Rematch("102", "plex://movie/other", "Other copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        using (IServiceScope scope = factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<LibraryRefresh>().FullAsync(CancellationToken.None);
+        }
+
+        int reads = 0;
+        factory.Plex.Delay = request =>
+        {
+            if (request.Path == "/library/metadata/102" && Interlocked.Increment(ref reads) == 2)
+            {
+                factory.Plex.Rematch("102", "plex://movie/other", "Replacement movie", "tmdb://700");
+            }
+
+            return Task.CompletedTask;
+        };
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Empty(factory.Plex.Item(key).Labels);
+        Assert.Empty(factory.Plex.Item("103").Labels);
+        Assert.Empty(factory.Plex.Item("102").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
+    [Fact]
     public async Task An_available_request_whose_title_stays_missing_fails_after_the_window()
     {
         using ArrivalApiFactory factory = new();

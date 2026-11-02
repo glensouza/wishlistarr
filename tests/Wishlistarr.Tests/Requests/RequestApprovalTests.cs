@@ -405,6 +405,36 @@ public sealed class RequestApprovalTests
     }
 
     [Fact]
+    public async Task A_timed_out_later_copy_keeps_the_row_it_shares_with_an_approved_copy_that_is_rolled_back()
+    {
+        FakeLibraryIndex index = LibraryWithSpiritedAway();
+        index.Add(MediaKind.Movie, 129, new MediaItem("101", "plex://movie/5d776b59ad5437001f79c6f8", "Spirited Away", 2001, MediaKind.Movie, "1", []));
+        using DeadlineFactory factory = new(index, TimeSpan.FromMilliseconds(500), TimeSpan.FromMinutes(5));
+        await factory.LinkPlexAsync();
+        factory.Plex.Rematch("101", factory.Plex.Item("102").Guid, "Spirited Away");
+        (HttpClient kid, _) = await factory.SignInKidAsync(movieAgeLimit: 10);
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        int id = await AskAsync(kid, 129);
+        TaskCompletionSource hang = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int puts = 0;
+        factory.Plex.Delay = request => request.Method == "PUT" && Interlocked.Increment(ref puts) == 2 ? hang.Task : Task.CompletedTask;
+
+        try
+        {
+            JsonElement body = await DecideAsync(parent, "approve", new { ids = new[] { id } });
+
+            Assert.Equal("failed", Item(body, id).GetProperty("state").GetString());
+            Assert.Empty(factory.Plex.Item("101").Labels);
+            Assert.Empty(factory.Plex.Item("102").Labels);
+            Assert.Single(await factory.GetLedgerAsync());
+        }
+        finally
+        {
+            hang.SetException(new InvalidOperationException("dropped"));
+        }
+    }
+
+    [Fact]
     public async Task A_bulk_call_past_its_deadline_reports_the_rest_as_not_processed()
     {
         FakeLibraryIndex index = LibraryWithSpiritedAway();

@@ -846,6 +846,62 @@ public sealed class RequestAccessTests
         Assert.Empty(await factory.GetLedgerAsync());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_timed_out_later_copy_keeps_the_row_it_shares_with_the_copy_rolled_back(bool grant)
+    {
+        using DeadlineFactory factory = new(TwoCopyIndex(), TimeSpan.FromMilliseconds(500));
+        await factory.LinkPlexAsync();
+        factory.Plex.Rematch("102", factory.Plex.Item("101").Guid, "The Matrix");
+        (HttpClient kid, int ada) = await factory.SignInKidAsync();
+        HttpClient parent = await factory.CreateSignedInClientAsync();
+        TaskCompletionSource hang = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int puts = 0;
+        factory.Plex.Delay = request => request.Method == "PUT" && Interlocked.Increment(ref puts) == 2 ? hang.Task : Task.CompletedTask;
+
+        try
+        {
+            if (grant)
+            {
+                await parent.PostAsJsonAsync("/api/v1/requests/grant", new { kidProfileId = ada, kind = "movie", tmdbId = 603 });
+            }
+            else
+            {
+                await AskAsync(kid, 603);
+            }
+
+            Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+            Assert.Empty(factory.Plex.Item("101").Labels);
+            Assert.Single(await factory.GetLedgerAsync());
+        }
+        finally
+        {
+            hang.SetException(new InvalidOperationException("dropped"));
+        }
+    }
+
+    [Fact]
+    public async Task A_failed_later_copy_forgets_the_row_it_shares_with_the_copy_rolled_back()
+    {
+        using KidRequestApiFactory factory = new(TwoCopyIndex());
+        await factory.LinkPlexAsync();
+        factory.Plex.Rematch("102", factory.Plex.Item("101").Guid, "The Matrix");
+        (HttpClient kid, _) = await factory.SignInKidAsync();
+        factory.Plex.Delay = request =>
+            request.Method == "PUT" && request.Query.GetValueOrDefault("id") == "102"
+                ? throw new InvalidOperationException("refused")
+                : Task.CompletedTask;
+
+        await AskAsync(kid, 603);
+        factory.Plex.Delay = null;
+
+        Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Empty(factory.Plex.Item("101").Labels);
+        Assert.Empty(factory.Plex.Item("102").Labels);
+        Assert.Empty(await factory.GetLedgerAsync());
+    }
+
     [Fact]
     public async Task A_failed_request_that_kept_a_label_is_offered_for_revoke_and_revoking_removes_it()
     {

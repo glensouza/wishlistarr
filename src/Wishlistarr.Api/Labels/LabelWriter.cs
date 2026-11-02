@@ -276,10 +276,12 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
         CheckIdentity(target, expectedIdentity);
         Func<Task>? release = null;
         bool anySent = false;
+        bool discarded = false;
         async Task DiscardAsync(bool refused = false)
         {
             if (release is not null && !keepReservationOnFailure && (refused || !(keepReservationAfterSend && anySent)))
             {
+                discarded = true;
                 Func<Task> discard = release;
                 release = null;
                 await discard();
@@ -375,9 +377,9 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             await DiscardAsync();
             throw new MediaServerException("Plex did not keep the label change.");
         }
-        catch (Exception ex) when (anySent && (keepReservationAfterSend || ex is OperationCanceledException))
+        catch (Exception ex) when (anySent && !discarded && (keepReservationAfterSend || ex is OperationCanceledException))
         {
-            ex.Data[WriteSentKey] = true;
+            ex.Data[WriteSentKey] = target.Guid;
             throw;
         }
     }
