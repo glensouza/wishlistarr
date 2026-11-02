@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Core.Library;
 using Wishlistarr.Core.MediaServers;
@@ -29,11 +30,13 @@ public sealed partial class LibraryRefresh(
     WishlistarrDbContext db,
     ILibraryScanner scanner,
     ITmdbClient tmdb,
+    ITmdbApiKeyProvider keys,
     LibraryRefreshGate gate,
     TimeProvider time,
     ILogger<LibraryRefresh> logger)
 {
     private const int BatchSize = 200;
+    private static readonly TimeSpan UnresolvedRetryAfter = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan CursorOverlap = TimeSpan.FromSeconds(5);
 
     private readonly Dictionary<(MediaKind Kind, int TmdbId), int> titleIds = [];
@@ -69,6 +72,105 @@ public sealed partial class LibraryRefresh(
         current.LastIncrementalRefreshAt = time.GetUtcNow();
         current.UpdatedCursor = Latest(current.UpdatedCursor, newest);
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task RetryUnresolvedAsync(CancellationToken ct)
+    {
+        if (await keys.GetApiKeyAsync(ct) is not { Length: > 0 })
+        {
+            return;
+        }
+
+        string? serverId = await scanner.GetServerIdAsync(ct);
+        if (serverId is null)
+        {
+            return;
+        }
+
+        // Failed lookups do not change Plex's timestamp, so the incremental cursor cannot decide which mappings to retry.
+        // Every attempt stamps IndexedAt, which spaces the attempts per item. A reload that fails for the item's own reasons is stamped too,
+        // so it waits out the backoff instead of blocking the items behind it.
+        DateTimeOffset due = time.GetUtcNow() - UnresolvedRetryAfter;
+        int after = 0;
+        while (true)
+        {
+            var unresolved = await db.LibraryItems.AsNoTracking()
+                .Where(item => item.Id > after && item.ServerId == serverId && item.TitleId == null
+                    && !item.ExternalIds.Any(id => id.Source == LibraryIdSource.Tmdb)
+                    && item.ExternalIds.Any(id => id.Source == LibraryIdSource.Tvdb || id.Source == LibraryIdSource.Imdb))
+                .OrderBy(item => item.Id)
+                .Select(item => new { item.Id, item.RatingKey, item.IndexedAt })
+                .Take(BatchSize)
+                .ToListAsync(ct);
+            if (unresolved.Count == 0)
+            {
+                return;
+            }
+
+            // SQLite cannot compare the stored offset timestamps in SQL, so the backoff is applied to each page here.
+            foreach (var item in unresolved)
+            {
+                after = item.Id;
+                if (item.IndexedAt > due)
+                {
+                    continue;
+                }
+
+                using IDisposable held = await gate.EnterAsync(ct);
+                try
+                {
+                    LibrarySnapshot? snapshot = await scanner.GetEntryAsync(item.RatingKey, ct);
+                    if (snapshot is null)
+                    {
+                        await db.LibraryItems.Where(row => row.ServerId == serverId && row.RatingKey == item.RatingKey).ExecuteDeleteAsync(ct);
+                        await this.RemoveOrphanTitlesAsync(ct);
+                    }
+                    else if (snapshot.ServerId != serverId)
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        await this.UpsertAsync(serverId, [snapshot.Entry], ct);
+                    }
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested && ex is not MediaServerNotConfiguredException)
+                {
+                    db.ChangeTracker.Clear();
+                    if (IsUnreachable(ex))
+                    {
+                        this.LogRetryStopped(ex);
+                        return;
+                    }
+
+                    this.LogRetryFailed(ex, item.Id);
+                    await this.StampAttemptAsync(item.RatingKey, serverId, item.Id, ct);
+                }
+
+                if (this.tmdbUnavailable)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private static bool IsUnreachable(Exception exception) =>
+        exception is HttpRequestException or TaskCanceledException
+            or MediaServerException { StatusCode: null or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout };
+
+    private async Task StampAttemptAsync(string ratingKey, string serverId, int itemId, CancellationToken ct)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        try
+        {
+            await db.LibraryItems.Where(row => row.ServerId == serverId && row.RatingKey == ratingKey)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.IndexedAt, now), ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            this.LogRetryFailed(ex, itemId);
+        }
     }
 
     public async Task<bool> TryItemAsync(string ratingKey, CancellationToken ct)
@@ -445,6 +547,12 @@ public sealed partial class LibraryRefresh(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Library refresh indexed {Count} items.")]
     private partial void LogRefreshed(int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Plex could not be reached while retrying legacy id lookups; the remaining items wait for a later poll.")]
+    private partial void LogRetryStopped(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Retrying the legacy id lookup for library item {ItemId} failed; it will be retried later.")]
+    private partial void LogRetryFailed(Exception exception, int itemId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "TMDB lookup failed for a {Kind} by {Source} id.")]
     private partial void LogResolveFailed(Exception exception, MediaKind kind, ExternalIdSource source);

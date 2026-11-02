@@ -18,6 +18,7 @@ public sealed partial class RequestLabeling(
 {
     public const string LabelSource = "request";
     public const string StoppedReason = "Labeling was stopped before it started.";
+    public const string NoLongerInLibraryReason = "The title is no longer in the library.";
     public const string TimeoutReason = "Plex did not answer in time.";
     public const string WriteFailedReason = "The Plex label could not be written.";
 
@@ -58,7 +59,9 @@ public sealed partial class RequestLabeling(
         IReadOnlyList<MediaItem> matches,
         KidProfile profile,
         RequestActor actor,
-        string source = LabelSource)
+        string source = LabelSource,
+        IReadOnlyDictionary<string, MediaItemLabels>? expectedItems = null,
+        bool retryOnConnectionFailure = false)
     {
         MediaRequest? current = await requests.GetAsync(requestId, CancellationToken.None);
         if (current is not { State: RequestState.Available })
@@ -74,7 +77,10 @@ public sealed partial class RequestLabeling(
         CancellationTokenSource? deadline = null;
         string? failure = null;
         bool notOwned = false;
-        List<string> added = [];
+        bool retry = false;
+        HashSet<string> createdGuids = [];
+        HashSet<string> sentGuids = [];
+        List<(string ItemId, string Guid)> added = [];
         try
         {
             deadline = new(options.Value.LabelTimeout, time);
@@ -82,10 +88,20 @@ public sealed partial class RequestLabeling(
             int labeled = 0;
             foreach (MediaItem match in matches)
             {
-                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct);
+                MediaItemLabels? expected = null;
+                if (expectedItems is not null && !expectedItems.TryGetValue(match.Id, out expected))
+                {
+                    continue;
+                }
+
+                LabelWriteResult written = await labels.AddAsync(match.Id, profile.PlexLabel, profile.Id, source, ct, expected, retryOnConnectionFailure);
                 if (written.Outcome == LabelWriteOutcome.Added)
                 {
-                    added.Add(match.Id);
+                    added.Add((match.Id, written.Item!.Guid));
+                    if (written.CreatedRow)
+                    {
+                        createdGuids.Add(written.Item.Guid);
+                    }
                 }
 
                 if (written.Outcome is LabelWriteOutcome.Added or LabelWriteOutcome.AlreadyPresent)
@@ -93,33 +109,49 @@ public sealed partial class RequestLabeling(
                     labeled++;
                 }
 
-                if (written is { Outcome: LabelWriteOutcome.AlreadyPresent, Item: MediaItemLabels item }
-                    && !await labels.OwnsAsync(item, profile.PlexLabel, ct))
+                if (written is { Outcome: LabelWriteOutcome.AlreadyPresent, Item: MediaItemLabels present })
                 {
-                    notOwned = true;
+                    if (!await labels.OwnsAsync(present, profile.PlexLabel, ct))
+                    {
+                        notOwned = true;
+                    }
                 }
             }
 
             if (labeled == 0)
             {
-                failure = "The title is no longer in the library.";
+                failure = NoLongerInLibraryReason;
             }
         }
         catch (Exception ex)
         {
             this.LogLabelFailed(ex, requestId);
+            if (ex.Data[LabelWriter.WriteSentKey] is string sentGuid)
+            {
+                sentGuids.Add(sentGuid);
+            }
+
             failure = deadline?.IsCancellationRequested == true
                 ? TimeoutReason
                 : WriteFailedReason;
+            retry = retryOnConnectionFailure
+                && deadline?.IsCancellationRequested != true
+                && (ex is HttpRequestException or TaskCanceledException || ex is MediaServerException and not MediaServerItemChangedException);
         }
         finally
         {
             deadline?.Dispose();
         }
 
-        if (failure is not null && added.Count > 0)
+        // A retry keeps the labels already added, so the shared ledger row they depend on is still there for the next attempt.
+        if (failure is not null && added.Count > 0 && !retry)
         {
-            await this.RollBackAsync(requestId, added, profile.PlexLabel);
+            await this.RollBackAsync(requestId, added, profile.PlexLabel, createdGuids, sentGuids);
+        }
+
+        if (retry)
+        {
+            return new RequestLabelResult(new RequestResult(RequestOutcome.Unchanged, current, failure), false);
         }
 
         RequestResult moved = await requests.TransitionAsync(
@@ -133,17 +165,31 @@ public sealed partial class RequestLabeling(
     }
 
     // A failed request should not leave the kid with some copies of the title, so labels this call added come off again.
-    private async Task RollBackAsync(int requestId, IReadOnlyList<string> itemIds, string label)
+    // Copies of one guid share a ledger row. Rolling back forgets a row only when this call created it, together with the last copy of its guid,
+    // and only if no removal of that guid failed and no write for it was sent with its row left in place.
+    private async Task RollBackAsync(
+        int requestId,
+        IReadOnlyList<(string ItemId, string Guid)> copies,
+        string label,
+        IReadOnlySet<string> createdGuids,
+        IReadOnlySet<string> sentGuids)
     {
         using CancellationTokenSource deadline = new(options.Value.LabelTimeout, time);
-        foreach (string itemId in itemIds)
+        HashSet<string> failedGuids = [];
+        for (int index = 0; index < copies.Count; index++)
         {
+            (string itemId, string guid) = copies[index];
+            bool forget = createdGuids.Contains(guid)
+                && !sentGuids.Contains(guid)
+                && !failedGuids.Contains(guid)
+                && !copies.Skip(index + 1).Any(later => later.Guid == guid);
             try
             {
-                await labels.RemoveAsync(itemId, label, deadline.Token);
+                await labels.RemoveAsync(itemId, label, deadline.Token, forgetOwnership: forget);
             }
             catch (Exception ex)
             {
+                failedGuids.Add(guid);
                 this.LogRollBackFailed(ex, requestId, itemId);
             }
         }

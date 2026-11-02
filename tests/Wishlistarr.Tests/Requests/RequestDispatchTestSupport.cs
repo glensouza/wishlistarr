@@ -13,13 +13,13 @@ using Wishlistarr.Tests.Seerr;
 
 namespace Wishlistarr.Tests.Requests;
 
-public sealed class DispatchApiFactory : KidRequestApiFactory
+public class DispatchApiFactory : KidRequestApiFactory
 {
     public const int MovieId = FakeArrServer.MovieTmdbId;
     public const int ShowId = FakeArrServer.ShowTmdbId;
 
-    public DispatchApiFactory()
-        : base(new FakeLibraryIndex())
+    public DispatchApiFactory(bool useLibraryIndex = false)
+        : base(useLibraryIndex ? null : new FakeLibraryIndex())
     {
         this.Seerr = FakeSeerrServer.StartAsync().GetAwaiter().GetResult();
         this.Sonarr = FakeArrServer.StartAsync(ArrService.Sonarr).GetAwaiter().GetResult();

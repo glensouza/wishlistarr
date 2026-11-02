@@ -24,8 +24,8 @@ The host in the address is the one the settings request was made with, so open t
 ## Configuring the senders
 
 - Plex: Settings, Webhooks, Add Webhook. Plex sends `multipart/form-data` with the event in a `payload` part; other parts such as the thumbnail are ignored.
-- Sonarr and Radarr: Settings, Connect, Webhook, method `POST`, with the address as the URL.
-- Seerr: Settings, Notifications, Webhook, with the address as the webhook URL and the default JSON payload.
+- Sonarr and Radarr: Settings, Connect, Webhook, method `POST`, with the address as the URL. Enable notifications on import (and import complete in Sonarr).
+- Seerr: Settings, Notifications, Webhook, with the address as the webhook URL and the default JSON payload. Enable media available notifications.
 
 ## Behaviour
 
@@ -33,7 +33,7 @@ The host in the address is the one the settings request was made with, so open t
 - An unknown source returns `404`, a missing or wrong token returns `401`, an invalid payload returns `400` and a payload over the size limit returns `413`.
 - The event type is read from `event` (Plex), `eventType` (Sonarr and Radarr) or `notification_type` (Seerr), and is `unknown` when the field is missing.
 - A delivery whose payload is identical to one already received from the same source within the deduplication window is acknowledged with `200` and `{"status":"duplicate"}` and is not processed again. A new delivery returns `202`.
-- Accepted events are stored and handed to the `webhook-events` background job, which also runs every minute to pick up anything left over. The Plex `library.new` event refreshes the library index (see [library.md](library.md)); other events are only logged.
+- Accepted events are stored and handed to the `webhook-events` background job, which also runs every minute to pick up anything left over. The Plex `library.new` event refreshes the library index (see [library.md](library.md)). That event, Sonarr and Radarr `Download`, and Seerr `MEDIA_AVAILABLE` also start the [request arrival check](requests.md#arrival-and-labeling); other events are only logged. Download notifications never mark a request ready before Plex can return the matching title. Polling checks again every five minutes if a notification arrives before Plex finishes scanning or is missed entirely.
 - Tokens are not written to the logs: request paths are logged as `/api/v1/webhooks/{source}/***`. Avoid logging full URLs in a reverse proxy in front of Wishlistarr.
 
 ## Configuration
@@ -49,3 +49,7 @@ The host in the address is the one the settings request was made with, so open t
 ```
 
 `MaxPayloadBytes` limits the request body, `DeduplicationWindow` is how long an identical delivery counts as a duplicate, and `Retention` is how long processed events are kept. `Retention` must not be shorter than `DeduplicationWindow`.
+
+## Upstream behavior
+
+[Plex's webhook documentation](https://support.plex.tv/articles/115002267687-webhooks/) describes the multipart JSON payload and `library.new` event. Sonarr's [webhook payload builder](https://github.com/Sonarr/Sonarr/blob/develop/src/NzbDrone.Core/Notifications/Webhook/WebhookBase.cs) uses `Download` for both an imported episode and an import-complete notification. Radarr's [payload builder](https://github.com/Radarr/Radarr/blob/develop/src/NzbDrone.Core/Notifications/Webhook/WebhookBase.cs) uses `Download` when a movie is imported. These imports do not confirm that Plex has scanned the title. Seerr's [webhook agent](https://github.com/seerr-team/seerr/blob/develop/server/lib/notifications/agents/webhook.ts) substitutes the [notification enum name](https://github.com/seerr-team/seerr/blob/develop/server/lib/notifications/index.ts) into `notification_type`, including `MEDIA_AVAILABLE`. The arrival check uses these event names and reads identities from Plex rather than trusting notification metadata.
