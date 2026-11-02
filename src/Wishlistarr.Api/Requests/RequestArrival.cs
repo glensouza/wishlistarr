@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Wishlistarr.Api.Jobs;
 using Wishlistarr.Api.Labels;
@@ -92,7 +93,7 @@ public sealed partial class RequestArrival(
 
     private IQueryable<MediaRequest> Pending() => db.MediaRequests.AsNoTracking()
         .Where(request => (request.State == RequestState.Monitoring
-                || (request.DispatchedAt != null && (request.State == RequestState.Approved || request.State == RequestState.Fulfilling || request.State == RequestState.Available)))
+                || ((request.DispatchedAt != null || request.ExternalId != null) && (request.State == RequestState.Approved || request.State == RequestState.Fulfilling || request.State == RequestState.Available)))
             && request.KidProfile!.ArchivedAt == null);
 
     private async Task CheckOneAsync(int id, CancellationToken ct)
@@ -122,7 +123,10 @@ public sealed partial class RequestArrival(
             }
         }
 
-        bool complete = request.Kind == MediaKind.Show && await this.TryRefreshSeasonsAsync(request, visible, ct);
+        // With nothing visible a refresh would record every season as missing, so the last observation stays.
+        bool complete = request.Kind == MediaKind.Show
+            && !(visible.Count == 0 && request.State == RequestState.Monitoring)
+            && await this.TryRefreshSeasonsAsync(request, visible, ct);
         if (request.State == RequestState.Monitoring)
         {
             if (complete)
@@ -189,9 +193,13 @@ public sealed partial class RequestArrival(
         {
             this.LogSeasonsNotConfigured(ex, request.Id);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested && ex is TmdbException or JsonException or HttpRequestException or TaskCanceledException)
         {
             this.LogSeasonsFailed(ex, request.Id);
+        }
+        catch (MediaServerException ex)
+        {
+            this.LogSeasonsReadFailed(ex, request.Id);
         }
 
         return false;
@@ -210,6 +218,9 @@ public sealed partial class RequestArrival(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Reading the seasons of request {RequestId} from TMDB failed; they will be checked again")]
     private partial void LogSeasonsFailed(Exception ex, int requestId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Reading the seasons of request {RequestId} from Plex failed; they will be checked again")]
+    private partial void LogSeasonsReadFailed(Exception ex, int requestId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Checking Plex arrival for request {RequestId} failed; it will be checked again")]
     private partial void LogCheckFailed(Exception ex, int requestId);

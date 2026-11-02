@@ -41,9 +41,9 @@ public sealed class RequestSeasons(WishlistarrDbContext db, ITmdbClient tmdb, IM
         }
 
         await db.SaveChangesAsync(ct);
-        // Seasons only Plex knows about are not part of an all-seasons request, so they cannot hold the show back.
+        // Seasons only Plex knows about, and seasons TMDB lists without episodes, are not part of an all-seasons request, so they cannot hold the show back.
         MediaRequestSeason[] required = [.. request.AllSeasons
-            ? request.Seasons.Where(season => season.Number > 0 && expected.ContainsKey(season.Number))
+            ? request.Seasons.Where(season => season.Number > 0 && expected.GetValueOrDefault(season.Number) > 0)
             : request.Seasons.Where(season => season.Requested)];
         return details.Status is "Ended" or "Canceled" && required.Length > 0
             && required.All(season => season.Availability == SeasonAvailability.Available);

@@ -28,20 +28,24 @@ public sealed class RequestSeasonMigrationTests
                    (3, 1, 'Movie', 30, 'Labeled', 1, 0, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL),
                    (4, 1, 'Show', 40, 'Labeled', 1, 0, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL),
                    (5, 1, 'Show', 50, 'Available', 1, 0, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL),
-                   (6, 1, 'Show', 60, 'Fulfilling', 1, 1, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL);
-            INSERT INTO MediaRequestEvents (MediaRequestId, ToState, ActorKind, ActorName, Reason, OccurredAt)
-            VALUES (1, 'Pending', 'Parent', 'parent', 'Parent grant', '2026-10-01 00:00:00+00:00'),
-                   (2, 'Pending', 'Kid', 'Kid fixture', NULL, '2026-10-01 00:00:00+00:00');
+                   (6, 1, 'Show', 60, 'Fulfilling', 1, 1, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL),
+                   (7, 1, 'Show', 70, 'Failed', 1, 0, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL),
+                   (8, 1, 'Show', 80, 'Failed', 1, 0, '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', '2026-10-01 00:00:00+00:00', 3, NULL);
+            INSERT INTO MediaRequestEvents (MediaRequestId, FromState, ToState, ActorKind, ActorName, Reason, OccurredAt)
+            VALUES (1, NULL, 'Pending', 'Parent', 'parent', 'Parent grant', '2026-10-01 00:00:00+00:00'),
+                   (2, NULL, 'Pending', 'Kid', 'Kid fixture', NULL, '2026-10-01 00:00:00+00:00'),
+                   (7, 'Available', 'Failed', 'System', 'instant-label', NULL, '2026-10-01 00:00:00+00:00'),
+                   (8, 'Fulfilling', 'Failed', 'System', 'dispatch', NULL, '2026-10-01 00:00:00+00:00');
             """);
         await db.Database.MigrateAsync();
 
         MediaRequest[] requests = await db.MediaRequests.OrderBy(request => request.Id).ToArrayAsync();
         Assert.Equal(
-            [RequestState.Monitoring, RequestState.Monitoring, RequestState.Labeled, RequestState.Monitoring, RequestState.Available, RequestState.Fulfilling],
+            [RequestState.Monitoring, RequestState.Monitoring, RequestState.Labeled, RequestState.Monitoring, RequestState.Available, RequestState.Fulfilling, RequestState.Failed, RequestState.Failed],
             requests.Select(request => request.State));
         Assert.All(requests, request => Assert.True(request.AllSeasons));
-        Assert.Equal([false, true, true, false, false, true], requests.Select(request => request.DownloadRequested));
-        Assert.Equal([4, 4, 3, 4, 3, 3], requests.Select(request => request.Version));
+        Assert.Equal([false, true, true, false, false, true, false, true], requests.Select(request => request.DownloadRequested));
+        Assert.Equal([4, 4, 3, 4, 3, 3, 3, 3], requests.Select(request => request.Version));
         Assert.Equal(3, await db.MediaRequestEvents.CountAsync(item => item.FromState == RequestState.Labeled && item.ToState == RequestState.Monitoring));
         Assert.False(db.Database.HasPendingModelChanges());
     }

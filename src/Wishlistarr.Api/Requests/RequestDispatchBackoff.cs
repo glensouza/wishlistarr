@@ -8,6 +8,8 @@ public sealed class RequestDispatchBackoff
 
     private readonly ConcurrentDictionary<int, DateTimeOffset> retryAfter = new();
 
+    public IReadOnlyCollection<int> Waiting => [.. this.retryAfter.Keys];
+
     public bool IsWaiting(int requestId, DateTimeOffset now) =>
         this.retryAfter.TryGetValue(requestId, out DateTimeOffset until) && now < until;
 

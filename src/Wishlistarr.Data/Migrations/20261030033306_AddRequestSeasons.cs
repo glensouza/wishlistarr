@@ -51,6 +51,10 @@ public partial class AddRequestSeasons : Migration
                 AND e.FromState IS NULL AND e.ActorKind = 'Parent' AND e.Reason = 'Parent grant');
             UPDATE MediaRequests SET DownloadRequested = 0
             WHERE Kind = 'Show' AND State IN ('Labeled', 'Available') AND DispatchedAt IS NULL;
+            UPDATE MediaRequests SET DownloadRequested = 0
+            WHERE Kind = 'Show' AND State = 'Failed' AND DispatchedAt IS NULL
+                AND (SELECT e.FromState FROM MediaRequestEvents e WHERE e.MediaRequestId = MediaRequests.Id
+                    AND e.ToState = 'Failed' ORDER BY e.Id DESC LIMIT 1) = 'Available';
             INSERT INTO MediaRequestEvents (MediaRequestId, FromState, ToState, ActorKind, ActorName, OccurredAt)
             SELECT Id, 'Labeled', 'Monitoring', 'System', 'season-tracking', strftime('%Y-%m-%d %H:%M:%f+00:00', 'now')
             FROM MediaRequests WHERE Kind = 'Show' AND State = 'Labeled';

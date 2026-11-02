@@ -81,7 +81,7 @@ public sealed partial class KidWishlist(
 
     private static KidWishState ToWishState(MediaRequest request) =>
         request.State == RequestState.Monitoring
-            ? request.Seasons.Any(season => (request.AllSeasons || season.Requested) && season.Availability == SeasonAvailability.Available)
+            ? request.Seasons.Any(season => (request.AllSeasons || season.Requested) && season.Availability is SeasonAvailability.Available or SeasonAvailability.Partial)
                 ? KidWishState.Ready
                 : KidWishState.OnTheWay
             : ToWishState(request.State);

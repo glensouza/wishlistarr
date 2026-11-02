@@ -38,7 +38,7 @@ public sealed class RequestSeasonTests
         Assert.True(seasons[1].GetProperty("requested").GetBoolean());
         Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
         Assert.Empty(factory.Plex.Item("2011").Labels);
-        Assert.Equal("onTheWay", await WishStateAsync(kid));
+        Assert.Equal("ready", await WishStateAsync(kid));
 
         HttpClient parent = await factory.CreateAuthorizedClientAsync();
         JsonElement row = Assert.Single((await parent.GetFromJsonAsync<JsonElement>("/api/v1/requests?state=labeled&includeMonitoring=true")).GetProperty("items").EnumerateArray());
@@ -315,7 +315,7 @@ public sealed class RequestSeasonTests
     public async Task A_failing_tmdb_does_not_stop_arrival_from_labeling_a_show()
     {
         using ArrivalApiFactory factory = new();
-        (_, _, int id) = await DownloadAsync(factory, [1]);
+        (HttpClient kid, _, int id) = await DownloadAsync(factory, [1]);
         factory.Services.GetRequiredService<TmdbCache>().Clear();
         factory.Tmdb.Enqueue($"/3/tv/{FakeArrServer.ShowTmdbId}", 404);
 
@@ -327,10 +327,12 @@ public sealed class RequestSeasonTests
         Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Monitoring);
 
         Assert.Equal(SeasonAvailability.Unknown, Assert.Single(await SeasonsAsync(factory, id)).Availability);
+        Assert.Equal("onTheWay", await WishStateAsync(kid));
 
         await CheckAsync(factory);
         MediaRequest recovered = Assert.Single(await factory.GetRequestsAsync());
         Assert.Equal(SeasonAvailability.Partial, Assert.Single(await SeasonsAsync(factory, recovered.Id)).Availability);
+        Assert.Equal("ready", await WishStateAsync(kid));
     }
 
     [Fact]
@@ -496,7 +498,110 @@ public sealed class RequestSeasonTests
         Assert.Empty(factory.Plex.Item("201").Labels);
     }
 
-    private static async Task<(HttpClient Kid, int Profile, int Id)> DownloadAsync(ArrivalApiFactory factory, int[]? seasons, string status = "Returning Series")
+    [Fact]
+    public async Task A_refused_extra_season_keeps_a_downloading_show_fulfilling_and_it_is_labeled_when_the_first_season_lands()
+    {
+        using ArrivalApiFactory factory = new();
+        (HttpClient kid, _, int id) = await DownloadAsync(factory, [1], arrive: false);
+        await factory.Sonarr.DisposeAsync();
+
+        Assert.Equal(HttpStatusCode.OK, (await AskAsync(kid, [2], FakeArrServer.ShowTmdbId)).StatusCode);
+        await WaitForDispatchJobAsync(factory);
+        MediaRequest waiting = Assert.Single(await factory.GetRequestsAsync());
+        Assert.Equal(RequestState.Fulfilling, waiting.State);
+        Assert.Null(waiting.DispatchedAt);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
+
+        await DispatchAsync(factory);
+        Assert.Equal(RequestState.Fulfilling, Assert.Single(await factory.GetRequestsAsync()).State);
+
+        Arrive(factory);
+        await CheckAsync(factory);
+        Assert.Equal(RequestState.Monitoring, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
+    }
+
+    [Fact]
+    public async Task Backoff_entries_are_dropped_once_a_request_is_revoked()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1]);
+        await CheckAsync(factory);
+        HttpClient parent = await factory.CreateAuthorizedClientAsync();
+        RequestDispatchBackoff backoff = factory.Services.GetRequiredService<RequestDispatchBackoff>();
+        backoff.Defer(id, factory.Time.GetUtcNow());
+        await DispatchAsync(factory);
+        Assert.Contains(id, backoff.Waiting);
+
+        await parent.PostAsJsonAsync("/api/v1/requests/revoke", new { ids = new[] { id } });
+        await DispatchAsync(factory);
+
+        Assert.Empty(backoff.Waiting);
+    }
+
+    [Fact]
+    public async Task A_tmdb_season_without_episodes_does_not_hold_back_an_all_season_request()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, null, "Ended");
+        factory.Tmdb.SetBody($"/3/tv/{FakeArrServer.ShowTmdbId}", $$"""{"id":{{FakeArrServer.ShowTmdbId}},"name":"Fixture show","status":"Ended","genres":[],"seasons":[{"season_number":1,"episode_count":10},{"season_number":2,"episode_count":0}]}""");
+        factory.Services.GetRequiredService<TmdbCache>().Clear();
+        factory.Plex.Item("2011").LeafCount = 10;
+
+        await CheckAsync(factory);
+
+        Assert.Equal(RequestState.Labeled, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(id, Assert.Single(await factory.GetRequestsAsync()).Id);
+    }
+
+    [Fact]
+    public async Task A_malformed_tmdb_answer_does_not_stop_arrival_from_labeling_a_show()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1]);
+        factory.Tmdb.SetBody($"/3/tv/{FakeArrServer.ShowTmdbId}", "{not json");
+        factory.Services.GetRequiredService<TmdbCache>().Clear();
+
+        await CheckAsync(factory);
+
+        Assert.Equal(RequestState.Monitoring, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Monitoring);
+    }
+
+    [Fact]
+    public async Task A_plex_failure_reading_seasons_does_not_stop_a_new_arrival_being_labeled()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1]);
+        factory.Plex.Delay = request => request.Path.EndsWith("/children", StringComparison.Ordinal)
+            ? throw new InvalidOperationException("The server is down.")
+            : Task.CompletedTask;
+
+        await CheckAsync(factory);
+
+        Assert.Equal(RequestState.Monitoring, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(["Ada"], factory.Plex.Item("201").Labels);
+        Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Monitoring);
+    }
+
+    [Fact]
+    public async Task A_monitored_show_that_is_not_visible_keeps_its_last_season_observation()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1]);
+        await CheckAsync(factory);
+        Assert.Equal(SeasonAvailability.Partial, Assert.Single(await SeasonsAsync(factory, id)).Availability);
+
+        factory.Plex.DeleteItem("201");
+        await CheckAsync(factory);
+
+        MediaRequestSeason season = Assert.Single(await SeasonsAsync(factory, id));
+        Assert.Equal(SeasonAvailability.Partial, season.Availability);
+        Assert.Equal(1, season.AvailableEpisodes);
+    }
+
+    private static async Task<(HttpClient Kid, int Profile, int Id)> DownloadAsync(ArrivalApiFactory factory, int[]? seasons, string status = "Returning Series", bool arrive = true)
     {
         SetDetails(factory, status, tmdbId: FakeArrServer.ShowTmdbId);
         factory.Tmdb.SetBody($"/3/tv/{FakeArrServer.ShowTmdbId}/content_ratings", """{"results":[{"iso_3166_1":"US","rating":"TV-Y"}]}""");
@@ -512,7 +617,11 @@ public sealed class RequestSeasonTests
         int id = await CreateRequestAsync(factory, profile, seasons);
         await factory.ApproveAsync(parent, id);
         await factory.WaitForDispatchAsync(id);
-        factory.Plex.Rematch("201", "plex://show/arrived", "Arrived title", $"tmdb://{FakeArrServer.ShowTmdbId}");
+        if (arrive)
+        {
+            Arrive(factory);
+        }
+
         return (kid, profile, id);
     }
 
@@ -533,6 +642,9 @@ public sealed class RequestSeasonTests
 
     private static async Task<string?> WishStateAsync(HttpClient kid) =>
         (await kid.GetFromJsonAsync<JsonElement>("/api/v1/kid/wishlist")).GetProperty("items")[0].GetProperty("state").GetString();
+
+    private static void Arrive(ArrivalApiFactory factory) =>
+        factory.Plex.Rematch("201", "plex://show/arrived", "Arrived title", $"tmdb://{FakeArrServer.ShowTmdbId}");
 
     private static void AddSeason(ArrivalApiFactory factory, string key, int number, int episodes) =>
         factory.Plex.AddItem(new FakePlexServer.FakeItem(key, "season", $"plex://season/{key}", $"Season {number}", 2)

@@ -60,6 +60,7 @@ public sealed partial class RequestDispatch(
 
     public async Task DispatchPendingAsync(CancellationToken ct)
     {
+        await this.PruneBackoffAsync(ct);
         HashSet<int> seen = [];
         while (true)
         {
@@ -158,7 +159,7 @@ public sealed partial class RequestDispatch(
             return;
         }
 
-        if (request.State == RequestState.Monitoring && backoff.IsWaiting(id, time.GetUtcNow()))
+        if (IsResend(request) && backoff.IsWaiting(id, time.GetUtcNow()))
         {
             return;
         }
@@ -195,9 +196,9 @@ public sealed partial class RequestDispatch(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             this.LogDispatchFailed(ex, id, chosen);
-            if (request.State == RequestState.Monitoring)
+            if (IsResend(request))
             {
-                // The backend may not list a newly announced season yet, so the request is tried again after a pause instead of every run.
+                // The title is already with the backend, so a refused extra season is tried again after a pause instead of failing the request or retrying every run.
                 backoff.Defer(id, time.GetUtcNow());
                 return;
             }
@@ -226,6 +227,29 @@ public sealed partial class RequestDispatch(
         if (request.State != RequestState.Monitoring)
         {
             await requests.TransitionAsync(id, RequestState.Fulfilling, RequestActor.System(Component), ct: CancellationToken.None, expectedFrom: request.State);
+        }
+    }
+
+    // A request the backend already accepted (it has its id) or one that is only being monitored keeps its state when a later send is refused.
+    private static bool IsResend(MediaRequest request) =>
+        request.State == RequestState.Monitoring || (request.State == RequestState.Fulfilling && request.ExternalId is not null);
+
+    private async Task PruneBackoffAsync(CancellationToken ct)
+    {
+        int[] waiting = [.. backoff.Waiting];
+        if (waiting.Length == 0)
+        {
+            return;
+        }
+
+        List<int> active = await db.MediaRequests.AsNoTracking()
+            .Where(request => waiting.Contains(request.Id)
+                && (request.State == RequestState.Monitoring || request.State == RequestState.Fulfilling || request.State == RequestState.Labeled))
+            .Select(request => request.Id)
+            .ToListAsync(ct);
+        foreach (int id in waiting.Except(active))
+        {
+            backoff.Clear(id);
         }
     }
 
