@@ -551,7 +551,7 @@ public sealed class RequestArrivalTests
 
         await RunAsync(factory);
 
-        Assert.Equal(RequestState.Labeled, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Equal(RequestState.Monitoring, (await factory.GetRequestsAsync()).Single().State);
         Assert.Contains(factory.Plex.Requests, request => request.Path == "/library/metadata/101");
         Assert.Single(await factory.GetLedgerAsync());
     }
@@ -1218,6 +1218,8 @@ internal sealed class TransportFailureMediaServer(PlexMediaServer inner) : IMedi
     public Task<IReadOnlyList<MediaItem>> FindByExternalIdAsync(MediaKind kind, ExternalId id, CancellationToken ct = default) => inner.FindByExternalIdAsync(kind, id, ct);
 
     public Task<IReadOnlyList<MediaItem>> FindByGuidAsync(string guid, CancellationToken ct = default) => inner.FindByGuidAsync(guid, ct);
+
+    public Task<IReadOnlyList<MediaSeason>> GetSeasonsAsync(string showId, CancellationToken ct = default) => inner.GetSeasonsAsync(showId, ct);
 
     public Task<MediaItemLabels?> GetLabelsAsync(string itemId, CancellationToken ct = default) => inner.GetLabelsAsync(itemId, ct);
 
