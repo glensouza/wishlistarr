@@ -624,7 +624,7 @@ public sealed class RequestSeasonTests
     }
 
     [Fact]
-    public async Task A_refused_resend_keeps_an_approved_request_that_has_a_service_id()
+    public async Task A_refused_resend_keeps_an_approved_request_that_has_a_service_id_and_is_not_retried_within_the_pause()
     {
         using ArrivalApiFactory factory = new();
         (_, _, int id) = await DownloadAsync(factory, [1], arrive: false);
@@ -632,12 +632,82 @@ public sealed class RequestSeasonTests
             .SetProperty(row => row.State, RequestState.Approved)
             .SetProperty(row => row.ExternalId, 5)
             .SetProperty(row => row.DispatchedAt, (DateTimeOffset?)null));
+        Assert.Single(factory.Sonarr.Library)["seasons"]!.AsArray().RemoveAt(1);
+        int lookups = factory.Sonarr.Sent("GET", "/api/v3/series/lookup").Count();
+
+        await DispatchAsync(factory);
+        Assert.Equal(lookups + 1, factory.Sonarr.Sent("GET", "/api/v3/series/lookup").Count());
+        await DispatchAsync(factory);
+
+        Assert.Equal(lookups + 1, factory.Sonarr.Sent("GET", "/api/v3/series/lookup").Count());
+        Assert.Equal(RequestState.Approved, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
+
+        factory.Time.Advance(RequestDispatchBackoff.Delay);
+        await DispatchAsync(factory);
+        Assert.Equal(lookups + 2, factory.Sonarr.Sent("GET", "/api/v3/series/lookup").Count());
+    }
+
+    [Fact]
+    public async Task A_fulfilling_request_whose_own_send_was_never_accepted_still_fails_when_refused()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1], arrive: false);
+        await UpdateRequestAsync(factory, id, setters => setters
+            .SetProperty(row => row.ExternalId, (int?)null)
+            .SetProperty(row => row.AcceptedAt, (DateTimeOffset?)null)
+            .SetProperty(row => row.DispatchedAt, (DateTimeOffset?)null));
         await factory.Sonarr.DisposeAsync();
 
         await DispatchAsync(factory);
 
-        Assert.Equal(RequestState.Approved, Assert.Single(await factory.GetRequestsAsync()).State);
+        Assert.Equal(RequestState.Failed, Assert.Single(await factory.GetRequestsAsync()).State);
+    }
+
+    [Fact]
+    public async Task A_retried_request_whose_send_succeeded_is_kept_when_a_later_extra_season_is_refused()
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id) = await DownloadAsync(factory, [1], arrive: false);
+        await UpdateRequestAsync(factory, id, setters => setters
+            .SetProperty(row => row.ExternalId, (int?)null)
+            .SetProperty(row => row.AcceptedAt, (DateTimeOffset?)null)
+            .SetProperty(row => row.DispatchedAt, (DateTimeOffset?)null));
+        await DispatchAsync(factory);
+        MediaRequest sent = Assert.Single(await factory.GetRequestsAsync());
+        Assert.NotNull(sent.AcceptedAt);
+
+        await UpdateRequestAsync(factory, id, setters => setters
+            .SetProperty(row => row.ExternalId, (int?)null)
+            .SetProperty(row => row.DispatchedAt, (DateTimeOffset?)null));
+        await factory.Sonarr.DisposeAsync();
+        await DispatchAsync(factory);
+
+        Assert.Equal(RequestState.Fulfilling, Assert.Single(await factory.GetRequestsAsync()).State);
         Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Failed);
+    }
+
+    [Fact]
+    public async Task Specials_alone_do_not_make_an_all_season_show_ready()
+    {
+        using ArrivalApiFactory factory = new();
+        (HttpClient kid, _, int id) = await DownloadAsync(factory, null);
+        factory.Services.GetRequiredService<TmdbCache>().Clear();
+        factory.Tmdb.Enqueue($"/3/tv/{FakeArrServer.ShowTmdbId}", 404);
+        await CheckAsync(factory);
+        await AddObservedSeasonAsync(factory, id, 0, 2);
+        Assert.Equal("onTheWay", await WishStateAsync(kid));
+
+        await AddObservedSeasonAsync(factory, id, 1, 3);
+        Assert.Equal("ready", await WishStateAsync(kid));
+    }
+
+    private static async Task AddObservedSeasonAsync(ArrivalApiFactory factory, int id, int number, int episodes)
+    {
+        using IServiceScope scope = factory.Services.CreateScope();
+        WishlistarrDbContext db = scope.ServiceProvider.GetRequiredService<WishlistarrDbContext>();
+        db.Set<MediaRequestSeason>().Add(new MediaRequestSeason { MediaRequestId = id, Number = number, AvailableEpisodes = episodes });
+        await db.SaveChangesAsync();
     }
 
     [Fact]

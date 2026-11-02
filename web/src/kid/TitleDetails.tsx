@@ -10,6 +10,7 @@ import {
   getTitle,
   requestTitle,
   type TitleDetails as TitlePayload,
+  type RequestSeason,
   type TitleSeason,
 } from './kidApi'
 
@@ -34,6 +35,11 @@ function parseRoute(kind: string | undefined, rawId: string | undefined) {
   if (!Number.isSafeInteger(tmdbId)) return null
   return { kind, tmdbId } as const
 }
+
+const observed = (season: RequestSeason) =>
+  season.availability === 'unknown' && season.availableEpisodes > 0
+    ? 'partial'
+    : season.availability
 
 function seasonName(
   season: TitleSeason,
@@ -278,9 +284,11 @@ function TitleScreen() {
                         available: 'details.seasonAvailable',
                       } as const
                     )[
-                      seasonRequests.find(
-                        (season) => season.number === selected.number,
-                      )!.availability
+                      observed(
+                        seasonRequests.find(
+                          (season) => season.number === selected.number,
+                        )!,
+                      )
                     ],
                   )}
                 </p>

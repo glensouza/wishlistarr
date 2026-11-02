@@ -112,7 +112,7 @@ builder.Services.AddScoped<RequestArrival>();
 builder.Services.AddScoped<RequestSeasons>();
 builder.Services.AddBackgroundJob<RequestArrivalJob>(
     RequestArrivalJob.JobName,
-    "Checks dispatched requests and monitored shows in Plex and applies the requesting profile's label.",
+    "Checks dispatched requests, fulfilling requests not yet sent and monitored shows in Plex and applies the requesting profile's label.",
     TimeSpan.FromMinutes(5));
 foreach (WebhookSource source in Enum.GetValues<WebhookSource>())
 {

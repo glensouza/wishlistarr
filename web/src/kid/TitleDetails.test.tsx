@@ -631,3 +631,25 @@ it('explains when the request changed while it was being asked', async () => {
     'That one changed just now. Try again.',
   )
 })
+
+it('describes a season with episodes but no known size as partly ready', async () => {
+  payload = {
+    ...show,
+    request: {
+      state: 'monitoring',
+      requestCount: 1,
+      seasons: [
+        {
+          number: 1,
+          availability: 'unknown',
+          availableEpisodes: 3,
+          requested: true,
+        },
+      ],
+    },
+  } as typeof payload
+  const user = userEvent.setup()
+  renderAt('/title/show/82728')
+  await user.click(await screen.findByRole('radio', { name: 'Season 1' }))
+  expect(screen.getByRole('status').textContent).toBe('Some episodes are ready')
+})

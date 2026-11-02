@@ -10,6 +10,12 @@ public partial class AddRequestSeasons : Migration
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.AddColumn<DateTimeOffset>(
+            name: "AcceptedAt",
+            table: "MediaRequests",
+            type: "TEXT",
+            nullable: true);
+
         migrationBuilder.AddColumn<bool>(
             name: "AllSeasons",
             table: "MediaRequests",
@@ -46,6 +52,7 @@ public partial class AddRequestSeasons : Migration
             });
 
         migrationBuilder.Sql("""
+            UPDATE MediaRequests SET AcceptedAt = DispatchedAt WHERE DispatchedAt IS NOT NULL;
             UPDATE MediaRequests SET DownloadRequested = 0
             WHERE EXISTS (SELECT 1 FROM MediaRequestEvents e WHERE e.MediaRequestId = MediaRequests.Id
                 AND e.FromState IS NULL AND e.ActorKind = 'Parent' AND e.Reason = 'Parent grant');
@@ -76,6 +83,10 @@ public partial class AddRequestSeasons : Migration
 
         migrationBuilder.DropTable(
             name: "MediaRequestSeason");
+
+        migrationBuilder.DropColumn(
+            name: "AcceptedAt",
+            table: "MediaRequests");
 
         migrationBuilder.DropColumn(
             name: "AllSeasons",

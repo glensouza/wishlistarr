@@ -668,6 +668,9 @@ namespace Wishlistarr.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTimeOffset?>("AcceptedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("AllSeasons")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")

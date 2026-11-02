@@ -39,6 +39,8 @@ public sealed class MediaRequest
 
     public DateTimeOffset StateChangedAt { get; set; }
 
+    public DateTimeOffset? AcceptedAt { get; set; }
+
     public bool AllSeasons { get; set; } = true;
 
     public bool DownloadRequested { get; set; } = true;

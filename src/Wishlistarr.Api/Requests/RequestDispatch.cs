@@ -196,7 +196,7 @@ public sealed partial class RequestDispatch(
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             this.LogDispatchFailed(ex, id, chosen);
-            if (await this.IsResendAsync(request))
+            if (IsResend(request))
             {
                 // The title is already with the backend, so a refused extra season is tried again after a pause instead of failing the request or retrying every run.
                 backoff.Defer(id, time.GetUtcNow());
@@ -221,6 +221,7 @@ public sealed partial class RequestDispatch(
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(row => row.DispatchedAt, now)
+                    .SetProperty(row => row.AcceptedAt, row => row.AcceptedAt ?? now)
                     .SetProperty(row => row.ExternalId, row => externalId ?? row.ExternalId)
                     .SetProperty(row => row.Version, row => row.Version + 1),
                 CancellationToken.None);
@@ -231,26 +232,10 @@ public sealed partial class RequestDispatch(
     }
 
     // A request the backend already accepted, or one that is only being monitored, keeps its state when a later send is refused.
-    // Seerr does not always return an id, so a Fulfilling request counts as accepted when it got there from Approved rather than from a failed send.
-    private async Task<bool> IsResendAsync(MediaRequest request)
-    {
-        if (request.State == RequestState.Monitoring || request.ExternalId is not null)
-        {
-            return request.State is RequestState.Monitoring or RequestState.Approved or RequestState.Fulfilling;
-        }
-
-        if (request.State != RequestState.Fulfilling)
-        {
-            return false;
-        }
-
-        RequestState? entered = await db.MediaRequestEvents.AsNoTracking()
-            .Where(item => item.MediaRequestId == request.Id && item.ToState == RequestState.Fulfilling)
-            .OrderByDescending(item => item.Id)
-            .Select(item => item.FromState)
-            .FirstOrDefaultAsync(CancellationToken.None);
-        return entered == RequestState.Approved;
-    }
+    // Seerr does not always return an id, so acceptance is also recorded when a send succeeds (AcceptedAt).
+    private static bool IsResend(MediaRequest request) =>
+        request.State == RequestState.Monitoring
+        || (request.State is RequestState.Approved or RequestState.Fulfilling && (request.AcceptedAt is not null || request.ExternalId is not null));
 
     private async Task PruneBackoffAsync(CancellationToken ct)
     {
@@ -262,7 +247,7 @@ public sealed partial class RequestDispatch(
 
         List<int> active = await db.MediaRequests.AsNoTracking()
             .Where(request => waiting.Contains(request.Id)
-                && (request.State == RequestState.Monitoring || request.State == RequestState.Fulfilling || request.State == RequestState.Labeled))
+                && (request.State == RequestState.Approved || request.State == RequestState.Monitoring || request.State == RequestState.Fulfilling || request.State == RequestState.Labeled))
             .Select(request => request.Id)
             .ToListAsync(ct);
         foreach (int id in waiting.Except(active))
