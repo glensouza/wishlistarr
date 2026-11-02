@@ -78,7 +78,7 @@ public sealed class RequestArrivalTests
         Assert.Equal(RequestState.Fulfilling, available.FromState);
         Assert.Equal(RequestArrival.Component, available.ActorName);
         JsonElement wishlist = await kid.GetFromJsonAsync<JsonElement>("/api/v1/kid/wishlist");
-        Assert.Equal("ready", wishlist.GetProperty("items")[0].GetProperty("state").GetString());
+        Assert.Equal(kind == MediaKind.Show ? "onTheWay" : "ready", wishlist.GetProperty("items")[0].GetProperty("state").GetString());
 
         int writes = factory.LabelWrites;
         await SendWebhookAsync(factory, parent, source, key, 3);

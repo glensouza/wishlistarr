@@ -17,6 +17,7 @@ public enum RequestOutcome
     Changed,
     Unchanged,
     Rejected,
+    Conflict,
     NotFound,
 }
 
@@ -105,7 +106,9 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
                         await db.Entry(existing).Collection(request => request.Seasons).LoadAsync(ct);
                         bool enabledDownloads = downloadRequested && !existing.DownloadRequested;
                         bool broadened = seasons is null && !existing.AllSeasons;
-                        int[] added = [.. (seasons ?? []).Where(number => existing.Seasons.All(season => season.Number != number || !season.Requested))];
+                        int[] added = existing.AllSeasons && !enabledDownloads
+                            ? []
+                            : [.. (seasons ?? []).Where(number => existing.Seasons.All(season => season.Number != number || !season.Requested))];
                         foreach (int number in added)
                         {
                             MediaRequestSeason? season = existing.Seasons.SingleOrDefault(season => season.Number == number);
@@ -122,10 +125,23 @@ public sealed class MediaRequests(WishlistarrDbContext db, FulfilmentMode mode, 
                         if (added.Length > 0 || broadened || enabledDownloads)
                         {
                             existing.AllSeasons = enabledDownloads ? seasons is null : existing.AllSeasons || broadened;
-                            existing.DispatchedAt = null;
                             existing.DownloadRequested |= downloadRequested;
+                            if (existing.State is RequestState.Approved or RequestState.Fulfilling or RequestState.Monitoring or RequestState.Labeled)
+                            {
+                                existing.DispatchedAt = null;
+                            }
+
                             existing.Version++;
-                            await db.SaveChangesAsync(ct);
+                            try
+                            {
+                                await db.SaveChangesAsync(ct);
+                            }
+                            catch (DbUpdateConcurrencyException)
+                            {
+                                db.ChangeTracker.Clear();
+                                return new RequestResult(RequestOutcome.Conflict, Error: "The request changed while it was being updated. Try again.");
+                            }
+
                             if (existing.State == RequestState.Labeled)
                             {
                                 return (await this.TransitionAsync(existing.Id, RequestState.Monitoring, RequestActor.System("season-request"), ct: ct)) with { Outcome = RequestOutcome.Merged };

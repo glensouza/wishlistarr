@@ -134,6 +134,7 @@ public static class KidRequestEndpoints
                     detail: "You can ask for more when the new week starts.",
                     extensions: new Dictionary<string, object?> { ["code"] = AllowanceUsedCode, ["resetsAt"] = result.AllowanceResetsAt }),
                 KidRequestOutcome.InvalidSeasons => Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Choose seasons listed for this show."),
+                KidRequestOutcome.Conflict => Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "That one changed just now. Try again."),
                 KidRequestOutcome.TitleNotFound => Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "We couldn't find that one."),
                 _ => Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Sign in to a profile first."),
             };
@@ -145,6 +146,7 @@ public static class KidRequestEndpoints
             .Produces<KidRequestResponse>()
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status502BadGateway)

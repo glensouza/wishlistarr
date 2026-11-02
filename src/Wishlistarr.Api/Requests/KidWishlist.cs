@@ -38,7 +38,7 @@ public sealed partial class KidWishlist(
         }
 
         // SQLite cannot order by the stored DateTimeOffset, so the newest-first order is applied after the rows are loaded.
-        List<MediaRequest> requests = await db.MediaRequests.AsNoTracking()
+        List<MediaRequest> requests = await db.MediaRequests.AsNoTracking().Include(request => request.Seasons)
             .Where(request => request.KidProfileId == profileId && request.State != RequestState.Revoked)
             .ToListAsync(ct);
         requests.Sort(static (left, right) =>
@@ -53,7 +53,7 @@ public sealed partial class KidWishlist(
         List<KidWishItem> items = [];
         foreach (MediaRequest request in requests)
         {
-            KidWishState state = ToWishState(request.State);
+            KidWishState state = ToWishState(request);
             KidPlexLinks? plex = state == KidWishState.Ready && links.TryGetValue(new TitleKey(request.Kind, request.TmdbId), out KidPlexLinks? found)
                 ? found
                 : null;
@@ -74,10 +74,17 @@ public sealed partial class KidWishlist(
     public static KidWishState ToWishState(RequestState state) => state switch
     {
         RequestState.Approved or RequestState.Fulfilling => KidWishState.OnTheWay,
-        RequestState.Available or RequestState.Labeled or RequestState.Monitoring => KidWishState.Ready,
+        RequestState.Available or RequestState.Labeled => KidWishState.Ready,
         RequestState.Denied => KidWishState.Denied,
         _ => KidWishState.Waiting,
     };
+
+    private static KidWishState ToWishState(MediaRequest request) =>
+        request.State == RequestState.Monitoring
+            ? request.Seasons.Any(season => (request.AllSeasons || season.Requested) && season.Availability == SeasonAvailability.Available)
+                ? KidWishState.Ready
+                : KidWishState.OnTheWay
+            : ToWishState(request.State);
 
     private async Task<Dictionary<int, string>> ParentNotesAsync(List<MediaRequest> requests, CancellationToken ct)
     {
@@ -124,7 +131,7 @@ public sealed partial class KidWishlist(
     {
         Dictionary<TitleKey, KidPlexLinks> links = [];
         List<TitleKey> ready = [.. requests
-            .Where(request => ToWishState(request.State) == KidWishState.Ready)
+            .Where(request => ToWishState(request) == KidWishState.Ready)
             .Select(request => new TitleKey(request.Kind, request.TmdbId))
             .Distinct()];
         if (ready.Count == 0 || await this.TryServerIdAsync(ct) is not string serverId || !PlexWatchLink.IsMachineId(serverId))

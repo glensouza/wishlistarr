@@ -22,6 +22,7 @@ public enum KidRequestOutcome
     TitleNotFound,
     ProfileNotFound,
     InvalidSeasons,
+    Conflict,
 }
 
 public sealed record KidRequestResult(KidRequestOutcome Outcome, MediaRequest? Request = null, DateTimeOffset? AllowanceResetsAt = null);
@@ -151,6 +152,11 @@ public sealed partial class KidRequestFlow(
                     countsTowardAllowance: counts,
                     ct,
                     seasons: seasons);
+                if (result.Outcome == RequestOutcome.Conflict)
+                {
+                    return new KidRequestResult(KidRequestOutcome.Conflict);
+                }
+
                 if (result.Outcome == RequestOutcome.Created && instant)
                 {
                     await requests.TransitionAsync(result.Request!.Id, RequestState.Approved, InstantLabelActor, "Allowed and already in the library.", ct);
@@ -168,7 +174,7 @@ public sealed partial class KidRequestFlow(
 
         if (result.Outcome == RequestOutcome.Merged)
         {
-            if (request.State is RequestState.Fulfilling or RequestState.Monitoring && request.DispatchedAt is null)
+            if (request.State is RequestState.Fulfilling or RequestState.Monitoring && request.DownloadRequested && request.DispatchedAt is null)
             {
                 await dispatch.StartAsync();
             }

@@ -97,6 +97,7 @@ builder.Services.AddSeerr<StoredAppSettings>();
 builder.Services.AddSingleton<ItemLocks>();
 builder.Services.AddSingleton<IProfileLabelGate, ProfileLabelGate>();
 builder.Services.AddSingleton<RequestLocks>();
+builder.Services.AddSingleton<RequestDispatchBackoff>();
 builder.Services.AddScoped<LabelWriter>();
 builder.Services.AddLabelGuardian(builder.Configuration);
 builder.Services.AddLibraryBackfill();
@@ -111,7 +112,7 @@ builder.Services.AddScoped<RequestArrival>();
 builder.Services.AddScoped<RequestSeasons>();
 builder.Services.AddBackgroundJob<RequestArrivalJob>(
     RequestArrivalJob.JobName,
-    "Checks dispatched requests in Plex and applies the requesting profile's label.",
+    "Checks dispatched requests and monitored shows in Plex and applies the requesting profile's label.",
     TimeSpan.FromMinutes(5));
 foreach (WebhookSource source in Enum.GetValues<WebhookSource>())
 {

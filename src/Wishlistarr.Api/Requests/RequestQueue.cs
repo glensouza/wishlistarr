@@ -63,7 +63,8 @@ public sealed record ApprovalQueueItem(
     string? TrailerKey,
     QueueReason Reason,
     IReadOnlyList<QueueGap> Gaps,
-    IReadOnlyList<RequestSeasonResponse> Seasons);
+    IReadOnlyList<RequestSeasonResponse> Seasons,
+    bool AllSeasons);
 
 public sealed record ApprovalQueuePage(IReadOnlyList<ApprovalQueueItem> Items, int Total, int Limit, int Offset, bool TmdbConfigured = true);
 
@@ -273,7 +274,8 @@ public sealed partial class RequestQueue(
             lookup.Trailer,
             reason,
             lookup.Gaps,
-            RequestSeasonResponse.From(request));
+            RequestSeasonResponse.From(request),
+            request.AllSeasons);
     }
 
     private static QueueReason Build(

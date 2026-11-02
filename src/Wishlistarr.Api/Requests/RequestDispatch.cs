@@ -20,6 +20,7 @@ public sealed partial class RequestDispatch(
     WishlistarrDbContext db,
     MediaRequests requests,
     RequestLocks locks,
+    RequestDispatchBackoff backoff,
     FulfilmentMode mode,
     ISeerrBackend seerr,
     ArrBackends arr,
@@ -157,6 +158,11 @@ public sealed partial class RequestDispatch(
             return;
         }
 
+        if (request.State == RequestState.Monitoring && backoff.IsWaiting(id, time.GetUtcNow()))
+        {
+            return;
+        }
+
         FulfilmentBackend? backend = request.Backend ?? await mode.GetAsync(ct);
         if (backend is not FulfilmentBackend chosen)
         {
@@ -191,6 +197,8 @@ public sealed partial class RequestDispatch(
             this.LogDispatchFailed(ex, id, chosen);
             if (request.State == RequestState.Monitoring)
             {
+                // The backend may not list a newly announced season yet, so the request is tried again after a pause instead of every run.
+                backoff.Defer(id, time.GetUtcNow());
                 return;
             }
 
@@ -202,6 +210,8 @@ public sealed partial class RequestDispatch(
                 CancellationToken.None);
             return;
         }
+
+        backoff.Clear(id);
 
         // The title is with the backend before this is saved. If the process stops in between, the request is still approved and the next run finds the title there instead of adding it again.
         DateTimeOffset now = time.GetUtcNow();
