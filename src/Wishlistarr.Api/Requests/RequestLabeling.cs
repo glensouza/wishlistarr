@@ -166,7 +166,7 @@ public sealed partial class RequestLabeling(
 
     // A failed request should not leave the kid with some copies of the title, so labels this call added come off again.
     // Copies of one guid share a ledger row. Rolling back forgets a row only when this call created it, together with the last copy of its guid,
-    // and only if no removal of that guid failed and no failing write for it was sent.
+    // and only if no removal of that guid failed and no write for it was sent with its row left in place.
     private async Task RollBackAsync(
         int requestId,
         IReadOnlyList<(string ItemId, string Guid)> copies,
