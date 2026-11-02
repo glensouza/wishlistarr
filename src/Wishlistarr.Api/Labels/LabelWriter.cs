@@ -27,6 +27,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
 {
     public const int MaxAttempts = 3;
     public const int MaxSourceLength = 32;
+    public const string WriteSentKey = "WriteSent";
 
     public static StringComparer LabelComparer { get; } = StringComparer.OrdinalIgnoreCase;
 
@@ -146,7 +147,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             keepReservationAfterSend: keepReservationAfterSend);
     }
 
-    public async Task<LabelWriteResult> RemoveAsync(string itemId, string label, CancellationToken ct = default)
+    public async Task<LabelWriteResult> RemoveAsync(string itemId, string label, CancellationToken ct = default, bool forgetOwnership = true)
     {
         bool owned = false;
         LabelWriteResult result = await this.WriteAsync(
@@ -160,7 +161,7 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             },
             item => !item.Labels.Contains(label, LabelComparer),
             _ => Task.FromResult<Func<Task>>(() => Task.CompletedTask),
-            (item, token) => this.ForgetAsync(item, label, token),
+            (item, token) => forgetOwnership ? this.ForgetAsync(item, label, token) : Task.CompletedTask,
             LabelWriteOutcome.Removed,
             LabelWriteOutcome.NotPresent,
             ct);
@@ -172,7 +173,10 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
                 return result with { Outcome = LabelWriteOutcome.NotOwned };
             }
 
-            await this.ForgetAsync(result.Item!, label, ct);
+            if (forgetOwnership)
+            {
+                await this.ForgetAsync(result.Item!, label, ct);
+            }
         }
 
         return result;
@@ -295,79 +299,87 @@ public sealed class LabelWriter(WishlistarrDbContext db, IMediaServer server, It
             }
         }
 
-        for (int attempt = 0; attempt < MaxAttempts; attempt++)
+        try
         {
-            MediaItemLabels? current = await server.GetLabelsAsync(target.Id, ct);
-            if (current is null || current.ServerId != target.ServerId || current.Guid != target.Guid)
+            for (int attempt = 0; attempt < MaxAttempts; attempt++)
             {
-                await DiscardAsync();
-                return new LabelWriteResult(LabelWriteOutcome.ItemNotFound);
-            }
-
-            await CheckAsync(current);
-            if (await plan(current, ct) is not IReadOnlyList<string> labels)
-            {
-                return new LabelWriteResult(unchanged, current);
-            }
-
-            // Plex has no conditional write, so a second read narrows the window in which an edit made elsewhere could be overwritten.
-            MediaItemLabels? confirm = await server.GetLabelsAsync(target.Id, ct);
-            if (confirm is not null) await CheckAsync(confirm);
-            if (confirm is null || confirm.ServerId != target.ServerId || confirm.Guid != target.Guid || !confirm.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
-            {
-                continue;
-            }
-
-            // The ledger row is saved before Plex is touched, so a deadline that fires after Plex took the change cannot leave a label with no owner.
-            release ??= await reserve(current);
-            bool labelsChanged = false;
-            bool firstSend = false;
-            try
-            {
-                if (expectedIdentity is not null)
+                MediaItemLabels? current = await server.GetLabelsAsync(target.Id, ct);
+                if (current is null || current.ServerId != target.ServerId || current.Guid != target.Guid)
                 {
-                    // Reserving ownership awaits the database, so confirm the identity again after it and immediately before writing.
-                    MediaItemLabels? final = await server.GetLabelsAsync(target.Id, ct);
-                    if (final is null)
+                    await DiscardAsync();
+                    return new LabelWriteResult(LabelWriteOutcome.ItemNotFound);
+                }
+
+                await CheckAsync(current);
+                if (await plan(current, ct) is not IReadOnlyList<string> labels)
+                {
+                    return new LabelWriteResult(unchanged, current);
+                }
+
+                // Plex has no conditional write, so a second read narrows the window in which an edit made elsewhere could be overwritten.
+                MediaItemLabels? confirm = await server.GetLabelsAsync(target.Id, ct);
+                if (confirm is not null) await CheckAsync(confirm);
+                if (confirm is null || confirm.ServerId != target.ServerId || confirm.Guid != target.Guid || !confirm.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels))
+                {
+                    continue;
+                }
+
+                // The ledger row is saved before Plex is touched, so a deadline that fires after Plex took the change cannot leave a label with no owner.
+                release ??= await reserve(current);
+                bool labelsChanged = false;
+                bool firstSend = false;
+                try
+                {
+                    if (expectedIdentity is not null)
                     {
-                        throw new MediaServerItemChangedException("The Plex item is no longer available.");
+                        // Reserving ownership awaits the database, so confirm the identity again after it and immediately before writing.
+                        MediaItemLabels? final = await server.GetLabelsAsync(target.Id, ct);
+                        if (final is null)
+                        {
+                            throw new MediaServerItemChangedException("The Plex item is no longer available.");
+                        }
+
+                        CheckIdentity(final, expectedIdentity);
+                        labelsChanged = !final.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels);
                     }
 
-                    CheckIdentity(final, expectedIdentity);
-                    labelsChanged = !final.Labels.ToHashSet(LabelComparer).SetEquals(current.Labels);
+                    if (!labelsChanged)
+                    {
+                        firstSend = !anySent;
+                        anySent = true;
+                        await server.SetLabelsAsync(current, labels, ct);
+                    }
                 }
-
-                if (!labelsChanged)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    firstSend = !anySent;
-                    anySent = true;
-                    await server.SetLabelsAsync(current, labels, ct);
+                    // Once any write was sent, a failure may have followed a write that landed, so a retrying caller keeps the owner row
+                    // for its next attempt, unless Plex refused the first write outright, which cannot be told once the client has sent it again after a transport failure.
+                    await DiscardAsync(refused: firstSend && ex is MediaServerException { StatusCode: HttpStatusCode status, Resent: false } && (int)status is >= 400 and < 500);
+                    throw;
+                }
+
+                if (labelsChanged)
+                {
+                    continue;
+                }
+
+                MediaItemLabels? written = await server.GetLabelsAsync(target.Id, ct);
+                if (written is not null) CheckIdentity(written, expectedIdentity);
+                if (written is not null && written.ServerId == target.ServerId && written.Guid == target.Guid && written.Locked && verify(written))
+                {
+                    await record(written, ct);
+                    return new LabelWriteResult(changed, written);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Once any write was sent, a failure may have followed a write that landed, so a retrying caller keeps the owner row
-                // for its next attempt, unless Plex refused the first write outright, which cannot be told once the client has sent it again after a transport failure.
-                await DiscardAsync(refused: firstSend && ex is MediaServerException { StatusCode: HttpStatusCode status, Resent: false } && (int)status is >= 400 and < 500);
-                throw;
-            }
 
-            if (labelsChanged)
-            {
-                continue;
-            }
-
-            MediaItemLabels? written = await server.GetLabelsAsync(target.Id, ct);
-            if (written is not null) CheckIdentity(written, expectedIdentity);
-            if (written is not null && written.ServerId == target.ServerId && written.Guid == target.Guid && written.Locked && verify(written))
-            {
-                await record(written, ct);
-                return new LabelWriteResult(changed, written);
-            }
+            await DiscardAsync();
+            throw new MediaServerException("Plex did not keep the label change.");
         }
-
-        await DiscardAsync();
-        throw new MediaServerException("Plex did not keep the label change.");
+        catch (Exception ex) when (anySent)
+        {
+            ex.Data[WriteSentKey] = true;
+            throw;
+        }
     }
 
     private async Task<OwnedLabel?> FindOwnedAsync(MediaItemLabels item, string label, CancellationToken ct)

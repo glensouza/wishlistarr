@@ -78,6 +78,7 @@ public sealed partial class RequestLabeling(
         string? failure = null;
         bool notOwned = false;
         bool retry = false;
+        bool writeSent = false;
         List<string> added = [];
         try
         {
@@ -118,6 +119,7 @@ public sealed partial class RequestLabeling(
         catch (Exception ex)
         {
             this.LogLabelFailed(ex, requestId);
+            writeSent = ex.Data.Contains(LabelWriter.WriteSentKey);
             failure = deadline?.IsCancellationRequested == true
                 ? TimeoutReason
                 : WriteFailedReason;
@@ -133,7 +135,7 @@ public sealed partial class RequestLabeling(
         // A retry keeps the labels already added, so the shared ledger row they depend on is still there for the next attempt.
         if (failure is not null && added.Count > 0 && !retry)
         {
-            await this.RollBackAsync(requestId, added, profile.PlexLabel);
+            await this.RollBackAsync(requestId, added, profile.PlexLabel, writeSent);
         }
 
         if (retry)
@@ -152,14 +154,15 @@ public sealed partial class RequestLabeling(
     }
 
     // A failed request should not leave the kid with some copies of the title, so labels this call added come off again.
-    private async Task RollBackAsync(int requestId, IReadOnlyList<string> itemIds, string label)
+    // A copy whose write was sent may carry the label under the same shared ledger row, so that row stays.
+    private async Task RollBackAsync(int requestId, IReadOnlyList<string> itemIds, string label, bool keepOwnership)
     {
         using CancellationTokenSource deadline = new(options.Value.LabelTimeout, time);
         foreach (string itemId in itemIds)
         {
             try
             {
-                await labels.RemoveAsync(itemId, label, deadline.Token);
+                await labels.RemoveAsync(itemId, label, deadline.Token, forgetOwnership: !keepOwnership);
             }
             catch (Exception ex)
             {

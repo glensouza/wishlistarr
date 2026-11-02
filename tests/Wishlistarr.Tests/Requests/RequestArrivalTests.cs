@@ -724,6 +724,42 @@ public sealed class RequestArrivalTests
         Assert.Single(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rolling_back_an_earlier_copy_keeps_the_shared_row_when_a_later_copys_write_was_sent(bool changedItem)
+    {
+        using ArrivalApiFactory factory = new();
+        (_, _, int id, string key) = await DispatchAsync(factory, "arr", MediaKind.Movie);
+        Arrive(factory, key, MediaKind.Movie);
+        string guid = factory.Plex.Item(key).Guid;
+        factory.Plex.Rematch("102", guid, "Another copy", $"tmdb://{TmdbId(MediaKind.Movie)}");
+        if (changedItem)
+        {
+            int puts = 0;
+            factory.Plex.AfterRequest = request =>
+            {
+                if (request.Method == "PUT" && Interlocked.Increment(ref puts) == 2)
+                {
+                    factory.Plex.Rematch(request.Query["id"], guid, "Replacement movie", "tmdb://700");
+                }
+            };
+        }
+        else
+        {
+            TransportFailureMediaServer plex = factory.Services.GetRequiredService<TransportFailureMediaServer>();
+            plex.WritesBeforeFailure = 1;
+            plex.FailAfterNextWrite = new OperationCanceledException();
+        }
+
+        await RunAsync(factory);
+
+        Assert.Equal(RequestState.Failed, (await factory.GetRequestsAsync()).Single().State);
+        Assert.Single(await factory.GetLedgerAsync());
+        Assert.Single(new[] { key, "102" }, item => factory.Plex.Item(item).Labels.Count > 0);
+        Assert.DoesNotContain(await factory.GetHistoryAsync(id), item => item.ToState == RequestState.Labeled);
+    }
+
     [Fact]
     public async Task An_available_request_whose_title_stays_missing_fails_after_the_window()
     {
@@ -938,6 +974,10 @@ internal sealed class TransportFailureMediaServer(PlexMediaServer inner) : IMedi
 {
     public Exception? FailAfterNextWrite { get; set; }
 
+    public int WritesBeforeFailure { get; set; }
+
+    private int writes;
+
     public Exception? GetEntryFailure { get; set; }
 
     public int GetEntryCalls { get; private set; }
@@ -969,7 +1009,7 @@ internal sealed class TransportFailureMediaServer(PlexMediaServer inner) : IMedi
     public async Task SetLabelsAsync(MediaItemLabels item, IReadOnlyList<string> labels, CancellationToken ct = default)
     {
         await inner.SetLabelsAsync(item, labels, ct);
-        if (this.FailAfterNextWrite is Exception failure)
+        if (this.FailAfterNextWrite is Exception failure && this.writes++ >= this.WritesBeforeFailure)
         {
             this.FailAfterNextWrite = null;
             throw failure;
